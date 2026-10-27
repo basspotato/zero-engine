@@ -30,6 +30,8 @@ void DisplayPanel::timerCallback()
     ease (monoFreq, meters.monoFreq.load());
     ease (width, meters.width.load());
     ease (rms, meters.rmsDb.load());
+    ease (momentary, meters.momentaryLufs.load());
+    shortTerm = meters.shortTermLufs.load(); // already a 3 s average
 
     // Fast attack, slow fall, so short peaks stay readable.
     clip = juce::jmax (meters.clipDb.load(), clip * 0.9f);
@@ -151,9 +153,10 @@ void DisplayPanel::paint (juce::Graphics& g)
             clip < 0.1f ? "Clean" : clip < 2.0f ? "Shaving peaks" : "Working hard",
             [&] (juce::Rectangle<float> r) { hBar (r, clip / 6.0f, clip < 2.0f ? Palette::accent : Palette::warn); });
 
-    // Output level.
-    column ("OUT", rms > -99.0f ? String (rms, 1) + " dB" : String ("-inf"),
-            "RMS; peak " + (peak > -99.0f ? String (peak, 1) : String ("-inf")) + " dB",
+    // Output level: short-term LUFS as the headline, momentary LUFS on the bar.
+    auto level = [] (float dB) { return dB > -99.0f ? String (dB, 1) : String ("-inf"); };
+    column ("OUT", level (shortTerm) + " LUFS",
+            "RMS " + level (rms) + ", peak " + level (peak) + " dB",
             [&] (juce::Rectangle<float> r)
             {
                 auto meter = r.withSizeKeepingCentre (14.0f, r.getHeight());
@@ -161,7 +164,7 @@ void DisplayPanel::paint (juce::Graphics& g)
                 g.fillRoundedRectangle (meter, 3.0f);
 
                 auto toFraction = [] (float dB) { return juce::jlimit (0.0f, 1.0f, (dB + 36.0f) / 36.0f); };
-                const auto h = toFraction (rms) * meter.getHeight();
+                const auto h = toFraction (momentary) * meter.getHeight();
                 g.setColour (peak > -0.5f ? Palette::warn : Palette::accent);
                 g.fillRoundedRectangle (meter.withTop (meter.getBottom() - h), 3.0f);
 

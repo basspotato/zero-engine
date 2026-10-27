@@ -18,6 +18,7 @@ private:
 
     // Smoothed copies of the meters, for drawing.
     float drive = 0, bands[3] {}, tilt = 0, air = 0, monoFreq = 120, width = 0, clip = 0, rms = -100, peak = -100;
+    float momentary = -100, shortTerm = -100;
 };
 
 class ZeroEngineEditor : public juce::AudioProcessorEditor

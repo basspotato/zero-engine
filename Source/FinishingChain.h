@@ -35,6 +35,7 @@ public:
         std::atomic<float> monoFreq { 120 }, width { 0 }; // side/mid ratio of the output
         std::atomic<float> clipDb { 0 };       // peak reduction this block
         std::atomic<float> rmsDb { -100 }, peakDb { -100 };
+        std::atomic<float> momentaryLufs { -100 }, shortTermLufs { -100 }; // BS.1770: 0.4 s and 3 s windows
     };
 
     const Meters& getMeters() const noexcept { return meters; }
@@ -81,5 +82,12 @@ private:
     float midEnergy = 0.0f, sideEnergy = 0.0f, clipPeakDb = 0.0f, outPeak = 0.0f;
 
     Shelf tilt, airShelf;
+
+    // Loudness meter only: K-weighting, then 100 ms energy slots covering 3 s.
+    Shelf kPre, kHighPass;
+    static constexpr int loudnessSlots = 30;
+    float slotEnergy[loudnessSlots] {};
+    float slotSum = 0.0f;
+    int slotPos = 0, slotFill = 0, slotLength = 4800;
     float lastTiltDb = -100.0f, lastAir = -1.0f, lastMonoFreq = -1.0f;
 };

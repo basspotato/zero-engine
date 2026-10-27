@@ -67,7 +67,30 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
     sideGain.reset (fs, 0.02);
     outputGain.reset (fs, 0.02);
     dcCoeff = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / fs);
-    rmsCoeff = coeffFor (0.3, fs); // roughly a momentary-loudness window
+    rmsCoeff = coeffFor (0.3, fs);
+    slotLength = juce::jmax (1, juce::roundToInt (0.1 * fs));
+
+    // BS.1770 K-weighting at this sample rate (same prototypes as tools/analyze).
+    {
+        const auto k = std::tan (juce::MathConstants<double>::pi * 1681.974450955533 / fs);
+        const auto q = 0.7071752369554196;
+        const auto vh = std::pow (10.0, 3.999843853973347 / 20.0);
+        const auto vb = std::pow (vh, 0.4996667741545416);
+        const auto a0 = 1.0 + k / q + k * k;
+        kPre.b0 = (float) ((vh + vb * k / q + k * k) / a0);
+        kPre.b1 = (float) (2.0 * (k * k - vh) / a0);
+        kPre.b2 = (float) ((vh - vb * k / q + k * k) / a0);
+        kPre.a1 = (float) (2.0 * (k * k - 1.0) / a0);
+        kPre.a2 = (float) ((1.0 - k / q + k * k) / a0);
+    }
+    {
+        const auto k = std::tan (juce::MathConstants<double>::pi * 38.13547087602444 / fs);
+        const auto q = 0.5003270373238773;
+        const auto a0 = 1.0 + k / q + k * k;
+        kHighPass.b0 = 1.0f; kHighPass.b1 = -2.0f; kHighPass.b2 = 1.0f;
+        kHighPass.a1 = (float) (2.0 * (k * k - 1.0) / a0);
+        kHighPass.a2 = (float) ((1.0 - k / q + k * k) / a0);
+    }
 
     const juce::dsp::ProcessSpec spec { fs, (juce::uint32) maxBlock, (juce::uint32) channels };
     for (auto* f : { &xoverLow, &xoverHigh, &lowAllpass, &monoXover })
@@ -107,6 +130,11 @@ void FinishingChain::reset()
     std::fill (std::begin (dcState), std::end (dcState), 0.0f);
     std::fill (std::begin (dcPrev), std::end (dcPrev), 0.0f);
     meanSquare = 0.0f;
+    kPre.reset();
+    kHighPass.reset();
+    std::fill (std::begin (slotEnergy), std::end (slotEnergy), 0.0f);
+    slotSum = 0.0f;
+    slotPos = slotFill = 0;
 }
 
 int FinishingChain::getLatencySamples() const
@@ -156,6 +184,17 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
     meters.clipDb = clipPeakDb;
     meters.rmsDb = juce::Decibels::gainToDecibels (std::sqrt (meanSquare), -100.0f);
     meters.peakDb = juce::Decibels::gainToDecibels (outPeak, -100.0f);
+
+    auto lufs = [this] (int slots)
+    {
+        auto sum = 0.0f;
+        for (int i = 1; i <= slots; ++i)
+            sum += slotEnergy[(slotPos - i + loudnessSlots) % loudnessSlots];
+        const auto z = sum / (float) slots;
+        return z > 1.0e-10f ? -0.691f + 10.0f * std::log10 (z) : -100.0f;
+    };
+    meters.momentaryLufs = lufs (4);
+    meters.shortTermLufs = lufs (loudnessSlots);
 }
 
 //==============================================================================
@@ -338,5 +377,22 @@ void FinishingChain::clipAndGain (juce::AudioBuffer<float>& buffer, int numSampl
         }
 
         meanSquare += rmsCoeff * (square / (float) numCh - meanSquare);
+
+        // K-weighted energy, summed over L and R (a mono output counts for both).
+        auto weighted = 0.0f;
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const auto k = kHighPass.process (ch, kPre.process (ch, buffer.getSample (ch, i)));
+            weighted += k * k;
+        }
+        slotSum += numCh == 1 ? weighted * 2.0f : weighted;
+
+        if (++slotFill == slotLength)
+        {
+            slotEnergy[slotPos] = slotSum / (float) slotLength;
+            slotPos = (slotPos + 1) % loudnessSlots;
+            slotSum = 0.0f;
+            slotFill = 0;
+        }
     }
 }
