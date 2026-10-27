@@ -53,6 +53,13 @@ namespace ParamIDs
     inline constexpr auto glide     = "glide";
     inline constexpr auto bendRange = "bendRange";
 
+    // Space (in the finishing chain, before the OTT).
+    inline constexpr auto delayMix      = "delayMix";
+    inline constexpr auto delayTime     = "delayTime";
+    inline constexpr auto delayFeedback = "delayFeedback";
+    inline constexpr auto reverbMix     = "reverbMix";
+    inline constexpr auto reverbSize    = "reverbSize";
+
     // Finishing chain.
     inline constexpr auto ottDepth    = "ottDepth";
     inline constexpr auto tilt        = "tilt";
@@ -65,6 +72,8 @@ inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech
 inline const juce::StringArray typeNames     { "Bass", "Lead", "Chord", "Pad", "Pluck", "FX" };
 inline const juce::StringArray lfoShapeNames { "Sine", "Triangle", "Saw", "Square", "Sample & Hold" };
 inline const juce::StringArray filterModeNames { "Low 12", "Low 24", "Band", "High" };
+inline const juce::StringArray delayTimeNames  { "1/16", "1/8", "1/8 Dotted", "1/4", "1/4 Dotted", "1/2" };
+inline constexpr float delayTimeBeats[]        { 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
 inline const juce::StringArray playModeNames { "Poly", "Mono", "Legato" }; // Legato: overlapping notes slide without retriggering
 
 inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
@@ -144,6 +153,13 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     seconds (ParamIDs::glide, "Glide", 2.0f, 0.0f);
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::bendRange, 1 }, "Bend Range", 0, 24, 2,
                                                      AudioParameterIntAttributes().withLabel ("st")));
+
+    unit (ParamIDs::delayMix, "Delay Mix", 0.0f);
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::delayTime, 1 }, "Delay Time", delayTimeNames, 2));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::delayFeedback, 1 }, "Delay Feedback",
+                                                       NormalisableRange<float> (0.0f, 0.9f), 0.35f));
+    unit (ParamIDs::reverbMix,  "Reverb Mix",  0.0f);
+    unit (ParamIDs::reverbSize, "Reverb Size", 0.6f);
 
     unit (ParamIDs::ottDepth, "OTT Depth", 0.35f);
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::tilt, 1 }, "Tilt",

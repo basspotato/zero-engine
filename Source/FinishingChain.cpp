@@ -68,6 +68,15 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
     outputGain.reset (fs, 0.02);
     dcCoeff = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / fs);
     rmsCoeff = coeffFor (0.3, fs);
+
+    delayLines.setSize (2, (int) std::ceil (2.1 * fs)); // up to a half note at 60 BPM
+    send.setSize (2, maxBlock);
+    delaySamples.reset (fs, 0.1);
+    delayMix.reset (fs, 0.05);
+    reverbMix.reset (fs, 0.05);
+    sendHpCoeff = (float) std::exp (-juce::MathConstants<double>::twoPi * 250.0 / fs);
+    fbLpCoeff = (float) std::exp (-juce::MathConstants<double>::twoPi * 6000.0 / fs);
+    reverb.setSampleRate (fs);
     slotLength = juce::jmax (1, juce::roundToInt (0.1 * fs));
 
     // BS.1770 K-weighting at this sample rate (same prototypes as tools/analyze).
@@ -130,6 +139,11 @@ void FinishingChain::reset()
     std::fill (std::begin (dcState), std::end (dcState), 0.0f);
     std::fill (std::begin (dcPrev), std::end (dcPrev), 0.0f);
     meanSquare = 0.0f;
+    delayLines.clear();
+    delayWrite = 0;
+    reverb.reset();
+    std::fill (std::begin (sendHpState), std::end (sendHpState), 0.0f);
+    std::fill (std::begin (fbLpState), std::end (fbLpState), 0.0f);
     kPre.reset();
     kHighPass.reset();
     std::fill (std::begin (slotEnergy), std::end (slotEnergy), 0.0f);
@@ -149,6 +163,17 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
     drive.setTargetValue (1.0f + s.grit * 11.0f);
     bias.setTargetValue (s.grit * 0.2f); // a little asymmetry adds even harmonics
     sideGain.setTargetValue (s.sideGain);
+    delaySamples.setTargetValue (juce::jlimit (1.0f, (float) delayLines.getNumSamples() - 2.0f, s.delaySeconds * (float) sampleRate));
+    delayMix.setTargetValue (s.delayMix);
+    reverbMix.setTargetValue (s.reverbMix);
+
+    juce::Reverb::Parameters reverbParams;
+    reverbParams.roomSize = s.reverbSize;
+    reverbParams.damping = 0.5f;
+    reverbParams.wetLevel = 1.0f;
+    reverbParams.dryLevel = 0.0f;
+    reverbParams.width = 1.0f;
+    reverb.setParameters (reverbParams);
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (s.outputDb));
 
     if (s.monoFreq != lastMonoFreq)
@@ -167,6 +192,7 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
         juce::AudioBuffer<float> chunk (buffer.getArrayOfWritePointers(), juce::jmin (channels, buffer.getNumChannels()), start, n);
 
         saturate (chunk, n);
+        space (chunk, n, s);
         compress (chunk, n, s.ottDepth);
         equalise (chunk, n, s);
         widen (chunk, n);
@@ -229,6 +255,83 @@ void FinishingChain::saturate (juce::AudioBuffer<float>& buffer, int numSamples)
             dcState[ch] = x - dcPrev[ch] + dcCoeff * dcState[ch];
             dcPrev[ch] = x;
             data[i] = dcState[ch];
+        }
+    }
+}
+
+void FinishingChain::space (juce::AudioBuffer<float>& buffer, int numSamples, const FinishingSettings& s)
+{
+    const auto numCh = buffer.getNumChannels();
+    const auto stereo = numCh > 1;
+    const auto lineLength = delayLines.getNumSamples();
+    auto* lineL = delayLines.getWritePointer (0);
+    auto* lineR = delayLines.getWritePointer (1);
+    auto* sendL = send.getWritePointer (0);
+    auto* sendR = send.getWritePointer (1);
+    const auto feedback = s.delayFeedback;
+
+    // High-passed send, so delay and reverb keep the low end dry.
+    for (int i = 0; i < numSamples; ++i)
+    {
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const auto x = buffer.getSample (stereo ? ch : 0, i);
+            sendHpState[ch] = x + sendHpCoeff * (sendHpState[ch] - x); // one-pole low-pass...
+            (ch == 0 ? sendL : sendR)[i] = x - sendHpState[ch];        // ...subtracted: high-pass
+        }
+    }
+
+    // Ping-pong: the input enters the left line, each line feeds the other.
+    // Reverb runs on the same send afterwards, so it isn't fed the echoes twice.
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto d = delaySamples.getNextValue();
+        auto readPos = (float) delayWrite - d;
+        if (readPos < 0.0f)
+            readPos += (float) lineLength;
+
+        const auto i0 = (int) readPos;
+        const auto i1 = (i0 + 1) % lineLength;
+        const auto frac = readPos - (float) i0;
+        const auto outL = lineL[i0] + frac * (lineL[i1] - lineL[i0]);
+        const auto outR = lineR[i0] + frac * (lineR[i1] - lineR[i0]);
+
+        // Darken the repeats a little each time round.
+        fbLpState[0] = outR + fbLpCoeff * (fbLpState[0] - outR);
+        fbLpState[1] = outL + fbLpCoeff * (fbLpState[1] - outL);
+
+        lineL[delayWrite] = 0.5f * (sendL[i] + sendR[i]) + feedback * fbLpState[0];
+        lineR[delayWrite] = feedback * fbLpState[1];
+        delayWrite = (delayWrite + 1) % lineLength;
+
+        const auto mix = delayMix.getNextValue();
+        if (stereo)
+        {
+            buffer.addSample (0, i, outL * mix);
+            buffer.addSample (1, i, outR * mix);
+        }
+        else
+        {
+            buffer.addSample (0, i, 0.5f * (outL + outR) * mix);
+        }
+    }
+
+    if (s.reverbMix <= 0.0f && reverbMix.getCurrentValue() <= 0.0f)
+        return; // skip the reverb's CPU while it's off
+
+    reverb.processStereo (sendL, sendR, numSamples);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto mix = reverbMix.getNextValue();
+        if (stereo)
+        {
+            buffer.addSample (0, i, sendL[i] * mix);
+            buffer.addSample (1, i, sendR[i] * mix);
+        }
+        else
+        {
+            buffer.addSample (0, i, 0.5f * (sendL[i] + sendR[i]) * mix);
         }
     }
 }

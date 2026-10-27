@@ -20,6 +20,9 @@ namespace
         p.subOctave = -1.0f;
         p.filterMode = 1.0f;        // Low 24, fully open: bypassed
         p.filterCutoff = 20000.0f;
+        p.delayTime = 2.0f;         // 1/8 dotted
+        p.delayFeedback = 0.35f;
+        p.reverbSize = 0.6f;
 
         switch (type)
         {
@@ -40,6 +43,7 @@ namespace
                 p.modAttack = 0.0f; p.modDecay = 0.5f; p.modSustain = 0.3f; p.modRelease = 0.3f; p.modToPos = 0.1f;
                 p.lfoRate = 5.5f; p.lfoToPitch = 0.05f; // light vibrato
                 p.ottDepth = 0.4f; p.tilt = 0.5f;
+                p.delayMix = 0.15f; p.reverbMix = 0.15f;
                 break;
 
             case chord:
@@ -49,6 +53,7 @@ namespace
                 p.modAttack = 0.0f; p.modDecay = 0.8f; p.modSustain = 0.4f; p.modRelease = 0.4f; p.modToPos = 0.15f;
                 p.lfoRate = 0.3f; p.lfoShape = triangle; p.lfoToPos = 0.1f;
                 p.ottDepth = 0.3f; p.monoFreq = 150.0f; p.stereoWidth = 1.2f;
+                p.reverbMix = 0.2f; p.reverbSize = 0.7f;
                 break;
 
             case pad:
@@ -58,6 +63,7 @@ namespace
                 p.modAttack = 1.5f; p.modDecay = 2.0f; p.modSustain = 0.6f; p.modRelease = 2.0f; p.modToPos = 0.2f;
                 p.lfoRate = 0.2f; p.lfoShape = triangle; p.lfoToPos = 0.25f;
                 p.ottDepth = 0.25f; p.tilt = -0.5f; p.monoFreq = 200.0f; p.stereoWidth = 1.4f;
+                p.reverbMix = 0.35f; p.reverbSize = 0.85f;
                 break;
 
             case pluck:
@@ -68,6 +74,7 @@ namespace
                 p.filterCutoff = 500.0f; p.filterRes = 0.25f; p.filterEnv = 5.5f; p.filterKeytrack = 0.5f; // classic filter pluck
                 p.lfoRate = 1.0f;
                 p.ottDepth = 0.5f; p.tilt = 0.5f; p.monoFreq = 150.0f; p.stereoWidth = 1.1f;
+                p.delayMix = 0.2f; p.delayTime = 1.0f; p.delayFeedback = 0.4f; p.reverbMix = 0.25f; // 1/8 echoes
                 break;
 
             default: // fx
@@ -77,6 +84,7 @@ namespace
                 p.modAttack = 2.0f; p.modDecay = 2.0f; p.modSustain = 0.5f; p.modRelease = 2.0f; p.modToPos = 0.5f;
                 p.lfoRate = 4.0f; p.lfoShape = sampleHold; p.lfoToPos = 0.6f; p.lfoToPitch = 0.2f;
                 p.ottDepth = 0.5f; p.tilt = 1.0f; p.stereoWidth = 1.5f;
+                p.delayMix = 0.2f; p.reverbMix = 0.4f; p.reverbSize = 0.9f;
                 break;
         }
 
@@ -108,6 +116,28 @@ namespace
             case hardstyle:   return { 0.45f, 0.20f, 0.0f,  0.5f, 0.0f,  0.0f,  0.0f,  0.20f, 0.1f };
             default:          return {};
         }
+    }
+
+    // How wet each genre runs, added to the type's delay and reverb (basses stay dry).
+    void applySpace (Profile& p, int genre, int type)
+    {
+        if (type == bass)
+            return;
+
+        auto delay = 0.0f, verb = 0.0f;
+        switch (genre)
+        {
+            case synthwave:            verb = 0.10f; break;
+            case trance:               verb = 0.10f; delay = 0.05f; break;
+            case pop:                  verb = -0.05f; break;
+            case techno: case techHouse: verb = -0.05f; delay = 0.05f; break;
+            case hardstyle:            verb = 0.05f; break;
+            case trap:                 delay = type == lead ? 0.05f : 0.0f; break;
+            default:                   break;
+        }
+
+        p.delayMix = juce::jlimit (0.0f, 1.0f, p.delayMix + delay);
+        p.reverbMix = juce::jlimit (0.0f, 1.0f, p.reverbMix + verb);
     }
 
     // Signature sounds that a shift alone can't reach.
@@ -180,6 +210,7 @@ namespace
         a[M::motion][T::lfoRate]  = 1.0f;
         a[M::air][T::tilt]        = 1.0f;
         a[M::air][T::filterCutoff] = 1.0f; // opens the filter where one is in use
+        a[M::air][T::reverbMix]   = type == bass ? 0.0f : 0.15f;
 
         switch (type)
         {
@@ -240,6 +271,7 @@ Profile makeProfile (int genre, int type)
     unitAdd (p.weight, s.weight);
     p.tilt = juce::jlimit (-6.0f, 6.0f, p.tilt + s.tilt);
 
+    applySpace (p, genre, type);
     applySignature (p, genre, type);
     p.directions = macroDirections (genre, type);
     return p;
@@ -301,6 +333,12 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::lfoShape,   p.lfoShape);
     set (ParamIDs::lfoToPos,   p.lfoToPos);
     set (ParamIDs::lfoToPitch, p.lfoToPitch);
+
+    set (ParamIDs::delayMix,      p.delayMix);
+    set (ParamIDs::delayTime,     p.delayTime);
+    set (ParamIDs::delayFeedback, p.delayFeedback);
+    set (ParamIDs::reverbMix,     p.reverbMix);
+    set (ParamIDs::reverbSize,    p.reverbSize);
 
     set (ParamIDs::ottDepth,    p.ottDepth);
     set (ParamIDs::tilt,        p.tilt);

@@ -24,7 +24,7 @@ public:
     bool acceptsMidi() const override  { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.5; }
+    double getTailLengthSeconds() const override { return 4.0; } // reverb and delay tails
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -60,6 +60,11 @@ private:
     std::atomic<float>& tilt;
     std::atomic<float>& monoFreq;
     std::atomic<float>& stereoWidth;
+    std::atomic<float>& delayMix;
+    std::atomic<float>& delayTime;
+    std::atomic<float>& delayFeedback;
+    std::atomic<float>& reverbMix;
+    std::atomic<float>& reverbSize;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ZeroEngineProcessor)
 };

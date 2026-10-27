@@ -22,7 +22,12 @@ ZeroEngineProcessor::ZeroEngineProcessor()
       ottDepth (*state.getRawParameterValue (ParamIDs::ottDepth)),
       tilt (*state.getRawParameterValue (ParamIDs::tilt)),
       monoFreq (*state.getRawParameterValue (ParamIDs::monoFreq)),
-      stereoWidth (*state.getRawParameterValue (ParamIDs::stereoWidth))
+      stereoWidth (*state.getRawParameterValue (ParamIDs::stereoWidth)),
+      delayMix (*state.getRawParameterValue (ParamIDs::delayMix)),
+      delayTime (*state.getRawParameterValue (ParamIDs::delayTime)),
+      delayFeedback (*state.getRawParameterValue (ParamIDs::delayFeedback)),
+      reverbMix (*state.getRawParameterValue (ParamIDs::reverbMix)),
+      reverbSize (*state.getRawParameterValue (ParamIDs::reverbSize))
 {
     WavetableBank::get(); // build tables here, never on the audio thread
 
@@ -87,6 +92,20 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.monoFreq = monoFreq.load();
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
     settings.outputDb = output.load();
+
+    // Delay follows the host tempo; 120 BPM when there is none (standalone).
+    auto bpm = 120.0;
+    if (auto* host = getPlayHead())
+        if (const auto position = host->getPosition())
+            if (const auto hostBpm = position->getBpm())
+                bpm = juce::jlimit (40.0, 300.0, *hostBpm);
+
+    const auto beats = delayTimeBeats[juce::jlimit (0, (int) std::size (delayTimeBeats) - 1, (int) delayTime.load())];
+    settings.delaySeconds  = (float) (beats * 60.0 / bpm);
+    settings.delayMix      = juce::jlimit (0.0f, 1.0f, delayMix.load() + macroMap.offset (MacroTarget::delayMix));
+    settings.delayFeedback = delayFeedback.load();
+    settings.reverbMix     = juce::jlimit (0.0f, 1.0f, reverbMix.load() + macroMap.offset (MacroTarget::reverbMix));
+    settings.reverbSize    = reverbSize.load();
 
     finishing.process (buffer, settings);
 }

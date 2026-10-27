@@ -31,6 +31,9 @@ struct Profile
     // LFO.
     float lfoRate, lfoShape, lfoToPos, lfoToPitch;
 
+    // Space: delay time is an index into delayTimeNames.
+    float delayMix, delayTime, delayFeedback, reverbMix, reverbSize;
+
     // Finishing chain.
     float ottDepth, tilt, monoFreq, stereoWidth;
 

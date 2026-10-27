@@ -3,11 +3,16 @@
 #include <juce_dsp/juce_dsp.h>
 
 // Per-instrument finishing chain, in order:
-// saturation (Grit) > 3-band upward+downward compression > tilt + air shelf
-// > mono bass / stereo width > soft clipper > output gain.
+// saturation (Grit) > delay + reverb > 3-band upward+downward compression
+// > tilt + air shelf > mono bass / stereo width > soft clipper > output gain.
 struct FinishingSettings
 {
     float grit      = 0.0f; // 0..1
+    float delayMix      = 0.0f; // 0..1
+    float delaySeconds  = 0.375f;
+    float delayFeedback = 0.35f;
+    float reverbMix     = 0.0f; // 0..1
+    float reverbSize    = 0.6f;
     float ottDepth  = 0.0f; // 0..1
     float tiltDb    = 0.0f; // +/- dB around a 1 kHz pivot
     float air       = 0.0f; // 0..1
@@ -60,6 +65,7 @@ private:
     };
 
     void saturate (juce::AudioBuffer<float>& buffer, int numSamples);
+    void space (juce::AudioBuffer<float>& buffer, int numSamples, const FinishingSettings& s);
     void compress (juce::AudioBuffer<float>& buffer, int numSamples, float depth);
     void equalise (juce::AudioBuffer<float>& buffer, int numSamples, const FinishingSettings& s);
     void widen (juce::AudioBuffer<float>& buffer, int numSamples);
@@ -75,6 +81,13 @@ private:
 
     juce::dsp::LinkwitzRileyFilter<float> xoverLow, xoverHigh, lowAllpass, monoXover;
     Band bands[3];
+
+    // Space: ping-pong delay lines and a reverb, both fed a high-passed send.
+    juce::AudioBuffer<float> delayLines, send;
+    int delayWrite = 0;
+    juce::SmoothedValue<float> delaySamples, delayMix, reverbMix;
+    float sendHpState[2] {}, sendHpCoeff = 0.0f, fbLpState[2] {}, fbLpCoeff = 0.0f;
+    juce::Reverb reverb;
 
     Meters meters;
     float bandGainSum[3] {};
