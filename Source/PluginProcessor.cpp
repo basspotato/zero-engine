@@ -19,6 +19,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
       air (*state.getRawParameterValue (ParamIDs::air)),
       width (*state.getRawParameterValue (ParamIDs::width)),
       output (*state.getRawParameterValue (ParamIDs::output)),
+      levelTrim (*state.getRawParameterValue (ParamIDs::levelTrim)),
       ottDepth (*state.getRawParameterValue (ParamIDs::ottDepth)),
       tilt (*state.getRawParameterValue (ParamIDs::tilt)),
       monoFreq (*state.getRawParameterValue (ParamIDs::monoFreq)),
@@ -32,7 +33,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     WavetableBank::get(); // build tables here, never on the audio thread
 
     for (int i = 0; i < numVoices; ++i)
-        synth.addVoice (new ZeroVoice (state, macroMap));
+        synth.addVoice (new ZeroVoice (state, macroMap, i));
 
     synth.addSound (new ZeroSound());
 
@@ -53,9 +54,21 @@ void ZeroEngineProcessor::syncProfile()
     if (genre == appliedGenre && type == appliedType)
         return;
 
+    loadProfile (genre, type, makeProfile (genre, type));
+}
+
+void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profile)
+{
+    auto setChoice = [this] (const char* id, int index)
+    {
+        auto* param = state.getParameter (id);
+        param->setValueNotifyingHost (param->convertTo0to1 ((float) index));
+    };
+
     appliedGenre = genre;
     appliedType = type;
-    const auto profile = makeProfile (genre, type);
+    setChoice (ParamIDs::genre, genre);
+    setChoice (ParamIDs::type, type);
     applyProfile (state, profile);
     loadMacroMap (macroMap, profile);
 }
@@ -91,7 +104,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.air      = air.load();
     settings.monoFreq = monoFreq.load();
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
-    settings.outputDb = output.load();
+    settings.outputDb = output.load() + levelTrim.load();
 
     // Delay follows the host tempo; 120 BPM when there is none (standalone).
     auto bpm = 120.0;

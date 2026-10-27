@@ -330,7 +330,20 @@ Profile makeProfile (int genre, int type)
     applySpace (p, genre, type);
     applySignature (p, genre, type);
     p.directions = macroDirections (genre, type);
+
+    if (genre >= 0 && genre < 12 && type >= 0 && type < 6 && profileTrims[genre][type].tuned)
+        applyTrim (p, profileTrims[genre][type]);
+
     return p;
+}
+
+void applyTrim (Profile& p, const ProfileTrim& trim)
+{
+    p.levelTrim = trim.levelDb;
+    p.ottDepth = trim.ottDepth;
+    p.tilt = trim.tilt;
+    p.weight = trim.weight;
+    p.stereoWidth = trim.stereoWidth;
 }
 
 void loadMacroMap (MacroMap& map, const Profile& p)
@@ -401,6 +414,7 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::reverbMix,     p.reverbMix);
     set (ParamIDs::reverbSize,    p.reverbSize);
 
+    set (ParamIDs::levelTrim,   p.levelTrim);
     set (ParamIDs::ottDepth,    p.ottDepth);
     set (ParamIDs::tilt,        p.tilt);
     set (ParamIDs::monoFreq,    p.monoFreq);

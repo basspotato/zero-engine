@@ -17,8 +17,8 @@ namespace
     }
 }
 
-ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map)
-    : macroMap (map)
+ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map, int index)
+    : macroMap (map), random (0x5eed + index)
 {
     auto get = [&] (const char* id) { return state.getRawParameterValue (id); };
 

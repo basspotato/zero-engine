@@ -5,6 +5,7 @@
 #include "FinishingChain.h"
 #include "MacroMap.h"
 #include "SynthVoice.h"
+#include "Profiles.h"
 
 class ZeroEngineProcessor : public juce::AudioProcessor,
                             private juce::Timer
@@ -41,6 +42,10 @@ public:
     // Runs on a timer; offline tools call it directly after setting Genre/Type.
     void syncProfile();
 
+    // Message thread: loads a given profile as if Genre/Type had been chosen
+    // (the offline tuner passes candidate profiles through this).
+    void loadProfile (int genre, int type, const Profile& profile);
+
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboardState;
 
@@ -56,6 +61,7 @@ private:
     std::atomic<float>& air;
     std::atomic<float>& width;
     std::atomic<float>& output;
+    std::atomic<float>& levelTrim;
     std::atomic<float>& ottDepth;
     std::atomic<float>& tilt;
     std::atomic<float>& monoFreq;

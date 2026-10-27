@@ -66,6 +66,7 @@ namespace ParamIDs
     inline constexpr auto reverbSize    = "reverbSize";
 
     // Finishing chain.
+    inline constexpr auto levelTrim   = "levelTrim"; // per-profile loudness match, before Output
     inline constexpr auto ottDepth    = "ottDepth";
     inline constexpr auto tilt        = "tilt";
     inline constexpr auto monoFreq    = "monoFreq";
@@ -174,6 +175,9 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     unit (ParamIDs::reverbMix,  "Reverb Mix",  0.0f);
     unit (ParamIDs::reverbSize, "Reverb Size", 0.6f);
 
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::levelTrim, 1 }, "Level Trim",
+                                                       NormalisableRange<float> (-18.0f, 12.0f), 0.0f,
+                                                       AudioParameterFloatAttributes().withLabel ("dB")));
     unit (ParamIDs::ottDepth, "OTT Depth", 0.35f);
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::tilt, 1 }, "Tilt",
                                                        NormalisableRange<float> (-6.0f, 6.0f), 0.0f,

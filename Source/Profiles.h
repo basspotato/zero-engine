@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "MacroMap.h"
+#include "ProfileTuning.h"
 
 // A starting point for one genre x type pair: every engine and finishing
 // parameter plus the six macro positions. Built from a per-type template and
@@ -37,13 +38,17 @@ struct Profile
     float delayMix, delayTime, delayFeedback, reverbMix, reverbSize;
 
     // Finishing chain.
-    float ottDepth, tilt, monoFreq, stereoWidth;
+    float levelTrim, ottDepth, tilt, monoFreq, stereoWidth;
 
     // What each macro pushes besides its main job.
     MacroDirections directions;
 };
 
+// The hand-designed profile with any tuned trim from ProfileTuning.h applied.
 Profile makeProfile (int genre, int type);
+
+// Overwrites the five tuner-controlled values (level, OTT, tilt, Weight, width).
+void applyTrim (Profile& profile, const ProfileTrim& trim);
 
 // Message thread only: writes every profile value through the host.
 void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& profile);

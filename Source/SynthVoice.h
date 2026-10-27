@@ -16,7 +16,9 @@ class ZeroVoice : public juce::SynthesiserVoice
 public:
     static constexpr int maxUnison = 7;
 
-    ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& macroMap);
+    // index seeds the voice's randomness (unison start phases, S&H), so a
+    // fresh engine renders identically; phases still vary from note to note.
+    ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& macroMap, int index);
 
     bool canPlaySound (juce::SynthesiserSound* sound) override;
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel) override;
