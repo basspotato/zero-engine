@@ -301,6 +301,26 @@ void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
 }
 
 //==============================================================================
+void ChevronButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    const auto r = getLocalBounds().toFloat();
+    if (highlighted && isEnabled())
+    {
+        g.setColour (Palette::screen.withAlpha (0.8f));
+        g.fillRoundedRectangle (r, 3.0f);
+    }
+
+    const auto c = r.getCentre().translated (down ? 0.5f : 0.0f, down ? 0.5f : 0.0f);
+    const auto dx = left ? 2.5f : -2.5f;
+    juce::Path p;
+    p.startNewSubPath (c.x + dx, c.y - 4.0f);
+    p.lineTo (c.x - dx, c.y);
+    p.lineTo (c.x + dx, c.y + 4.0f);
+    g.setColour (! isEnabled() ? Palette::text.withAlpha (0.2f) : highlighted ? Palette::yellow : Palette::accent);
+    g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
+//==============================================================================
 TesseractButton::TesseractButton()
     : juce::Button ("Generate")
 {
@@ -814,9 +834,16 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     generateButton.onClick = [this]
     {
         processor.generate();
+        refreshHistoryButtons();
         generateButton.fold();
     };
     addAndMakeVisible (generateButton);
+
+    backButton.onClick = [this] { processor.stepHistory (-1); refreshHistoryButtons(); };
+    forwardButton.onClick = [this] { processor.stepHistory (1); refreshHistoryButtons(); };
+    addAndMakeVisible (backButton);
+    addAndMakeVisible (forwardButton);
+    refreshHistoryButtons();
 
     // Favourites: save the current sound (generated or tweaked) and recall it later.
     saveButton.onClick = [this]
@@ -861,6 +888,12 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
 ZeroEngineEditor::~ZeroEngineEditor()
 {
     setLookAndFeel (nullptr);
+}
+
+void ZeroEngineEditor::refreshHistoryButtons()
+{
+    backButton.setEnabled (processor.canStepHistory (-1));
+    forwardButton.setEnabled (processor.canStepHistory (1));
 }
 
 void ZeroEngineEditor::refreshFavourites()
@@ -981,6 +1014,9 @@ void ZeroEngineEditor::resized()
     favouritesRow.removeFromRight (4);
     favouritesBox.setBounds (favouritesRow);
     generateButton.setBounds (generateArea);
+    // History arrows sit in the header strip, left of the LED.
+    forwardButton.setBounds (generateSection.getRight() - 26 - 18, generateSection.getY() + 3, 18, 16);
+    backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
     levelMeter.setBounds (content (meterSection));
     display.setBounds (content (displaySection));
     // The mode menu sits in the header strip, left of the LED.

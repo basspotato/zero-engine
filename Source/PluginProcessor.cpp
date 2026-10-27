@@ -81,7 +81,31 @@ void ZeroEngineProcessor::generate (juce::int64 seed)
     syncProfile(); // a Genre/Type change not yet picked up by the timer
     juce::Random random (seed);
     const int genre = appliedGenre, type = appliedType;
+
+    // History, like a browser: going back and generating drops what was ahead;
+    // the sound before the first click (or any tweak since) is kept as a step too.
+    history.erase (history.begin() + juce::jmin ((int) history.size(), historyPos + 1), history.end());
+    if (history.empty() || ! history.back().isEquivalentTo (state.state))
+        history.push_back (state.copyState());
+
     loadProfile (genre, type, pickGeneratedProfile (genre, type, random));
+
+    history.push_back (state.copyState());
+    constexpr size_t maxHistory = 50;
+    if (history.size() > maxHistory)
+        history.erase (history.begin(), history.begin() + (std::ptrdiff_t) (history.size() - maxHistory));
+    historyPos = (int) history.size() - 1;
+}
+
+bool ZeroEngineProcessor::stepHistory (int direction)
+{
+    const auto target = historyPos + direction;
+    if (target < 0 || target >= (int) history.size())
+        return false;
+
+    historyPos = target;
+    restoreTree (history[(size_t) historyPos]);
+    return true;
 }
 
 ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (int genre, int type, const Profile& profile)
@@ -338,13 +362,18 @@ bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml)
     if (! xml.hasTagName (state.state.getType()))
         return false;
 
-    state.replaceState (juce::ValueTree::fromXml (xml));
+    restoreTree (juce::ValueTree::fromXml (xml));
+    return true;
+}
+
+void ZeroEngineProcessor::restoreTree (const juce::ValueTree& tree)
+{
+    state.replaceState (tree.createCopy());
 
     // The saved values already include any tweaks; don't overwrite them with the profile.
     appliedGenre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
     appliedType = (int) state.getRawParameterValue (ParamIDs::type)->load();
     loadMacroMap (macroMap, makeProfile (appliedGenre, appliedType));
-    return true;
 }
 
 juce::String ZeroEngineProcessor::saveFavourite()

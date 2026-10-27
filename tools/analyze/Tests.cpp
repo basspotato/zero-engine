@@ -159,6 +159,31 @@ namespace
         return problems;
     }
 
+    // Back and forward through generated sounds must land on exactly what was
+    // heard, including the designed sound from before the first click.
+    juce::StringArray checkHistory()
+    {
+        ZeroEngineProcessor engine;
+        loadProfile (engine, genreNames.indexOf ("Techno"), typeNames.indexOf ("Bass"));
+        const auto designed = engine.state.copyState();
+        engine.generate (1);
+        const auto first = engine.state.copyState();
+        engine.generate (2);
+        const auto second = engine.state.copyState();
+
+        juce::StringArray problems;
+        auto expect = [&] (bool ok, const char* what) { if (! ok) problems.add (what); };
+        auto now = [&] (const juce::ValueTree& t) { return engine.state.copyState().isEquivalentTo (t); };
+
+        expect (! first.isEquivalentTo (second), "two generates gave the same sound");
+        expect (engine.stepHistory (-1) && now (first), "back did not return to the first generated sound");
+        expect (engine.stepHistory (-1) && now (designed), "back did not return to the designed sound");
+        expect (! engine.stepHistory (-1), "back went past the start");
+        expect (engine.stepHistory (1) && engine.stepHistory (1) && now (second), "forward did not return to the newest");
+        expect (! engine.stepHistory (1), "forward went past the end");
+        return problems;
+    }
+
     juce::StringArray checkState()
     {
         ZeroEngineProcessor a;
@@ -202,6 +227,17 @@ int runTests()
 
     std::printf ("Favourites save/recall... ");
     if (const auto problems = checkFavourites(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Generate history... ");
+    if (const auto problems = checkHistory(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

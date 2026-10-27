@@ -75,6 +75,17 @@ private:
     std::vector<float> spectrumDb = std::vector<float> ((size_t) fftSize / 2, -100.0f);
 };
 
+// A small chevron button for stepping through Generate's history.
+class ChevronButton : public juce::Button
+{
+public:
+    explicit ChevronButton (bool pointsLeft) : juce::Button (pointsLeft ? "Back" : "Forward"), left (pointsLeft) {}
+    void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+
+private:
+    bool left;
+};
+
 // The Generate button: a slowly turning tesseract (4D cube) that folds in on
 // itself, turning inside out through the fourth dimension, when clicked.
 class TesseractButton : public juce::Button,
@@ -132,6 +143,7 @@ private:
     TesseractButton generateButton;
     juce::ComboBox favouritesBox;            // recall a saved sound
     juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite
+    ChevronButton backButton { true }, forwardButton { false }; // Generate history, in the header strip
 
     // Temporary: all engine parameters as plain sliders, shown in place of the display.
     juce::GenericAudioProcessorEditor devPanel;
@@ -140,6 +152,7 @@ private:
 
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);
     void refreshFavourites();
+    void refreshHistoryButtons();
 
     // Panel areas, set in resized() and drawn in paint() behind the components.
     juce::Rectangle<int> displaySection, meterSection, generateSection, macroSection;

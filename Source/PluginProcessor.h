@@ -70,12 +70,21 @@ public:
     // How many of the last Generate's candidates passed the check (out of 6), for tests and tuning.
     int getLastGenerateFits() const noexcept { return lastGenerateFits; }
 
+    // Message thread: step back (-1) or forward (+1) through generated sounds.
+    // Returns false at either end.
+    bool stepHistory (int direction);
+    bool canStepHistory (int direction) const { const auto t = historyPos + direction; return t >= 0 && t < (int) history.size(); }
+
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboardState;
 
 private:
     void timerCallback() override;
     bool restoreState (const juce::XmlElement&);
+    void restoreTree (const juce::ValueTree&);
+
+    std::vector<juce::ValueTree> history; // Generate history, oldest first (message thread)
+    int historyPos = -1;
 
     // Generate's render-and-check (message thread, ~0.15 s per click).
     struct SoundCheck { float levelDb = -100, centroidHz = 0, bassPct = 0, sidePct = 0; };
