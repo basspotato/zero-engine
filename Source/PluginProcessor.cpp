@@ -21,6 +21,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
       output (*state.getRawParameterValue (ParamIDs::output)),
       levelTrim (*state.getRawParameterValue (ParamIDs::levelTrim)),
       subSplit (*state.getRawParameterValue (ParamIDs::subSplit)),
+      subOn (*state.getRawParameterValue (ParamIDs::subOn)),
       midHighPass (*state.getRawParameterValue (ParamIDs::midHighPass)),
       ottDepth (*state.getRawParameterValue (ParamIDs::ottDepth)),
       tilt (*state.getRawParameterValue (ParamIDs::tilt)),
@@ -125,6 +126,28 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.air      = air.load();
     settings.monoFreq = monoFreq.load();
     settings.midHighPassHz = juce::jlimit (20.0f, 1000.0f, midHighPass.load() * std::exp2 (macroMap.offset (MacroTarget::midHighPass)));
+
+    // With no sub (leads, chords, pads, plucks) nothing replaces what the
+    // high-pass removes, so keep it below the lowest note's fundamental: a low
+    // hoover or brass chord keeps its root. Basses keep the fixed split, since
+    // their clean sub carries the fundamental.
+    if (subOn.load() < 0.5f)
+    {
+        int lowest = 128;
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (auto* voice = synth.getVoice (i); voice->isVoiceActive())
+                lowest = juce::jmin (lowest, voice->getCurrentlyPlayingNote());
+
+        // About 3/4 octave under the fundamental, where the 12 dB slope costs it
+        // under 0.5 dB. Glide there over ~10 ms; hold the last value in silence.
+        if (lowest < 128)
+        {
+            const auto target = (float) juce::MidiMessage::getMidiNoteInHertz (lowest) * 0.6f;
+            const auto glide = 1.0f - std::exp (-(float) numSamples / (0.01f * (float) getSampleRate()));
+            noteHighPassHz *= std::exp2 (glide * std::log2 (target / noteHighPassHz));
+        }
+        settings.midHighPassHz = juce::jlimit (20.0f, settings.midHighPassHz, noteHighPassHz);
+    }
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
     settings.outputDb = output.load() + levelTrim.load();
 
