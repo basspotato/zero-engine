@@ -7,8 +7,9 @@ namespace
     enum Type  { bass, lead, chord, pad, pluck, fx };
     enum Lfo   { sine, triangle, saw, square, sampleHold };
 
-    // Wave positions across the frames: sine, triangle, saw, square, pulse.
+    // Wave positions across the Basic frames: sine, triangle, saw, square, pulse.
     constexpr float sineWave = 0.0f, sawWave = 0.5f, squareWave = 0.75f;
+    constexpr float growlTable = 1.0f, digitalTable = 2.0f, organTable = 3.0f; // waveTableNames indices
 
     Profile typeTemplate (int type)
     {
@@ -159,7 +160,8 @@ namespace
                     p.glide = 0.08f; // overlapping notes slide
                     break;
 
-                case dubstep: // wobble
+                case dubstep: // talking wobble: the LFO sweeps the vowel formants
+                    p.waveTable = growlTable; p.wavePos = 0.5f;
                     p.lfoRate = 3.0f; p.lfoShape = sine; p.lfoToPos = 0.7f;
                     break;
 
@@ -191,7 +193,13 @@ namespace
 
         if (genre == hardstyle && type == lead)
         {
+            p.waveTable = digitalTable; p.wavePos = 0.9f; // high sync peak: bright
             p.lfoRate = 6.0f; p.lfoToPitch = 0.1f; // screech
+        }
+
+        if (genre == house && type == chord)
+        {
+            p.waveTable = organTable; p.wavePos = 0.9f; // organ stab, most drawbars out
         }
     }
 
@@ -304,6 +312,7 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::motion, p.motion);
     set (ParamIDs::air,    p.air);
 
+    set (ParamIDs::waveTable, p.waveTable);
     set (ParamIDs::wavePos, p.wavePos);
     set (ParamIDs::unison,  p.unison);
     set (ParamIDs::detune,  p.detune);

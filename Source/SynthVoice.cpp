@@ -30,7 +30,8 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::lfoToPitch), get (ParamIDs::modToPitch), get (ParamIDs::subOctave),
           get (ParamIDs::glide),     get (ParamIDs::bendRange),
           get (ParamIDs::filterMode), get (ParamIDs::filterCutoff), get (ParamIDs::filterRes), get (ParamIDs::filterEnv),
-          get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff), get (ParamIDs::velToCutoff), get (ParamIDs::velSens) };
+          get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff), get (ParamIDs::velToCutoff), get (ParamIDs::velSens),
+          get (ParamIDs::waveTable) };
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -207,6 +208,7 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto maxFreq = std::exp2 (juce::jmax (pitch, targetPitch) + maxCents / 1200.0
                                     + (lfoToPitch + juce::jmax (0.0f, modToPitch) + juce::jmax (0.0f, bendSemis)) / 12.0);
     const auto mipLevel = WavetableBank::levelFor (maxFreq, sampleRate);
+    const auto table = juce::jlimit (0, WavetableBank::numBanks - 1, (int) p.waveTable->load());
 
     // Filter. Fully open low-pass with no modulation is skipped, so profiles
     // that don't use it sound exactly as before.
@@ -234,7 +236,7 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         float l = 0.0f, r = 0.0f;
         for (int v = 0; v < voices; ++v)
         {
-            const auto s = bank.lookup (mipLevel, pos, phases[v]);
+            const auto s = bank.lookup (table, mipLevel, pos, phases[v]);
             l += s * gainL[v];
             r += s * gainR[v];
 

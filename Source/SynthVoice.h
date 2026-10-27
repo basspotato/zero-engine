@@ -66,6 +66,7 @@ private:
         std::atomic<float>* lfoToCutoff;
         std::atomic<float>* velToCutoff;
         std::atomic<float>* velSens;
+        std::atomic<float>* waveTable;
     } p;
 
     void setVelocity (float velocity);

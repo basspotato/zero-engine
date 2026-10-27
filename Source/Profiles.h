@@ -11,8 +11,8 @@ struct Profile
     // Macros.
     float weight, grit, punch, width, motion, air;
 
-    // Oscillator.
-    float wavePos, unison, detune, blend;
+    // Oscillator: waveTable is an index into waveTableNames.
+    float waveTable, wavePos, unison, detune, blend;
 
     // Envelopes (seconds, sustain 0..1).
     float ampAttack, ampDecay, ampSustain, ampRelease;

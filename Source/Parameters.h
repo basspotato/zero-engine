@@ -17,6 +17,7 @@ namespace ParamIDs
     inline constexpr auto output = "output";
 
     // Engine parameters (set by profiles later; exposed in the dev panel for now).
+    inline constexpr auto waveTable = "waveTable";
     inline constexpr auto wavePos = "wavePos";
     inline constexpr auto unison  = "unison";
     inline constexpr auto detune  = "detune";
@@ -73,6 +74,7 @@ inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech
                                                 "Drum & Bass", "Pop", "House", "Trance", "Future Bass", "Hardstyle" };
 inline const juce::StringArray typeNames     { "Bass", "Lead", "Chord", "Pad", "Pluck", "FX" };
 inline const juce::StringArray lfoShapeNames { "Sine", "Triangle", "Saw", "Square", "Sample & Hold" };
+inline const juce::StringArray waveTableNames  { "Basic", "Growl", "Digital", "Organ" };
 inline const juce::StringArray filterModeNames { "Low 12", "Low 24", "Band", "High" };
 inline const juce::StringArray delayTimeNames  { "1/16", "1/8", "1/8 Dotted", "1/4", "1/4 Dotted", "1/2" };
 inline constexpr float delayTimeBeats[]        { 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
@@ -108,6 +110,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::output, 1 }, "Output",
                                                        NormalisableRange<float> (-24.0f, 6.0f), 0.0f));
 
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::waveTable, 1 }, "Wave Table", waveTableNames, 0));
     unit (ParamIDs::wavePos, "Wave Position", 0.5f);
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::unison, 1 }, "Unison Voices", 1, 7, 5));
     unit (ParamIDs::detune, "Unison Detune", 0.35f);
