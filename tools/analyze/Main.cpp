@@ -386,6 +386,27 @@ int main (int argc, char* argv[])
 
         std::printf ("Live wavetable position %.3f (knob %.3f)\n", engine.getLivePosition(),
                      engine.state.getRawParameterValue (ParamIDs::wavePos)->load());
+
+        // Extra arguments click buttons by their text, in order (e.g. ADVANCED FILTER).
+        for (int a = 2; a < args.size(); ++a)
+        {
+            std::function<juce::Button* (juce::Component&)> find = [&] (juce::Component& c) -> juce::Button*
+            {
+                if (auto* b = dynamic_cast<juce::Button*> (&c); b != nullptr && b->getButtonText() == args[a])
+                    return b;
+                for (auto* child : c.getChildren())
+                    if (auto* found = find (*child))
+                        return found;
+                return nullptr;
+            };
+            if (auto* button = find (*editor))
+            {
+                button->triggerClick();
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+            }
+            else
+                std::printf ("No button labelled %s\n", args[a].toRawUTF8());
+        }
         const auto image = editor->createComponentSnapshot (editor->getLocalBounds());
         juce::FileOutputStream out (argFile (args, 1, {}));
         out.setPosition (0);

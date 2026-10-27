@@ -20,6 +20,7 @@ public:
     juce::Font getPopupMenuFont() override;
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
     void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
+    juce::Font getLabelFont (juce::Label&) override; // knob value boxes in the mono face
 };
 
 // Output meter: L/R peak and RMS bars on a dB scale with peak hold and clip
@@ -73,6 +74,42 @@ private:
     juce::dsp::WindowingFunction<float> window { (size_t) fftSize, juce::dsp::WindowingFunction<float>::hann };
     std::vector<float> samples = std::vector<float> ((size_t) fftSize), fftData = std::vector<float> ((size_t) fftSize * 2);
     std::vector<float> spectrumDb = std::vector<float> ((size_t) fftSize / 2, -100.0f);
+};
+
+// Every engine parameter, grouped into tabs, in the console style: knobs for
+// numbers, slim menus for choices, toggles for switches. Covers the panels
+// between the top bar and the keyboard while open.
+class AdvancedPanel : public juce::Component
+{
+public:
+    explicit AdvancedPanel (juce::AudioProcessorValueTreeState&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    struct Control
+    {
+        juce::String name;
+        std::unique_ptr<juce::Slider> knob;
+        std::unique_ptr<juce::ComboBox> menu;
+        std::unique_ptr<juce::ToggleButton> toggle;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> knobAttachment;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> menuAttachment;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> toggleAttachment;
+        juce::Component* widget() const;
+    };
+
+    struct Tab
+    {
+        juce::String name;
+        std::vector<std::unique_ptr<Control>> controls;
+        std::unique_ptr<juce::TextButton> button;
+    };
+
+    void show (size_t tab);
+
+    std::vector<Tab> tabs;
+    size_t current = 0;
 };
 
 // A small chevron button for stepping through Generate's history.
@@ -145,9 +182,9 @@ private:
     juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite
     ChevronButton backButton { true }, forwardButton { false }; // Generate history, in the header strip
 
-    // Temporary: all engine parameters as plain sliders, shown in place of the display.
-    juce::GenericAudioProcessorEditor devPanel;
-    juce::TextButton devButton { "Dev" };
+    // Every engine parameter, in tabs; ADVANCED opens it over the panels.
+    AdvancedPanel advancedPanel;
+    juce::TextButton advancedButton { "ADVANCED" };
     juce::MidiKeyboardComponent keyboard;
 
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);

@@ -84,6 +84,15 @@ ZeroLookAndFeel::ZeroLookAndFeel()
     setColour (juce::Label::textColourId, Palette::accent);
     setColour (juce::TooltipWindow::backgroundColourId, Palette::panel);
     setColour (juce::TooltipWindow::textColourId, Palette::text);
+    setColour (juce::Slider::textBoxTextColourId, Palette::text.withAlpha (0.8f));
+    setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+    setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    setColour (juce::Slider::textBoxHighlightColourId, Palette::orange.withAlpha (0.4f));
+    setColour (juce::ToggleButton::textColourId, Palette::accent);
+    setColour (juce::ToggleButton::tickColourId, Palette::yellow);
+    setColour (juce::ToggleButton::tickDisabledColourId, Palette::text.withAlpha (0.3f));
+    setColour (juce::TextEditor::backgroundColourId, Palette::screen);
+    setColour (juce::TextEditor::textColourId, Palette::text);
 }
 
 void ZeroLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
@@ -126,6 +135,13 @@ juce::Font ZeroLookAndFeel::getPopupMenuFont()
 juce::Font ZeroLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)
 {
     return Fonts::ui (juce::jmin (12.0f, (float) buttonHeight * 0.62f), true, 0.08f);
+}
+
+juce::Font ZeroLookAndFeel::getLabelFont (juce::Label& label)
+{
+    if (dynamic_cast<juce::Slider*> (label.getParentComponent()) != nullptr)
+        return Fonts::mono (11.0f);
+    return LookAndFeel_V4::getLabelFont (label);
 }
 
 void ZeroLookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int width, int height)
@@ -291,11 +307,16 @@ void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
         const auto dragging = slider.isMouseButtonDown();
         g.setColour (dragging ? ramp (n).brighter (0.4f) : Palette::text.withAlpha (0.55f));
         g.setFont (Fonts::mono (size * 0.1f));
-        // 0..1 macros read on the 0-10 scale printed round the knob; others in their own units.
-        const auto unitRange = slider.getMinimum() == 0.0 && slider.getMaximum() == 1.0;
-        const auto text = unitRange ? juce::String (slider.getValue() * 10.0, 1) : slider.getTextFromValue (slider.getValue());
+        // 0..1 amounts read on the 0-10 scale printed round the knob; anything with a
+        // unit (s, Hz, dB, st, oct) in that unit, with sensible decimals.
+        const auto value = slider.getValue();
+        const auto unit = slider.getTextValueSuffix();
+        const auto unitRange = slider.getMinimum() == 0.0 && slider.getMaximum() == 1.0 && unit.isEmpty();
+        const auto magnitude = std::abs (value);
+        const auto decimals = slider.getInterval() >= 1.0 || magnitude >= 100.0 ? 0 : magnitude >= 10.0 ? 1 : 2;
+        const auto text = unitRange ? juce::String (value * 10.0, 1) : juce::String (value, decimals) + unit;
         g.drawText (text,
-                    juce::Rectangle<float> (size * 0.6f, size * 0.12f).withCentre ({ centre.x, centre.y + outer - size * 0.06f }),
+                    juce::Rectangle<float> (size * 0.95f, size * 0.12f).withCentre ({ centre.x, centre.y + outer - size * 0.06f }),
                     juce::Justification::centred, false);
     }
 }
@@ -796,12 +817,168 @@ void ScopeView::drawWavetable (juce::Graphics& g, juce::Rectangle<float> area)
 }
 
 //==============================================================================
+juce::Component* AdvancedPanel::Control::widget() const
+{
+    if (knob != nullptr)   return knob.get();
+    if (menu != nullptr)   return menu.get();
+    return toggle.get();
+}
+
+AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
+{
+    using namespace ParamIDs;
+    const std::vector<std::pair<const char*, std::vector<const char*>>> layout {
+        { "OSC",       { waveTable, waveTableB, tableMix, wavePos, unison, detune, blend } },
+        { "ENVELOPES", { ampAttack, ampDecay, ampSustain, ampRelease, modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch } },
+        { "FILTER",    { filterMode, filterCutoff, filterRes, filterEnv, filterKeytrack, velToCutoff } },
+        { "LFO",       { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } },
+        { "SUB & PLAY",{ subOn, subOctave, subSplit, midHighPass, playMode, glide, bendRange, velSens } },
+        { "SPACE",     { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
+        { "FINISH",    { ottDepth, tilt, monoFreq, stereoWidth, levelTrim } },
+    };
+
+    for (const auto& [tabName, ids] : layout)
+    {
+        Tab tab;
+        tab.name = tabName;
+
+        for (const auto* id : ids)
+        {
+            auto* param = state.getParameter (id);
+            if (param == nullptr)
+                continue;
+
+            auto control = std::make_unique<Control>();
+            control->name = param->getName (24).toUpperCase();
+
+            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (param))
+            {
+                control->menu = std::make_unique<juce::ComboBox>();
+                control->menu->addItemList (choice->choices, 1);
+                control->menuAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, id, *control->menu);
+            }
+            else if (dynamic_cast<juce::AudioParameterBool*> (param) != nullptr)
+            {
+                control->toggle = std::make_unique<juce::ToggleButton> ("ON");
+                control->toggleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, id, *control->toggle);
+            }
+            else
+            {
+                control->knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
+                control->knob->setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
+                control->knob->setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+                if (const auto unit = param->getLabel(); unit.isNotEmpty())
+                    control->knob->setTextValueSuffix (" " + unit); // the knob readout shows it
+                control->knobAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, id, *control->knob);
+                control->knob->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
+            }
+
+            addChildComponent (control->widget());
+            tab.controls.push_back (std::move (control));
+        }
+
+        tab.button = std::make_unique<juce::TextButton> (tab.name);
+        tab.button->setClickingTogglesState (true);
+        tab.button->setRadioGroupId (0x7ab5);
+        const auto index = tabs.size();
+        tab.button->onClick = [this, index] { show (index); };
+        addAndMakeVisible (tab.button.get());
+        tabs.push_back (std::move (tab));
+    }
+
+    show (0);
+}
+
+void AdvancedPanel::show (size_t tab)
+{
+    current = juce::jmin (tab, tabs.size() - 1);
+    for (size_t t = 0; t < tabs.size(); ++t)
+    {
+        tabs[t].button->setToggleState (t == current, juce::dontSendNotification);
+        for (auto& control : tabs[t].controls)
+            control->widget()->setVisible (t == current);
+    }
+    resized();
+    repaint();
+}
+
+void AdvancedPanel::paint (juce::Graphics& g)
+{
+    // Same plate and header strip as the other panels.
+    const auto plate = getLocalBounds().toFloat();
+    g.setGradientFill (juce::ColourGradient (Palette::panel.brighter (0.03f), 0.0f, plate.getY(),
+                                             Palette::panel.darker (0.08f), 0.0f, plate.getBottom(), false));
+    g.fillRoundedRectangle (plate, 7.0f);
+    g.setColour (Palette::panelEdge);
+    g.drawRoundedRectangle (plate.reduced (0.5f), 7.0f, 1.0f);
+
+    auto strip = plate.withHeight (22.0f).reduced (1.0f, 1.0f);
+    g.setColour (Palette::header);
+    g.fillRoundedRectangle (strip, 6.0f);
+    g.fillRect (strip.withTrimmedTop (8.0f));
+    g.setColour (Palette::accent);
+    g.setFont (Fonts::ui (11.0f, true));
+    g.drawText ("ADVANCED", strip.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
+
+    // Parameter names above each control.
+    g.setFont (Fonts::ui (10.0f, true, 0.06f));
+    g.setColour (Palette::accent.withAlpha (0.85f));
+    for (auto& control : tabs[current].controls)
+    {
+        const auto r = control->widget()->getBounds();
+        g.drawFittedText (control->name, juce::Rectangle<int> (r.getX() - 10, r.getY() - 18, r.getWidth() + 20, 16),
+                          juce::Justification::centredBottom, 1);
+    }
+}
+
+void AdvancedPanel::resized()
+{
+    if (tabs.empty())
+        return;
+
+    // Tabs across the header strip, right of the title.
+    auto strip = getLocalBounds().removeFromTop (22).reduced (6, 3);
+    strip.removeFromLeft (80);
+    const auto tabWidth = juce::jmin (96, strip.getWidth() / (int) tabs.size());
+    for (auto& tab : tabs)
+        tab.button->setBounds (strip.removeFromLeft (tabWidth).reduced (2, 0));
+
+    // Controls in one row, or two when there are many; a name above each.
+    auto area = getLocalBounds().withTrimmedTop (22).reduced (20, 14);
+    const auto& controls = tabs[current].controls;
+    const auto count = (int) controls.size();
+    const auto rows = count > 7 ? 2 : 1;
+    const auto perRow = (count + rows - 1) / rows;
+    const auto rowHeight = juce::jmin (area.getHeight() / rows, 190);
+    area = area.withSizeKeepingCentre (area.getWidth(), rowHeight * rows); // centred, not stuck to the top
+    const auto cellWidth = area.getWidth() / juce::jmax (1, perRow);
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto cell = juce::Rectangle<int> (area.getX() + (i % perRow) * cellWidth, area.getY() + (i / perRow) * rowHeight,
+                                          cellWidth, rowHeight).reduced (8, 4);
+        cell.removeFromTop (20); // the name
+        auto* widget = controls[(size_t) i]->widget();
+
+        if (controls[(size_t) i]->knob != nullptr)
+        {
+            const auto size = juce::jmin (cell.getWidth(), cell.getHeight(), 110);
+            widget->setBounds (cell.withSizeKeepingCentre (juce::jmin (cell.getWidth(), size + 10), size).withY (cell.getY()));
+        }
+        else
+        {
+            widget->setBounds (cell.withSizeKeepingCentre (juce::jmin (cell.getWidth(), 120), 22).withY (cell.getY() + 24));
+        }
+    }
+}
+
+//==============================================================================
 ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     : AudioProcessorEditor (p),
       processor (p),
       display (p),
       levelMeter (p.getMeters()),
-      devPanel (p),
+      advancedPanel (p.state),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
 {
     setLookAndFeel (&lookAndFeel);
@@ -829,7 +1006,6 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     displayMode.onChange = [this] { display.setMode (displayMode.getSelectedId()); };
     addAndMakeVisible (displayMode);
     addAndMakeVisible (levelMeter);
-    addChildComponent (devPanel);
 
     generateButton.onClick = [this]
     {
@@ -866,14 +1042,14 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     refreshFavourites();
     addAndMakeVisible (keyboard);
 
-    devButton.setClickingTogglesState (true);
-    devButton.onClick = [this]
+    advancedButton.setClickingTogglesState (true);
+    advancedButton.onClick = [this]
     {
-        const auto showDev = devButton.getToggleState();
-        devPanel.setVisible (showDev);
-        display.setVisible (! showDev);
+        advancedPanel.setVisible (advancedButton.getToggleState());
+        advancedPanel.toFront (false);
     };
-    addAndMakeVisible (devButton);
+    addAndMakeVisible (advancedButton);
+    addChildComponent (advancedPanel); // last, so it sits over the panels
 
     keyboard.setColour (juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour (0xffd6daf2));
     keyboard.setColour (juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour (0xff0c0d22));
@@ -977,7 +1153,7 @@ void ZeroEngineEditor::resized()
     outputKnob.label.setBounds (outputArea.removeFromLeft (60));
     outputKnob.knob.setBounds (outputArea);
     top.removeFromRight (12);
-    devButton.setBounds (top.removeFromRight (44).withSizeKeepingCentre (44, 22));
+    advancedButton.setBounds (top.removeFromRight (74).withSizeKeepingCentre (74, 22));
     top.removeFromRight (8);
     typeBox.setBounds (top.removeFromRight (120).withSizeKeepingCentre (120, 22));
     top.removeFromRight (8);
@@ -1021,5 +1197,5 @@ void ZeroEngineEditor::resized()
     display.setBounds (content (displaySection));
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
-    devPanel.setBounds (content (displaySection));
+    advancedPanel.setBounds (displaySection.getUnion (macroSection).getUnion (generateSection));
 }
