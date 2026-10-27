@@ -7,7 +7,7 @@
 
 namespace
 {
-    constexpr int numVoices = 8;
+    constexpr int numVoices = 16;
 }
 
 ZeroEngineProcessor::ZeroEngineProcessor()

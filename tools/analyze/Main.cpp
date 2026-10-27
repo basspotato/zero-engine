@@ -308,6 +308,51 @@ namespace
         std::printf ("Wrote %s\n", outDir.getChildFile ("compare.csv").getFullPathName().toRawUTF8());
     }
 
+    // CPU check: all 16 voices held on a profile, timed per block against the
+    // block's real-time budget. Single core, Release build.
+    void bench (int genre, int type)
+    {
+        ZeroEngineProcessor engine;
+        auto setChoice = [&] (const char* id, int index)
+        {
+            auto* param = engine.state.getParameter (id);
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) index));
+        };
+        setChoice (ParamIDs::genre, genre);
+        setChoice (ParamIDs::type, type);
+        engine.syncProfile();
+
+        engine.setPlayConfigDetails (0, 2, renderRate, renderBlock);
+        engine.prepareToPlay (renderRate, renderBlock);
+
+        juce::AudioBuffer<float> block (2, renderBlock);
+        juce::MidiBuffer midi;
+        for (int v = 0; v < 16; ++v)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 40 + v * 2, (juce::uint8) 100), 0);
+
+        const auto blocks = (int) (10.0 * renderRate / renderBlock);
+        const auto budget = renderBlock / renderRate;
+        double total = 0.0, worst = 0.0;
+
+        for (int b = 0; b < blocks; ++b)
+        {
+            const auto start = juce::Time::getHighResolutionTicks();
+            engine.processBlock (block, midi);
+            const auto seconds = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - start);
+            midi.clear();
+
+            if (b > 10) // skip warm-up
+            {
+                total += seconds;
+                worst = juce::jmax (worst, seconds);
+            }
+        }
+
+        const auto average = total / (blocks - 11);
+        std::printf ("  %-26s avg %5.1f%%  worst %5.1f%% of one core\n", (genreNames[genre] + " / " + typeNames[type]).toRawUTF8(),
+                     100.0 * average / budget, 100.0 * worst / budget);
+    }
+
     juce::File argFile (const juce::StringArray& args, int index, const juce::String& fallback)
     {
         return juce::File::getCurrentWorkingDirectory().getChildFile (args.size() > index ? args[index] : fallback);
@@ -359,6 +404,15 @@ int main (int argc, char* argv[])
     if (command == "compare" && args.size() >= 2)
     {
         compare (analyseFolder (argFile (args, 1, {})), argFile (args, 2, "analysis"));
+        return 0;
+    }
+
+    if (command == "bench")
+    {
+        std::printf ("16 voices held, 48 kHz, %d-sample blocks:\n", renderBlock);
+        for (const auto& [g, t] : { std::pair { "Trance", "Chord" }, { "EDM", "Pad" }, { "Dubstep", "Bass" },
+                                    { "Drum & Bass", "Bass" }, { "Trap", "Bass" }, { "Hardstyle", "Lead" } })
+            bench (genreNames.indexOf (g), typeNames.indexOf (t));
         return 0;
     }
 
