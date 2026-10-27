@@ -122,6 +122,7 @@ private:
     std::atomic<float>& midHighPass;
     float noteHighPassHz = 1000.0f; // high-pass ceiling from the lowest held note, smoothed
     std::atomic<float>& ottDepth;
+    std::atomic<float>& spectral;
     std::atomic<float>& tilt;
     std::atomic<float>& monoFreq;
     std::atomic<float>& stereoWidth;

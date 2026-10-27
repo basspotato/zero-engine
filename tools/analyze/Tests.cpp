@@ -9,6 +9,7 @@
 #include "Tests.h"
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/Parameters.h"
+#include "../../Source/SpectralCompressor.h"
 #include <cstdlib>
 #include <new>
 
@@ -60,12 +61,17 @@ namespace
 
     // Plays a chord of three notes for a second, then 8 s of silence.
     // Returns problems found; empty means it passed.
-    juce::StringArray checkRender (int genre, int type, double rate, int blockSize, juce::int64 generateSeed = 0)
+    juce::StringArray checkRender (int genre, int type, double rate, int blockSize, juce::int64 generateSeed = 0, float spectral = -1.0f)
     {
         ZeroEngineProcessor engine;
         loadProfile (engine, genre, type);
         if (generateSeed != 0)
             engine.generate (generateSeed); // a Generate-button variation instead of the designed profile
+        if (spectral >= 0.0f) // force the spectral stage to this amount
+        {
+            auto* q = engine.state.getParameter (ParamIDs::spectral);
+            q->setValueNotifyingHost (q->convertTo0to1 (spectral));
+        }
         engine.setPlayConfigDetails (0, 2, rate, blockSize);
         engine.prepareToPlay (rate, blockSize);
 
@@ -193,6 +199,52 @@ namespace
         return problems;
     }
 
+    // At 0 the spectral stage must pass the signal through untouched, only
+    // delayed by its latency; at full it must stay finite and sane in level.
+    juce::StringArray checkSpectralStage()
+    {
+        juce::StringArray problems;
+        for (const auto amount : { 0.0f, 1.0f })
+        {
+            SpectralCompressor stage;
+            stage.prepare (48000.0, 2);
+            const auto latency = stage.getLatencySamples();
+            const auto length = 48000;
+
+            juce::Random random (7);
+            juce::AudioBuffer<float> in (2, length), out (2, length);
+            for (int i = 0; i < length; ++i)
+                for (int ch = 0; ch < 2; ++ch)
+                    in.setSample (ch, i, 0.3f * std::sin (0.031f * (float) i * (float) (ch + 1)) + 0.1f * (random.nextFloat() - 0.5f));
+            out.makeCopyOf (in);
+            for (int start = 0; start < length; start += 333) // odd block sizes on purpose
+                {
+                    juce::AudioBuffer<float> chunk (out.getArrayOfWritePointers(), 2, start, juce::jmin (333, length - start));
+                    stage.process (chunk, chunk.getNumSamples(), amount);
+                }
+
+            double error = 0.0, inEnergy = 0.0, outEnergy = 0.0;
+            bool finite = true;
+            for (int i = latency; i < length; ++i)
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    const auto x = in.getSample (ch, i - latency), y = out.getSample (ch, i);
+                    finite = finite && std::isfinite (y);
+                    error += (x - y) * (x - y);
+                    inEnergy += x * x;
+                    outEnergy += y * y;
+                }
+
+            if (! finite)
+                problems.add ("non-finite output at amount " + juce::String (amount));
+            else if (amount == 0.0f && error > inEnergy * 1.0e-8) // under -80 dB
+                problems.add ("not clean at 0: residual " + juce::String (10.0 * std::log10 (error / inEnergy), 1) + " dB");
+            else if (amount > 0.0f && std::abs (10.0 * std::log10 (outEnergy / inEnergy)) > 12.0)
+                problems.add ("level moved more than 12 dB at full");
+        }
+        return problems;
+    }
+
     // A note let go mid-decay must finish its release, whatever the sustain
     // (a zero sustain used to hang the voice forever; a tiny one for minutes).
     juce::StringArray checkReleaseMidDecay()
@@ -316,6 +368,35 @@ int runTests()
         for (const auto& p : problems)
             std::printf ("    %s\n", p.toRawUTF8());
         ++failures;
+    }
+
+    std::printf ("Spectral stage (clean at 0, sane at full)... ");
+    if (const auto problems = checkSpectralStage(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    {
+        std::printf ("All profiles with Spectral at full... ");
+        juce::StringArray report;
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+                for (const auto& problem : checkRender (g, t, 48000.0, 512, 0, 1.0f))
+                    report.add (genreNames[g] + " / " + typeNames[t] + ": " + problem);
+        if (report.isEmpty())
+            std::printf ("ok\n");
+        else
+        {
+            std::printf ("%d problems\n", report.size());
+            for (const auto& line : report)
+                std::printf ("    %s\n", line.toRawUTF8());
+            failures += report.size();
+        }
     }
 
     std::printf ("Release mid-decay... ");

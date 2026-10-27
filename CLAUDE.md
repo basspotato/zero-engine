@@ -36,7 +36,8 @@ Output goes to `analysis/` by default (git-ignored).
 - `Source/Profiles.*`: the 72 designed profiles (type template, genre shift, signatures, `applyResearchedGaps`), `generateProfile` for Generate
 - `Source/SynthVoice.*`: voice DSP (wavetables, unison, filter, envelopes, tempo-synced LFO)
 - `Source/Wavetable.*`: wavetable banks, including the Jupiter bank from `JupiterHarmonics.h`
-- `Source/FinishingChain.*`: saturation, OTT, EQ, width, clipper, meters
+- `Source/FinishingChain.*`: saturation, OTT, EQ, width, spectral stage, clipper, meters
+- `Source/SpectralCompressor.*`: our own many-band (256-bin STFT) up/down compressor, level-neutral, leaves < 150 Hz alone; adds 512 samples of latency
 - `Source/MacroMap.h`: what each macro pushes per profile; the mod wheel adds to Motion
 - `Source/PluginProcessor.*`: synth, finishing chain, state, Generate (render-and-check), history, favourites (`%APPDATA%/Zero Engine/Favourites`)
 - `Source/PluginEditor.*`: UI (look and feel, display, meter, tesseract, Advanced page); laid out at 900 x 600 and scaled with the window

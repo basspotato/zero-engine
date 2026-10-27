@@ -77,6 +77,7 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
     oversampling = std::make_unique<juce::dsp::Oversampling<float>> (
         (size_t) channels, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
     oversampling->initProcessing ((size_t) maxBlock);
+    spectral.prepare (fs, channels);
 
     drive.reset (fs * 2.0, 0.02);
     bias.reset (fs * 2.0, 0.02);
@@ -141,6 +142,7 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
 
 void FinishingChain::reset()
 {
+    spectral.reset();
     if (oversampling != nullptr)
         oversampling->reset();
 
@@ -171,7 +173,7 @@ void FinishingChain::reset()
 
 int FinishingChain::getLatencySamples() const
 {
-    return oversampling != nullptr ? juce::roundToInt (oversampling->getLatencyInSamples()) : 0;
+    return (oversampling != nullptr ? juce::roundToInt (oversampling->getLatencyInSamples()) : 0) + spectral.getLatencySamples();
 }
 
 void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingSettings& s, const float* sub)
@@ -238,6 +240,8 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
             for (int ch = 0; ch < chunk.getNumChannels(); ++ch)
                 juce::FloatVectorOperations::addWithMultiply (chunk.getWritePointer (ch), sub + start, cleanSubGain, n);
 
+        // The spectral stage sits after the clean sub joins, so sub and mids share its delay.
+        spectral.process (chunk, n, s.spectral);
         clipAndGain (chunk, n);
     }
 

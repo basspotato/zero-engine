@@ -259,7 +259,7 @@ namespace
             p.modToPos = 0.0f;
             p.filterMode = 0.0f; p.filterCutoff = 4500.0f;
             p.lfoRate = 0.2f; p.lfoToPos = 0.15f;
-            p.grit = 0.05f; p.ottDepth = 0.2f; p.air = 0.35f; p.tilt = 1.5f; p.levelTrim = 5.0f;
+            p.grit = 0.05f; p.ottDepth = 0.2f; p.air = 0.35f; p.tilt = 1.5f; p.levelTrim = 4.5f; // 5 clipped with Spectral at full
             p.reverbMix = 0.4f;
         }
 
@@ -643,6 +643,13 @@ Profile makeProfile (int genre, int type)
 
     applySpace (p, genre, type);
     applySignature (p, genre, type);
+
+    // Spectral stage: a light, level-neutral polish everywhere, more on dense
+    // basses and wide chords (it never touches anything below 150 Hz).
+    constexpr float spectralByType[] { 0.3f, 0.2f, 0.3f, 0.2f, 0.15f, 0.1f };
+    p.spectral = spectralByType[juce::jlimit (0, 5, type)]
+               + ((genre == dubstep || genre == drumAndBass) && type == bass ? 0.1f : 0.0f)
+               + ((genre == futureBass || genre == trance) && type == chord ? 0.1f : 0.0f);
     p.directions = macroDirections (genre, type);
 
     if (genre >= 0 && genre < 12 && type >= 0 && type < 6 && profileTrims[genre][type].tuned)
@@ -807,6 +814,7 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
 
     set (ParamIDs::levelTrim,   p.levelTrim);
     set (ParamIDs::ottDepth,    p.ottDepth);
+    set (ParamIDs::spectral,    p.spectral);
     set (ParamIDs::tilt,        p.tilt);
     set (ParamIDs::monoFreq,    p.monoFreq);
     set (ParamIDs::stereoWidth, p.stereoWidth);

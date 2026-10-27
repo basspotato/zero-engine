@@ -868,7 +868,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
         { "MIX",    { { { "SUB",          { subOn, subOctave, subSplit, midHighPass } },
                         { "PLAY",         { playMode, glide, bendRange, velSens } } },
                       { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
-                        { "FINISH",       { ottDepth, tilt, monoFreq, stereoWidth, levelTrim } } } } },
+                        { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
     };
 
     auto makeControl = [&] (const char* id) -> std::unique_ptr<Control>

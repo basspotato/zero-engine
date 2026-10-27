@@ -24,6 +24,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
       subOn (*state.getRawParameterValue (ParamIDs::subOn)),
       midHighPass (*state.getRawParameterValue (ParamIDs::midHighPass)),
       ottDepth (*state.getRawParameterValue (ParamIDs::ottDepth)),
+      spectral (*state.getRawParameterValue (ParamIDs::spectral)),
       tilt (*state.getRawParameterValue (ParamIDs::tilt)),
       monoFreq (*state.getRawParameterValue (ParamIDs::monoFreq)),
       stereoWidth (*state.getRawParameterValue (ParamIDs::stereoWidth)),
@@ -287,6 +288,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     FinishingSettings settings;
     settings.grit     = grit.load();
     settings.ottDepth = juce::jlimit (0.0f, 1.0f, ottDepth.load() + macroMap.offset (MacroTarget::ottDepth));
+    settings.spectral = spectral.load();
     settings.tiltDb   = juce::jlimit (-6.0f, 6.0f, tilt.load() + macroMap.offset (MacroTarget::tilt));
     settings.air      = air.load();
     settings.monoFreq = monoFreq.load();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_dsp/juce_dsp.h>
+#include "SpectralCompressor.h"
 
 // Per-instrument finishing chain, in order:
 // saturation (Grit) > delay + reverb > 3-band upward+downward compression
@@ -14,6 +15,7 @@ struct FinishingSettings
     float reverbMix     = 0.0f; // 0..1
     float reverbSize    = 0.6f;
     float ottDepth  = 0.0f; // 0..1
+    float spectral  = 0.0f; // 0..1, the many-band stage just before the clipper
     float tiltDb    = 0.0f; // +/- dB around a 1 kHz pivot
     float air       = 0.0f; // 0..1
     float monoFreq  = 120.0f;
@@ -84,6 +86,7 @@ private:
     int channels = 2;
 
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
+    SpectralCompressor spectral;
     juce::SmoothedValue<float> drive, bias, sideGain, outputGain;
     float dcState[2] {}, dcPrev[2] {}, dcCoeff = 0.999f;
 

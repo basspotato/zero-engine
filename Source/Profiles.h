@@ -42,6 +42,7 @@ struct Profile
 
     // Finishing chain.
     float levelTrim, ottDepth, tilt, monoFreq, stereoWidth;
+    float spectral; // the many-band stage, 0..1
 
     // What each macro pushes besides its main job.
     MacroDirections directions;

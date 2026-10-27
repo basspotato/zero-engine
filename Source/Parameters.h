@@ -72,6 +72,7 @@ namespace ParamIDs
     // Finishing chain.
     inline constexpr auto levelTrim   = "levelTrim"; // per-profile loudness match, before Output
     inline constexpr auto ottDepth    = "ottDepth";
+    inline constexpr auto spectral    = "spectral";    // many-band compression before the clipper
     inline constexpr auto tilt        = "tilt";
     inline constexpr auto monoFreq    = "monoFreq";
     inline constexpr auto stereoWidth = "stereoWidth";
@@ -191,6 +192,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
                                                        NormalisableRange<float> (-18.0f, 12.0f), 0.0f,
                                                        AudioParameterFloatAttributes().withLabel ("dB")));
     unit (ParamIDs::ottDepth, "OTT Depth", 0.35f);
+    unit (ParamIDs::spectral, "Spectral", 0.0f);
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::tilt, 1 }, "Tilt",
                                                        NormalisableRange<float> (-6.0f, 6.0f), 0.0f,
                                                        AudioParameterFloatAttributes().withLabel ("dB")));
