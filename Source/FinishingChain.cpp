@@ -15,6 +15,7 @@ namespace
     constexpr float floorFadeDb  = 12.0f;  // full upward gain from -48 dB
 
     constexpr float clipKnee = 0.8f;
+    constexpr float cleanSubGain = 2.5f; // +8 dB, see process()
 
     float coeffFor (double seconds, double fs) { return (float) (1.0 - std::exp (-1.0 / (seconds * fs))); }
 }
@@ -228,9 +229,12 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
         equalise (chunk, n, s);
         widen (chunk, n);
 
+        // The mixed path ran the sub through Grit's drive, which raised it a lot;
+        // the clean sub gets a fixed lift instead, putting full Weight around
+        // -6 dBFS peak, below the clipper's knee so it stays clean.
         if (sub != nullptr)
             for (int ch = 0; ch < chunk.getNumChannels(); ++ch)
-                juce::FloatVectorOperations::add (chunk.getWritePointer (ch), sub + start, n);
+                juce::FloatVectorOperations::addWithMultiply (chunk.getWritePointer (ch), sub + start, cleanSubGain, n);
 
         clipAndGain (chunk, n);
     }

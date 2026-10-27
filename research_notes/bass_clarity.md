@@ -15,7 +15,9 @@ Every modern bass-music guide agrees on one structure:
 
 Each voice adds its sine sub to the oscillator output before the finishing chain, so the sub goes through Grit's saturation and the OTT with everything else. Mono-below-120 Hz keeps it mono, but it isn't clean or separate.
 
-**Proposed fix (not built yet):** split each voice into two signals.
+**Built in b6b1794 and rolled out after it** (Sub Split and Mid High-Pass in the Dev panel). On: dubstep, DnB, hardstyle, tech house (120 Hz); EDM, future bass, house, pop (90 Hz); trap 808 (80 Hz). Off for now: synthwave (single analog layer) and techno, whose loudness came from the driven sub: split, it measured about 6 LUFS quieter because a clean sine has none of the harmonics the saturation used to add. The clean sub gets a fixed +8 dB so full Weight peaks around -6 dBFS, under the clipper's knee.
+
+The original proposal: split each voice into two signals.
 - **Sub:** sine at the note (or an octave down), skips saturation, space and OTT, and rejoins just before the soft clipper, mono.
 - **Mid/top:** the wavetable layers, high-passed at a profile-set frequency (default ~120 Hz for basses), then the whole finishing chain.
 - No new main-screen controls: Weight still sets the sub level and Grit still drives the mids. One Dev value per profile: the mid-layer high-pass frequency.

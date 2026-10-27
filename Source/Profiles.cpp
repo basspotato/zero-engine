@@ -40,6 +40,7 @@ namespace
                 p.ottDepth = 0.45f; p.tilt = -1.0f; p.monoFreq = 150.0f; p.stereoWidth = 0.8f;
                 p.subOctave = 0.0f; // an octave below a bass note is inaudible and just eats headroom
                 p.playMode = 2.0f;  // legato: basses play one note at a time
+                p.subSplit = 1.0f;  // clean sub, dirty mids (research_notes/bass_clarity.md)
                 break;
 
             case lead:
@@ -166,7 +167,6 @@ namespace
 
                 case dubstep: // classic wobble: the LFO sweeps the Basic shapes
                     p.lfoRate = 3.0f; p.lfoShape = sine; p.lfoToPos = 0.7f;
-                    p.subSplit = 1.0f; // clean sub, dirty mids (research_notes/bass_clarity.md)
                     break;
 
                 case drumAndBass: // deep rolling reese: darker detuned wave over a heavy sub
@@ -189,6 +189,18 @@ namespace
 
                 default:
                     break;
+            }
+
+            // Where the mid layer starts (bass_clarity.md table): lighter genres keep
+            // more body in the mids; the 808 keeps its distorted harmonics over a
+            // clean sub; synthwave stays a single analog-style layer.
+            switch (genre)
+            {
+                case edm: case futureBass: case house: case pop: p.midHighPass = 90.0f; break;
+                case trap:                                      p.midHighPass = 80.0f; break;
+                case synthwave:                                 p.subSplit = 0.0f; break;
+                case techno:                                    p.subSplit = 0.0f; break; // its loudness comes from the driven sub; references will decide
+                default:                                        break; // 120 Hz
             }
         }
 
