@@ -45,10 +45,17 @@ target_link_libraries(ZeroEngine
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+        ZeroEngineFonts
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# UI fonts (SIL Open Font License, see Resources/Fonts/OFL-*.txt), from Potato Kicker.
+juce_add_binary_data(ZeroEngineFonts SOURCES
+    Resources/Fonts/BarlowCondensed-SemiBold.ttf
+    Resources/Fonts/BarlowCondensed-Bold.ttf
+    Resources/Fonts/ShareTechMono-Regular.ttf)
 
 # Offline tool: measures reference sounds and engine renders (loudness,
 # brightness, bass, width). Builds the engine sources directly so renders
@@ -75,12 +82,14 @@ target_compile_definitions(ZeroAnalyze
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
-        JucePlugin_Name="Zero Engine")
+        JucePlugin_Name="Zero Engine"
+        JUCE_MODAL_LOOPS_PERMITTED=1) # snapshot pumps the message loop so editor timers run
 
 target_link_libraries(ZeroAnalyze
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+        ZeroEngineFonts
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)

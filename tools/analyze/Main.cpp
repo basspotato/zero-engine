@@ -299,6 +299,44 @@ int main (int argc, char* argv[])
                                argFile (args, 2, "analysis/freesound/refs"),
                                args.size() > 3 ? args[3].getIntValue() : 450);
 
+    if (command == "snapshot" && args.size() >= 2)
+    {
+        // The editor as a PNG, after playing a chord through the engine so the
+        // meters and scope have something to show. For checking layout by eye.
+        ZeroEngineProcessor engine;
+        engine.setPlayConfigDetails (0, 2, renderRate, renderBlock);
+        engine.prepareToPlay (renderRate, renderBlock);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (engine.createEditor());
+
+        juce::AudioBuffer<float> block (2, renderBlock);
+        juce::MidiBuffer midi;
+        for (int i = 0; i < 60; ++i)
+        {
+            midi.clear();
+            if (i == 0)
+                for (auto note : { 48, 55, 60 })
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), 0);
+            engine.processBlock (block, midi);
+        }
+
+        // Let the editor's timers pick up the meters a few times.
+        for (int i = 0; i < 20; ++i)
+        {
+            engine.processBlock (block, midi);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+        }
+
+        std::printf ("Live wavetable position %.3f (knob %.3f)\n", engine.getLivePosition(),
+                     engine.state.getRawParameterValue (ParamIDs::wavePos)->load());
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds());
+        juce::FileOutputStream out (argFile (args, 1, {}));
+        out.setPosition (0);
+        out.truncate();
+        juce::PNGImageFormat().writeImageToStream (image, out);
+        std::printf ("Wrote %s\n", argFile (args, 1, {}).getFullPathName().toRawUTF8());
+        return 0;
+    }
+
     if (command == "harmonics" && args.size() >= 3)
     {
         juce::StringArray files;

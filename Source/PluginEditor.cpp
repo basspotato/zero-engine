@@ -1,187 +1,775 @@
 #include "PluginEditor.h"
 #include "Parameters.h"
+#include "Wavetable.h"
+#include "BinaryData.h"
 
 namespace Palette
 {
-    const juce::Colour background { 0xff121418 };
-    const juce::Colour panel      { 0xff1c1f26 };
-    const juce::Colour accent     { 0xff36d6c3 };
-    const juce::Colour text       { 0xffd8dde6 };
-    const juce::Colour warn       { 0xffffa94d };
-    const juce::Colour track      { 0xff2a2e38 };
+    // Flat, muted slate-navy hardware with a hint of purple; light-blue LEDs and
+    // screens; orange-to-yellow rings.
+    const juce::Colour backgroundTop    { 0xff181a2b };
+    const juce::Colour backgroundBottom { 0xff1c1a2e };
+    const juce::Colour panel      { 0xff23263a };
+    const juce::Colour panelEdge  { 0xff34384f };
+    const juce::Colour header     { 0xff2b2f47 };
+    const juce::Colour screen     { 0xff0b0c15 };
+    const juce::Colour accent     { 0xff72c9e6 }; // light blue
+    const juce::Colour orange     { 0xffff7417 };
+    const juce::Colour yellow     { 0xffffc531 };
+    const juce::Colour text       { 0xffdfe4ff };
+    const juce::Colour warn       { 0xffff9a2e };
+    const juce::Colour track      { 0xff141621 };
+    const juce::Colour clip       { 0xffff4a4a };
+}
+
+// Potato Kicker's type: Barlow Condensed for labels, Share Tech Mono for numbers.
+namespace Fonts
+{
+    struct Faces
+    {
+        juce::Typeface::Ptr semi = juce::Typeface::createSystemTypefaceFor (BinaryData::BarlowCondensedSemiBold_ttf, BinaryData::BarlowCondensedSemiBold_ttfSize);
+        juce::Typeface::Ptr bold = juce::Typeface::createSystemTypefaceFor (BinaryData::BarlowCondensedBold_ttf, BinaryData::BarlowCondensedBold_ttfSize);
+        juce::Typeface::Ptr mono = juce::Typeface::createSystemTypefaceFor (BinaryData::ShareTechMonoRegular_ttf, BinaryData::ShareTechMonoRegular_ttfSize);
+    };
+
+    const Faces& faces()
+    {
+        static Faces f;
+        return f;
+    }
+
+    // Condensed faces read small, so heights run a little larger than the old sans.
+    juce::FontOptions ui (float height, bool bold = false, float kerning = 0.04f)
+    {
+        return juce::FontOptions().withTypeface (bold ? faces().bold : faces().semi).withHeight (height * 1.2f).withKerningFactor (kerning);
+    }
+
+    juce::FontOptions mono (float height)
+    {
+        return juce::FontOptions().withTypeface (faces().mono).withHeight (height * 1.1f);
+    }
+}
+
+namespace
+{
+    // A dark recessed screen with a faint light-blue glass edge, for the display,
+    // meter and generate panels.
+    void fillScreen (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        g.setGradientFill (juce::ColourGradient (Palette::screen.brighter (0.12f), 0.0f, r.getY(),
+                                                 Palette::screen, 0.0f, r.getBottom(), false));
+        g.fillRoundedRectangle (r, 5.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 5.0f, 1.0f);
+        g.setColour (Palette::accent.withAlpha (0.12f));
+        g.drawRoundedRectangle (r.reduced (1.5f), 4.0f, 1.0f);
+    }
 }
 
 //==============================================================================
-DisplayPanel::DisplayPanel (const FinishingChain::Meters& m)
+ZeroLookAndFeel::ZeroLookAndFeel()
+{
+    setColour (juce::ComboBox::backgroundColourId, Palette::screen);
+    setColour (juce::ComboBox::outlineColourId, Palette::panelEdge);
+    setColour (juce::ComboBox::textColourId, Palette::accent);
+    setColour (juce::ComboBox::arrowColourId, Palette::accent);
+    setColour (juce::PopupMenu::backgroundColourId, Palette::panel);
+    setColour (juce::PopupMenu::textColourId, Palette::text);
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, Palette::header);
+    setColour (juce::PopupMenu::highlightedTextColourId, Palette::yellow);
+    setColour (juce::TextButton::buttonColourId, Palette::screen);
+    setColour (juce::TextButton::buttonOnColourId, Palette::header);
+    setColour (juce::TextButton::textColourOffId, Palette::accent);
+    setColour (juce::TextButton::textColourOnId, Palette::yellow);
+    setColour (juce::Label::textColourId, Palette::accent);
+    setColour (juce::TooltipWindow::backgroundColourId, Palette::panel);
+    setColour (juce::TooltipWindow::textColourId, Palette::text);
+}
+
+void ZeroLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
+                                    int, int, int, int, juce::ComboBox& box)
+{
+    const auto r = juce::Rectangle<float> ((float) width, (float) height).reduced (0.5f);
+    const auto hover = box.isMouseOver (true) || isButtonDown;
+
+    g.setColour (Palette::screen.withAlpha (0.85f));
+    g.fillRoundedRectangle (r, 3.0f);
+    g.setColour (hover ? Palette::accent.withAlpha (0.6f) : Palette::panelEdge);
+    g.drawRoundedRectangle (r, 3.0f, 1.0f);
+
+    // Small chevron.
+    const auto cx = (float) width - 9.0f, cy = (float) height * 0.5f;
+    juce::Path chevron;
+    chevron.startNewSubPath (cx - 3.5f, cy - 1.5f);
+    chevron.lineTo (cx, cy + 2.0f);
+    chevron.lineTo (cx + 3.5f, cy - 1.5f);
+    g.setColour (hover ? Palette::yellow : Palette::accent.withAlpha (0.8f));
+    g.strokePath (chevron, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
+void ZeroLookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
+{
+    label.setBounds (7, 0, box.getWidth() - 22, box.getHeight());
+    label.setFont (getComboBoxFont (box));
+}
+
+juce::Font ZeroLookAndFeel::getComboBoxFont (juce::ComboBox& box)
+{
+    return Fonts::ui (juce::jmin (12.0f, (float) box.getHeight() * 0.62f), false, 0.06f);
+}
+
+juce::Font ZeroLookAndFeel::getPopupMenuFont()
+{
+    return Fonts::ui (12.5f, false, 0.04f);
+}
+
+juce::Font ZeroLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)
+{
+    return Fonts::ui (juce::jmin (12.0f, (float) buttonHeight * 0.62f), true, 0.08f);
+}
+
+void ZeroLookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int width, int height)
+{
+    g.fillAll (Palette::panel);
+    g.setColour (Palette::panelEdge);
+    g.drawRect (0, 0, width, height);
+}
+
+void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float position,
+                                        float startAngle, float endAngle, juce::Slider& slider)
+{
+    using juce::MathConstants;
+
+    // Backlit light-pipe ring and lit scale (from Potato Kicker) around a machined
+    // black knob. The lit part fades orange to yellow along the travel, and the
+    // whole light gets brighter as the knob turns up.
+    const auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat();
+    const auto size = juce::jmin (bounds.getWidth(), bounds.getHeight());
+    const auto centre = bounds.getCentre();
+    const auto n = juce::jlimit (0.0f, 1.0f, position);
+    const auto k = 0.3f + 0.7f * n; // light intensity
+    const auto big = size >= 84.0f;
+
+    const auto outer = size * 0.5f - 1.5f;
+    const auto bodyRadius = size * (big ? 0.25f : 0.3f);
+    const auto pipe = juce::jmax (2.0f, size * 0.036f);
+    const auto ringRadius = bodyRadius + pipe * 0.5f + size * 0.04f;
+
+    auto ramp = [] (float t) { return Palette::orange.interpolatedWith (Palette::yellow, juce::jlimit (0.0f, 1.0f, t)); };
+    auto angleAt = [&] (float t) { return startAngle + t * (endAngle - startAngle); };
+    auto box = [&] (float r) { return juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (centre); };
+
+    // Arc from t0 to t1 of the travel, in short segments shaded along the ramp.
+    auto rampArc = [&] (float t0, float t1, float thickness, float alpha, float bright = 0.0f)
+    {
+        const auto segments = juce::jmax (2, (int) ((t1 - t0) * 40.0f));
+        for (int i = 0; i < segments; ++i)
+        {
+            const auto a = t0 + (t1 - t0) * (float) i / (float) segments;
+            const auto b = t0 + (t1 - t0) * (float) (i + 1) / (float) segments;
+            juce::Path p;
+            p.addCentredArc (centre.x, centre.y, ringRadius, ringRadius, 0.0f, angleAt (a), angleAt (b) + 0.005f, true);
+            g.setColour (ramp (0.5f * (a + b)).brighter (bright).withAlpha (juce::jlimit (0.0f, 1.0f, alpha)));
+            g.strokePath (p, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+        }
+    };
+
+    // Scale ticks: lit (with a glow) up to the value, dim beyond.
+    if (size > 40.0f)
+        for (int i = 0; i <= 40; ++i)
+        {
+            const auto major = i % 4 == 0;
+            const auto t = (float) i / 40.0f;
+            const auto a = angleAt (t);
+            const auto inner = centre.getPointOnCircumference (major ? outer - 5.5f : outer - 3.0f, a);
+            const auto tip = centre.getPointOnCircumference (outer, a);
+            if (n > 0.001f && t <= n + 0.0001f)
+            {
+                g.setColour (ramp (t).withAlpha (0.35f * k));
+                g.drawLine ({ inner, tip }, major ? 4.0f : 3.0f);
+                g.setColour (ramp (t).brighter (0.35f));
+                g.drawLine ({ inner, tip }, major ? 1.5f : 1.0f);
+            }
+            else
+            {
+                g.setColour (Palette::text.withAlpha (major ? 0.45f : 0.22f));
+                g.drawLine ({ inner, tip }, major ? 1.3f : 0.8f);
+            }
+        }
+
+    // 0-10 numbers on the big knobs, lit up to the value.
+    if (big)
+    {
+        const auto numberRadius = 0.5f * ((ringRadius + pipe * 0.5f + 1.2f) + (outer - 5.5f));
+        g.setFont (Fonts::ui (size * 0.095f, true));
+        for (int j = 0; j <= 10; ++j)
+        {
+            const auto t = (float) j / 10.0f;
+            const auto lit = n > 0.001f && t <= n + 0.0001f;
+            g.setColour (lit ? ramp (t).brighter (0.55f) : Palette::text.withAlpha (0.35f));
+            g.drawText (juce::String (j), juce::Rectangle<float> (14.0f, 11.0f).withCentre (centre.getPointOnCircumference (numberRadius, angleAt (t))),
+                        juce::Justification::centred, false);
+        }
+    }
+
+    // Groove, the dim backlit ring over the whole travel, then the lit value arc
+    // with layered bloom and a bright tip.
+    g.setColour (juce::Colour (0xff040306));
+    g.drawEllipse (box (ringRadius), pipe + 3.0f);
+    rampArc (0.0f, 1.0f, pipe * 0.8f, 0.10f + 0.12f * k);
+    if (n > 0.001f)
+    {
+        rampArc (0.0f, n, pipe * 4.0f, 0.12f * k);
+        rampArc (0.0f, n, pipe * 2.3f, 0.28f * k);
+        rampArc (0.0f, n, pipe * 1.1f, 0.65f + 0.35f * k);
+        rampArc (0.0f, n, pipe * 0.6f, 1.0f, 0.45f);
+        const auto tip = centre.getPointOnCircumference (ringRadius, angleAt (n));
+        g.setColour (ramp (n).brighter (0.6f).withAlpha (0.35f));
+        g.fillEllipse (juce::Rectangle<float> (pipe * 3.2f, pipe * 3.2f).withCentre (tip));
+        g.setColour (juce::Colour (0xfffff4d6));
+        g.fillEllipse (juce::Rectangle<float> (pipe * 1.3f, pipe * 1.3f).withCentre (tip));
+    }
+
+    // Light spilling onto the knob's edge.
+    g.setColour (ramp (n).withAlpha (0.12f + 0.3f * k));
+    g.drawEllipse (box (bodyRadius + 2.2f), 1.6f);
+
+    // The machined body, lit from the upper left: cast shadow, knurled skirt,
+    // bevelled rim, a cap with fine turning rings and a highlight.
+    const auto body = box (bodyRadius);
+    const auto light = centre.translated (-bodyRadius * 0.45f, -bodyRadius * 0.55f);
+
+    for (int i = 4; i >= 1; --i)
+    {
+        const auto spread = (float) i * bodyRadius * 0.05f;
+        g.setColour (juce::Colours::black.withAlpha (0.12f));
+        g.fillEllipse (body.translated (spread * 0.5f, spread * 0.9f).expanded (spread));
+    }
+
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c2e38), light.x, light.y,
+                                             juce::Colour (0xff050507), centre.x + bodyRadius, centre.y + bodyRadius, true));
+    g.fillEllipse (body);
+    constexpr int ridges = 40;
+    for (int i = 0; i < ridges; ++i)
+    {
+        const auto a = MathConstants<float>::twoPi * (float) i / ridges;
+        const auto lit = 0.5f + 0.5f * std::cos (a + MathConstants<float>::pi * 0.25f); // brightest upper left
+        g.setColour (juce::Colours::white.withAlpha (0.03f + 0.12f * lit));
+        g.drawLine ({ centre.getPointOnCircumference (bodyRadius * 0.86f, a), centre.getPointOnCircumference (bodyRadius * 0.99f, a) }, 1.0f);
+    }
+
+    const auto cap = body.reduced (bodyRadius * 0.16f);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff5a5d6c), cap.getX(), cap.getY(),
+                                             juce::Colour (0xff060608), cap.getRight(), cap.getBottom(), false));
+    g.fillEllipse (cap.expanded (bodyRadius * 0.05f));
+
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3c3e4a), light.x, light.y,
+                                             juce::Colour (0xff0a0a0e), cap.getRight(), cap.getBottom(), true));
+    g.fillEllipse (cap);
+    g.setColour (juce::Colours::white.withAlpha (0.035f));
+    for (float r = 0.2f; r < 1.0f; r += 0.12f)
+        g.drawEllipse (cap.reduced (cap.getWidth() * 0.5f * (1.0f - r)), 0.8f);
+
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.32f), light.x, light.y,
+                                             juce::Colours::transparentWhite, light.x + bodyRadius * 0.55f, light.y + bodyRadius * 0.55f, true));
+    g.fillEllipse (cap.reduced (cap.getWidth() * 0.06f));
+
+    // Pointer: a lit line in the ramp colour for the current position, in a dark groove.
+    const auto from = centre.getPointOnCircumference (bodyRadius * 0.15f, angleAt (n));
+    const auto to = centre.getPointOnCircumference (bodyRadius * 0.95f, angleAt (n));
+    const auto thickness = juce::jmax (2.0f, size * 0.026f);
+    g.setColour (juce::Colours::black.withAlpha (0.8f));
+    g.drawLine ({ from, to }, thickness + 2.0f);
+    g.setColour (ramp (n).withAlpha (0.25f + 0.4f * k));
+    g.drawLine ({ from, to }, 5.0f);
+    g.setColour (juce::Colour (0xfffff1d8));
+    g.drawLine ({ from, to }, thickness);
+
+    // Value readout in the gap at the bottom of the travel, brighter while dragging.
+    if (big)
+    {
+        const auto dragging = slider.isMouseButtonDown();
+        g.setColour (dragging ? ramp (n).brighter (0.4f) : Palette::text.withAlpha (0.55f));
+        g.setFont (Fonts::mono (size * 0.1f));
+        // 0..1 macros read on the 0-10 scale printed round the knob; others in their own units.
+        const auto unitRange = slider.getMinimum() == 0.0 && slider.getMaximum() == 1.0;
+        const auto text = unitRange ? juce::String (slider.getValue() * 10.0, 1) : slider.getTextFromValue (slider.getValue());
+        g.drawText (text,
+                    juce::Rectangle<float> (size * 0.6f, size * 0.12f).withCentre ({ centre.x, centre.y + outer - size * 0.06f }),
+                    juce::Justification::centred, false);
+    }
+}
+
+//==============================================================================
+TesseractButton::TesseractButton()
+    : juce::Button ("Generate")
+{
+    startTimerHz (60);
+}
+
+void TesseractButton::fold()
+{
+    foldStart = juce::Time::getMillisecondCounterHiRes();
+}
+
+void TesseractButton::timerCallback()
+{
+    constexpr double foldMs = 900.0;
+
+    if (foldStart >= 0.0)
+    {
+        foldProgress = (float) juce::jlimit (0.0, 1.0, (juce::Time::getMillisecondCounterHiRes() - foldStart) / foldMs);
+        if (foldProgress >= 1.0f)
+        {
+            foldStart = -1.0;
+            foldProgress = 0.0f;
+        }
+    }
+
+    angle += 0.008f + 0.12f * std::sin (juce::MathConstants<float>::pi * foldProgress); // spins up mid-fold
+    if (isShowing())
+        repaint();
+}
+
+void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    using juce::MathConstants;
+
+    auto bounds = getLocalBounds().toFloat();
+    fillScreen (g, bounds);
+
+    auto hint = bounds.removeFromBottom (18.0f);
+    g.setColour ((highlighted ? Palette::yellow : Palette::text).withAlpha (highlighted ? 0.9f : 0.45f));
+    g.setFont (Fonts::ui (9.0f, true));
+    g.drawText ("CLICK FOR A NEW SOUND", hint, juce::Justification::centred);
+
+    // Fold: shrink towards the centre while turning a half turn through w (the
+    // outer cube passes through the inner one), then open out again.
+    const auto pulse = std::sin (MathConstants<float>::pi * foldProgress);
+    const auto shrink = 1.0f - 0.7f * pulse - (down ? 0.08f : 0.0f);
+    const auto wTurn = angle + MathConstants<float>::pi * foldProgress;
+
+    const auto centre = bounds.getCentre();
+    const auto radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.38f * shrink;
+
+    // The 16 corners of a 4D cube, turned in the xw and yw planes, then zx;
+    // projected 4D -> 3D -> 2D with perspective.
+    juce::Point<float> points[16];
+    float depth[16];
+    for (int i = 0; i < 16; ++i)
+    {
+        float x = (i & 1) ? 1.0f : -1.0f, y = (i & 2) ? 1.0f : -1.0f;
+        float z = (i & 4) ? 1.0f : -1.0f, w = (i & 8) ? 1.0f : -1.0f;
+
+        auto turn = [] (float& a, float& b, float t)
+        {
+            const auto c = std::cos (t), s = std::sin (t);
+            const auto a2 = a * c - b * s;
+            b = a * s + b * c;
+            a = a2;
+        };
+        turn (x, w, wTurn);
+        turn (y, w, wTurn * 0.7f);
+        turn (z, x, angle * 0.5f);
+
+        const auto f4 = 2.2f / (3.0f - w);
+        x *= f4; y *= f4; z *= f4;
+        const auto f3 = 2.5f / (4.0f - z);
+        points[i] = { centre.x + x * f3 * radius, centre.y + y * f3 * radius };
+        depth[i] = w;
+    }
+
+    // Edges join corners that differ in one coordinate; nearer in w is brighter.
+    // Light blue at rest, flaring orange to yellow through the fold, with a glow pass.
+    const auto glow = highlighted ? 1.0f : 0.75f;
+    const auto colour = Palette::accent.interpolatedWith (Palette::orange.interpolatedWith (Palette::yellow, pulse), pulse);
+    for (const auto pass : { 0, 1 })
+        for (int a = 0; a < 16; ++a)
+            for (int bit = 1; bit < 16; bit <<= 1)
+                if (const auto b = a | bit; b != a)
+                {
+                    const auto near = juce::jlimit (0.15f, 1.0f, (0.5f + 0.25f * (depth[a] + depth[b]) * 0.5f) * glow + 0.4f * pulse);
+                    g.setColour (colour.withAlpha (pass == 0 ? near * 0.15f : near));
+                    g.drawLine ({ points[a], points[b] }, (pass == 0 ? 5.0f : 1.4f) + 1.2f * pulse);
+                }
+}
+
+//==============================================================================
+namespace
+{
+    constexpr float meterFloorDb = -60.0f;
+
+    // dB to 0..1 up a meter: finer near the top, where mixing decisions happen.
+    float meterFraction (float db)
+    {
+        const auto x = juce::jlimit (0.0f, 1.0f, (db - meterFloorDb) / -meterFloorDb);
+        return std::pow (x, 1.6f);
+    }
+
+    juce::String dbText (float db)
+    {
+        return db <= -99.0f ? juce::String ("-inf") : juce::String (db, 1);
+    }
+}
+
+LevelMeter::LevelMeter (const FinishingChain::Meters& m)
     : meters (m)
 {
     startTimerHz (30);
 }
 
-void DisplayPanel::timerCallback()
+void LevelMeter::timerCallback()
 {
-    auto ease = [] (float& v, float target) { v += 0.25f * (target - v); };
+    constexpr float frameMs = 1000.0f / 30.0f;
 
-    ease (drive, meters.driveDb.load());
-    for (int b = 0; b < 3; ++b)
-        ease (bands[b], meters.bandGainDb[b].load());
-    ease (tilt, meters.tiltDb.load());
-    ease (air, meters.airDb.load());
-    ease (monoFreq, meters.monoFreq.load());
-    ease (width, meters.width.load());
-    ease (rms, meters.rmsDb.load());
-    ease (momentary, meters.momentaryLufs.load());
-    shortTerm = meters.shortTermLufs.load(); // already a 3 s average
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        // Peak: instant rise, ~20 dB/s fall. RMS: eased.
+        const auto newPeak = meters.channelPeakDb[ch].load();
+        peak[ch] = juce::jmax (newPeak, peak[ch] - 20.0f * frameMs / 1000.0f);
+        rms[ch] += 0.3f * (meters.channelRmsDb[ch].load() - rms[ch]);
 
-    // Fast attack, slow fall, so short peaks stay readable.
-    clip = juce::jmax (meters.clipDb.load(), clip * 0.9f);
-    peak = juce::jmax (meters.peakDb.load(), peak - 1.0f);
+        // Hold for 1.5 s, then fall.
+        holdMs[ch] += frameMs;
+        if (newPeak >= hold[ch]) { hold[ch] = newPeak; holdMs[ch] = 0.0f; }
+        else if (holdMs[ch] > 1500.0f) hold[ch] -= 30.0f * frameMs / 1000.0f;
+
+        maxPeak = juce::jmax (maxPeak, newPeak);
+        clipped[ch] = clipped[ch] || newPeak > -0.1f;
+    }
+
+    momentary = meters.momentaryLufs.load();
+    shortTerm = meters.shortTermLufs.load();
+    clipDb = juce::jmax (meters.clipDb.load(), clipDb * 0.9f);
+    correlation += 0.2f * (meters.correlation.load() - correlation);
 
     if (isShowing())
         repaint();
 }
 
-void DisplayPanel::paint (juce::Graphics& g)
+void LevelMeter::mouseDown (const juce::MouseEvent&)
 {
-    using juce::String;
+    maxPeak = -100.0f;
+    clipped[0] = clipped[1] = false;
+    hold[0] = hold[1] = -100.0f;
+}
 
-    g.setColour (Palette::panel);
-    g.fillRoundedRectangle (getLocalBounds().toFloat(), 8.0f);
+// The meter keeps the plain sans (owner's choice); the rest of the UI uses Fonts.
+void LevelMeter::paint (juce::Graphics& g)
+{
+    fillScreen (g, getLocalBounds().toFloat());
 
-    auto area = getLocalBounds().reduced (14, 12);
-    const auto columnWidth = area.getWidth() / 6;
+    auto area = getLocalBounds().reduced (10).toFloat();
 
-    // Each column: title, big value, meter, caption.
-    auto column = [&] (const String& title, const String& value, const String& caption, auto&& drawMeter)
+
+    // Readouts at the bottom.
+    auto readouts = area.removeFromBottom (76.0f);
+    auto corrArea = readouts.removeFromBottom (18.0f);
+
+    auto row = [&] (const juce::String& name, const juce::String& value, juce::Colour colour)
     {
-        auto c = area.removeFromLeft (columnWidth).reduced (6, 0);
-
-        g.setColour (Palette::accent.withAlpha (0.8f));
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        g.drawText (title, c.removeFromTop (16), juce::Justification::centredLeft);
-
-        g.setColour (Palette::text);
-        g.setFont (juce::FontOptions (17.0f));
-        g.drawText (value, c.removeFromTop (24), juce::Justification::centredLeft);
-
-        g.setColour (Palette::text.withAlpha (0.6f));
-        g.setFont (juce::FontOptions (12.0f));
-        g.drawFittedText (caption, c.removeFromBottom (32), juce::Justification::topLeft, 2);
-
-        c.removeFromBottom (6);
-        drawMeter (c.reduced (0, 4).toFloat());
-    };
-
-    auto hBar = [&] (juce::Rectangle<float> r, float fraction, juce::Colour colour)
-    {
-        auto bar = r.withSizeKeepingCentre (r.getWidth(), 8.0f);
-        g.setColour (Palette::track);
-        g.fillRoundedRectangle (bar, 4.0f);
+        auto r = readouts.removeFromTop (14.0f);
+        g.setFont (juce::FontOptions (11.0f));
+        g.setColour (Palette::text.withAlpha (0.55f));
+        g.drawText (name, r, juce::Justification::centredLeft);
         g.setColour (colour);
-        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * juce::jlimit (0.0f, 1.0f, fraction)), 4.0f);
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (value, r, juce::Justification::centredRight);
     };
+    row ("Peak max", dbText (maxPeak) + " dB", maxPeak > -0.1f ? Palette::clip : Palette::text);
+    row ("LUFS M / S", dbText (momentary) + " / " + dbText (shortTerm), Palette::text);
+    row ("Clipper", clipDb < 0.05f ? juce::String ("idle") : "-" + juce::String (clipDb, 1) + " dB",
+         clipDb > 3.0f ? Palette::warn : Palette::text);
+    row ("RMS L / R", dbText (rms[0]) + " / " + dbText (rms[1]), Palette::text);
 
-    // Saturation.
-    column ("GRIT", "+" + String (drive, 1) + " dB",
-            drive < 3.0f ? "Clean, barely driven" : drive < 12.0f ? "Warm saturation" : "Heavy drive",
-            [&] (juce::Rectangle<float> r) { hBar (r, drive / 21.6f, Palette::accent); });
-
-    // 3-band upward/downward compression.
+    // Correlation: -1 (out of phase) .. +1 (mono).
     {
-        int loudest = 0;
-        for (int b = 1; b < 3; ++b)
-            if (std::abs (bands[b]) > std::abs (bands[loudest]))
-                loudest = b;
-
-        const char* names[] { "Lows", "Mids", "Highs" };
-        const auto amount = bands[loudest];
-        const auto caption = std::abs (amount) < 0.5f ? String ("Barely working")
-                           : String (names[loudest]) + (amount > 0 ? " lifted " : " tamed ") + String (std::abs (amount), 1) + " dB";
-
-        column ("OTT", String (bands[0], 1) + " / " + String (bands[1], 1) + " / " + String (bands[2], 1), caption,
-                [&] (juce::Rectangle<float> r)
-                {
-                    const auto barWidth = r.getWidth() / 3.0f;
-                    const auto centreY = r.getCentreY();
-                    for (int b = 0; b < 3; ++b)
-                    {
-                        auto slot = r.withX (r.getX() + barWidth * (float) b).withWidth (barWidth).reduced (6.0f, 0.0f);
-                        g.setColour (Palette::track);
-                        g.fillRoundedRectangle (slot, 3.0f);
-
-                        const auto h = juce::jlimit (0.0f, 1.0f, std::abs (bands[b]) / 12.0f) * slot.getHeight() * 0.5f;
-                        g.setColour (bands[b] > 0 ? Palette::accent : Palette::warn);
-                        g.fillRect (slot.withHeight (h).withY (bands[b] > 0 ? centreY - h : centreY));
-                    }
-                    g.setColour (Palette::text.withAlpha (0.3f));
-                    g.drawHorizontalLine ((int) centreY, r.getX(), r.getRight());
-                });
+        auto bar = corrArea.reduced (0.0f, 5.0f);
+        g.setColour (Palette::track);
+        g.fillRoundedRectangle (bar, 3.0f);
+        const auto centre = bar.getCentreX();
+        const auto x = centre + juce::jlimit (-1.0f, 1.0f, correlation) * bar.getWidth() * 0.5f;
+        g.setColour (correlation < 0.0f ? Palette::warn : Palette::accent);
+        g.fillRect (juce::Rectangle<float>::leftTopRightBottom (juce::jmin (centre, x), bar.getY(), juce::jmax (centre, x), bar.getBottom()));
+        g.setColour (Palette::text.withAlpha (0.5f));
+        g.setFont (juce::FontOptions (9.0f));
+        g.drawText ("-1", bar.withWidth (14.0f).translated (0.0f, -8.0f), juce::Justification::centredLeft);
+        g.drawText ("+1", bar.withTrimmedLeft (bar.getWidth() - 14.0f).translated (0.0f, -8.0f), juce::Justification::centredRight);
     }
 
-    // Tilt and air EQ, drawn as a rough response curve.
-    column ("TONE", "Air +" + String (air, 1) + " dB",
-            air > 0.5f ? "Highs opened above 8 kHz"
-                       : tilt < -0.5f ? "Tilted darker" : tilt > 0.5f ? "Tilted brighter" : "Flat",
-            [&] (juce::Rectangle<float> r)
-            {
-                g.setColour (Palette::track);
-                g.fillRoundedRectangle (r, 3.0f);
+    area.removeFromBottom (6.0f);
 
-                juce::Path curve;
-                for (int i = 0; i <= 40; ++i)
-                {
-                    const auto t = (float) i / 40.0f;
-                    const auto octavesFrom1k = (t - 0.55f) * 10.0f;   // ~20 Hz to 20 kHz
-                    const auto octavesFrom8k = octavesFrom1k - 3.0f;
-                    const auto dB = -tilt + 2.0f * tilt / (1.0f + std::exp (-octavesFrom1k * 1.5f))
-                                  + air / (1.0f + std::exp (-octavesFrom8k * 2.0f));
-                    const auto y = r.getCentreY() - juce::jlimit (-1.0f, 1.0f, dB / 10.0f) * r.getHeight() * 0.45f;
-                    const auto x = r.getX() + t * r.getWidth();
-                    if (i == 0) curve.startNewSubPath (x, y); else curve.lineTo (x, y);
-                }
-                g.setColour (Palette::accent);
-                g.strokePath (curve, juce::PathStrokeType (2.0f));
-            });
+    // Clip lights.
+    auto lights = area.removeFromTop (10.0f);
+    area.removeFromTop (4.0f);
 
-    // Mono bass and width.
-    column ("WIDTH", String (juce::roundToInt (width * 100.0f)) + "%",
-            "Mono below " + String (juce::roundToInt (monoFreq)) + " Hz",
-            [&] (juce::Rectangle<float> r) { hBar (r, width, Palette::accent); });
+    // Scale on the left, two bars on the right.
+    auto scale = area.removeFromLeft (28.0f);
+    const auto barGap = 6.0f;
+    const auto barWidth = (area.getWidth() - barGap) / 2.0f;
 
-    // Soft clipper.
-    column ("CLIP", String (clip, 1) + " dB",
-            clip < 0.1f ? "Clean" : clip < 2.0f ? "Shaving peaks" : "Working hard",
-            [&] (juce::Rectangle<float> r) { hBar (r, clip / 6.0f, clip < 2.0f ? Palette::accent : Palette::warn); });
+    auto yFor = [&] (float db) { return area.getBottom() - meterFraction (db) * area.getHeight(); };
 
-    // Output level: short-term LUFS as the headline, momentary LUFS on the bar.
-    auto level = [] (float dB) { return dB > -99.0f ? String (dB, 1) : String ("-inf"); };
-    column ("OUT", level (shortTerm) + " LUFS",
-            "RMS " + level (rms) + ", peak " + level (peak) + " dB",
-            [&] (juce::Rectangle<float> r)
-            {
-                auto meter = r.withSizeKeepingCentre (14.0f, r.getHeight());
-                g.setColour (Palette::track);
-                g.fillRoundedRectangle (meter, 3.0f);
+    g.setFont (juce::FontOptions (9.0f));
+    for (const auto db : { 0.0f, -6.0f, -12.0f, -18.0f, -24.0f, -36.0f, -48.0f })
+    {
+        const auto y = yFor (db);
+        g.setColour (Palette::text.withAlpha (0.45f));
+        g.drawText (juce::String ((int) db), scale.withY (y - 6.0f).withHeight (12.0f).withTrimmedRight (4.0f),
+                    juce::Justification::centredRight);
+        g.setColour (Palette::track.brighter (0.15f));
+        g.drawHorizontalLine ((int) y, area.getX(), area.getRight());
+    }
 
-                auto toFraction = [] (float dB) { return juce::jlimit (0.0f, 1.0f, (dB + 36.0f) / 36.0f); };
-                const auto h = toFraction (momentary) * meter.getHeight();
-                g.setColour (peak > -0.5f ? Palette::warn : Palette::accent);
-                g.fillRoundedRectangle (meter.withTop (meter.getBottom() - h), 3.0f);
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        auto bar = area.withX (area.getX() + (float) ch * (barWidth + barGap)).withWidth (barWidth);
 
-                const auto peakY = meter.getBottom() - toFraction (peak) * meter.getHeight();
-                g.setColour (Palette::text);
-                g.drawHorizontalLine ((int) peakY, meter.getX() - 3.0f, meter.getRight() + 3.0f);
-            });
+        g.setColour (Palette::track);
+        g.fillRoundedRectangle (bar, 3.0f);
+
+        // Colour by level: light blue low down, fading to orange as it rises, yellow
+        // near the top, red at 0 dB. The RMS body is the wide bar, the peak a thinner
+        // one behind it; each gets a lit cap and a soft rounded sheen.
+        auto fill = [&] (float db, float inset, float alpha)
+        {
+            const auto top = yFor (db);
+            auto r = bar.reduced (inset, 0.0f).withTop (top);
+            if (r.getHeight() <= 0.0f)
+                return;
+
+            juce::ColourGradient gradient (Palette::accent.withAlpha (alpha), 0.0f, bar.getBottom(),
+                                           Palette::clip.withAlpha (alpha), 0.0f, bar.getY(), false);
+            gradient.addColour (meterFraction (-48.0f), Palette::accent.withAlpha (alpha));
+            gradient.addColour (meterFraction (-18.0f), Palette::orange.withAlpha (alpha));
+            gradient.addColour (meterFraction (-6.0f), Palette::yellow.withAlpha (alpha));
+            g.setGradientFill (gradient);
+            g.fillRect (r);
+
+            juce::ColourGradient sheen (juce::Colours::black.withAlpha (0.35f), r.getX(), 0.0f,
+                                        juce::Colours::black.withAlpha (0.35f), r.getRight(), 0.0f, false);
+            sheen.addColour (0.4, juce::Colours::white.withAlpha (0.14f));
+            g.setGradientFill (sheen);
+            g.fillRect (r);
+
+            const auto capColour = gradient.getColourAtPosition (juce::jlimit (0.0, 1.0, (double) meterFraction (db)));
+            g.setColour (capColour.withAlpha (0.35f));
+            g.fillRect (r.withHeight (6.0f).translated (0.0f, -3.0f));
+            g.setColour (capColour.brighter (0.5f).withAlpha (1.0f));
+            g.fillRect (r.withHeight (1.5f));
+        };
+        fill (peak[ch], barWidth * 0.3f, 0.55f);
+        fill (rms[ch], 0.0f, 0.95f);
+
+        // Peak hold.
+        if (hold[ch] > meterFloorDb)
+        {
+            g.setColour (hold[ch] > -0.1f ? Palette::clip : Palette::text);
+            g.fillRect (bar.getX(), yFor (hold[ch]) - 1.0f, bar.getWidth(), 2.0f);
+        }
+
+        // Clip light.
+        auto light = lights.withX (bar.getX()).withWidth (bar.getWidth());
+        g.setColour (clipped[ch] ? Palette::clip : Palette::track);
+        g.fillRoundedRectangle (light, 2.0f);
+
+        g.setColour (Palette::text.withAlpha (0.5f));
+        g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+        g.drawText (ch == 0 ? "L" : "R", bar.withTop (bar.getBottom() - 14.0f), juce::Justification::centred);
+    }
+}
+
+//==============================================================================
+ScopeView::ScopeView (ZeroEngineProcessor& p)
+    : processor (p)
+{
+    startTimerHz (30);
+}
+
+void ScopeView::timerCallback()
+{
+    // Follow the sound: the voices' live wavetable position (envelopes and LFOs
+    // included), or the knob's position when nothing plays; and the output level.
+    const auto live = processor.getLivePosition();
+    const auto target = live >= 0.0f ? live : processor.state.getRawParameterValue (ParamIDs::wavePos)->load();
+    shownPosition = shownPosition < 0.0f ? target : shownPosition + 0.5f * (target - shownPosition);
+    const auto rms = juce::Decibels::decibelsToGain (processor.getMeters().rmsDb.load());
+    level += 0.3f * (juce::jlimit (0.0f, 1.0f, rms * 3.0f) - level);
+
+    if (! isShowing())
+        return;
+
+    if (mode == spectrum)
+    {
+        processor.copyScope (samples.data(), fftSize);
+        std::copy (samples.begin(), samples.end(), fftData.begin());
+        std::fill (fftData.begin() + fftSize, fftData.end(), 0.0f);
+        window.multiplyWithWindowingTable (fftData.data(), (size_t) fftSize);
+        fft.performFrequencyOnlyForwardTransform (fftData.data());
+
+        // Instant rise, slow fall, so the picture is readable.
+        for (size_t i = 0; i < spectrumDb.size(); ++i)
+        {
+            const auto db = juce::Decibels::gainToDecibels (fftData[i] * 4.0f / (float) fftSize, -100.0f);
+            spectrumDb[i] = juce::jmax (db, spectrumDb[i] - 1.5f);
+        }
+    }
+
+    repaint();
+}
+
+void ScopeView::paint (juce::Graphics& g)
+{
+    fillScreen (g, getLocalBounds().toFloat());
+
+    auto area = getLocalBounds().reduced (10).toFloat();
+
+    switch (mode)
+    {
+        case spectrum:  drawSpectrum (g, area); break;
+        case wavetable: drawWavetable (g, area); break;
+        default:        drawWaveform (g, area); break;
+    }
+}
+
+void ScopeView::drawWaveform (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    // About 43 ms at 48 kHz, starting on a rising zero crossing so a held note stands still.
+    constexpr int shown = 2048;
+    processor.copyScope (samples.data(), shown * 2);
+
+    int start = 0;
+    for (int i = 1; i < shown; ++i)
+        if (samples[(size_t) i - 1] <= 0.0f && samples[(size_t) i] > 0.0f) { start = i; break; }
+
+    g.setColour (Palette::track.brighter (0.15f));
+    g.drawHorizontalLine ((int) area.getCentreY(), area.getX(), area.getRight());
+    for (const auto gridLevel : { -0.5f, 0.5f })
+        g.drawHorizontalLine ((int) (area.getCentreY() - gridLevel * area.getHeight() * 0.5f), area.getX(), area.getRight());
+
+    juce::Path path;
+    for (int i = 0; i < shown; ++i)
+    {
+        const auto x = area.getX() + area.getWidth() * (float) i / (float) (shown - 1);
+        const auto y = area.getCentreY() - juce::jlimit (-1.0f, 1.0f, samples[(size_t) (start + i)]) * area.getHeight() * 0.5f;
+        i == 0 ? path.startNewSubPath (x, y) : path.lineTo (x, y);
+    }
+    g.setColour (Palette::accent);
+    g.strokePath (path, juce::PathStrokeType (1.5f));
+}
+
+void ScopeView::drawSpectrum (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    constexpr float minHz = 20.0f, maxHz = 20000.0f, floorDb = -90.0f;
+    const auto sampleRate = (float) juce::jmax (1.0, processor.getSampleRate());
+
+    auto xFor = [&] (float hz) { return area.getX() + area.getWidth() * std::log (hz / minHz) / std::log (maxHz / minHz); };
+    auto yFor = [&] (float db) { return area.getBottom() - area.getHeight() * juce::jlimit (0.0f, 1.0f, (db - floorDb) / -floorDb); };
+
+    g.setFont (Fonts::ui (9.0f));
+    for (const auto hz : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
+    {
+        g.setColour (Palette::track.brighter (0.15f));
+        g.drawVerticalLine ((int) xFor (hz), area.getY(), area.getBottom());
+        g.setColour (Palette::text.withAlpha (0.4f));
+        g.drawText (hz >= 1000.0f ? juce::String ((int) (hz / 1000.0f)) + "k" : juce::String ((int) hz),
+                    juce::Rectangle<float> (xFor (hz) + 2.0f, area.getBottom() - 12.0f, 30.0f, 12.0f), juce::Justification::centredLeft);
+    }
+    for (const auto db : { -18.0f, -36.0f, -54.0f, -72.0f })
+    {
+        g.setColour (Palette::track.brighter (0.15f));
+        g.drawHorizontalLine ((int) yFor (db), area.getX(), area.getRight());
+    }
+
+    juce::Path path;
+    path.startNewSubPath (area.getX(), area.getBottom());
+    for (size_t i = 1; i < spectrumDb.size(); ++i)
+    {
+        const auto hz = (float) i * sampleRate / (float) fftSize;
+        if (hz < minHz || hz > maxHz)
+            continue;
+        path.lineTo (xFor (hz), yFor (spectrumDb[i]));
+    }
+    path.lineTo (area.getRight(), area.getBottom());
+    path.closeSubPath();
+
+    g.setColour (Palette::accent.withAlpha (0.25f));
+    g.fillPath (path);
+    g.setColour (Palette::accent);
+    g.strokePath (path, juce::PathStrokeType (1.2f));
+}
+
+void ScopeView::drawWavetable (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    auto param = [this] (const char* id) { return processor.state.getRawParameterValue (id)->load(); };
+    const auto bankA = juce::jlimit (0, WavetableBank::numBanks - 1, (int) param (ParamIDs::waveTable));
+    const auto bankB = juce::jlimit (0, WavetableBank::numBanks - 1, (int) param (ParamIDs::waveTableB));
+    const auto mix = bankB != bankA ? juce::jlimit (0.0f, 1.0f, param (ParamIDs::tableMix)) : 0.0f;
+    const auto position = juce::jlimit (0.0f, 1.0f, shownPosition);
+    const auto& tables = WavetableBank::get();
+
+    // The voice's own blend of table A and B, so the picture is what plays.
+    auto sample = [&] (float pos, double phase)
+    {
+        const auto a = tables.lookup (bankA, 0, pos, phase);
+        return mix > 0.0f ? a + mix * (tables.lookup (bankB, 0, pos, phase) - a) : a;
+    };
+
+    auto title = area.removeFromTop (16.0f);
+    g.setFont (Fonts::ui (11.0f, true));
+    g.setColour (Palette::accent.withAlpha (0.75f));
+    g.drawText (waveTableNames[bankA].toUpperCase() + (mix > 0.0f ? "  +  " + waveTableNames[bankB].toUpperCase() : juce::String()),
+                title, juce::Justification::centredLeft);
+    g.setFont (Fonts::mono (11.0f));
+    g.setColour (Palette::yellow.withAlpha (0.8f));
+    g.drawText ("POS " + juce::String (position, 2), title, juce::Justification::centredRight);
+
+    // Every frame stacked back to front, then the playing position on top, which
+    // glows with the output level.
+    constexpr int points = 256;
+    constexpr int layers = 12;
+    const auto depthX = area.getWidth() * 0.18f, depthY = area.getHeight() * 0.3f;
+    auto face = area.withTrimmedRight (depthX).withTrimmedTop (depthY);
+
+    auto trace = [&] (float pos, float shift)
+    {
+        juce::Path path;
+        for (int i = 0; i < points; ++i)
+        {
+            const auto phase = (double) i / (double) points;
+            const auto px = face.getX() + shift * depthX + face.getWidth() * (float) i / (float) (points - 1);
+            const auto py = face.getCentreY() - shift * depthY - juce::jlimit (-1.0f, 1.0f, sample (pos, phase)) * face.getHeight() * 0.45f;
+            i == 0 ? path.startNewSubPath (px, py) : path.lineTo (px, py);
+        }
+        return path;
+    };
+
+    for (int layer = layers - 1; layer >= 0; --layer)
+    {
+        const auto pos = (float) layer / (float) (layers - 1);
+        const auto near = 1.0f - std::abs (pos - position) * 3.0f; // frames near the play position light up
+        g.setColour (Palette::accent.withAlpha (0.1f + 0.08f * (1.0f - pos) + 0.25f * juce::jmax (0.0f, near) * (0.4f + level)));
+        g.strokePath (trace (pos, pos), juce::PathStrokeType (1.0f));
+    }
+
+    const auto current = trace (position, position);
+    const auto colour = Palette::orange.interpolatedWith (Palette::yellow, position);
+    g.setColour (colour.withAlpha (0.12f + 0.3f * level));
+    g.strokePath (current, juce::PathStrokeType (6.0f + 6.0f * level));
+    g.setColour (colour);
+    g.strokePath (current, juce::PathStrokeType (2.0f));
 }
 
 //==============================================================================
 ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     : AudioProcessorEditor (p),
       processor (p),
-      display (p.getMeters()),
+      display (p),
+      levelMeter (p.getMeters()),
       devPanel (p),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
 {
+    setLookAndFeel (&lookAndFeel);
     const std::array<std::pair<const char*, const char*>, 6> macroParams { {
         { ParamIDs::weight, "Weight" }, { ParamIDs::grit,   "Grit" },   { ParamIDs::punch, "Punch" },
         { ParamIDs::width,  "Width" },  { ParamIDs::motion, "Motion" }, { ParamIDs::air,   "Air" } } };
@@ -199,7 +787,21 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     typeAttachment  = std::make_unique<ComboAttachment> (processor.state, ParamIDs::type, typeBox);
 
     addAndMakeVisible (display);
+    displayMode.addItem ("Wavetable", ScopeView::wavetable);
+    displayMode.addItem ("Waveform", ScopeView::waveform);
+    displayMode.addItem ("Spectrum", ScopeView::spectrum);
+    displayMode.setSelectedId (ScopeView::wavetable, juce::dontSendNotification);
+    displayMode.onChange = [this] { display.setMode (displayMode.getSelectedId()); };
+    addAndMakeVisible (displayMode);
+    addAndMakeVisible (levelMeter);
     addChildComponent (devPanel);
+
+    generateButton.onClick = [this]
+    {
+        processor.generate();
+        generateButton.fold();
+    };
+    addAndMakeVisible (generateButton);
     addAndMakeVisible (keyboard);
 
     devButton.setClickingTogglesState (true);
@@ -211,58 +813,130 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     };
     addAndMakeVisible (devButton);
 
-    setSize (760, 520);
+    keyboard.setColour (juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour (0xffd6daf2));
+    keyboard.setColour (juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour (0xff0c0d22));
+    keyboard.setColour (juce::MidiKeyboardComponent::keySeparatorLineColourId, Palette::panel);
+    keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, Palette::orange.withAlpha (0.85f));
+    keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, Palette::accent.withAlpha (0.35f));
+    keyboard.setColour (juce::MidiKeyboardComponent::shadowColourId, juce::Colours::black.withAlpha (0.4f));
+
+    setSize (900, 600);
+}
+
+ZeroEngineEditor::~ZeroEngineEditor()
+{
+    setLookAndFeel (nullptr);
 }
 
 void ZeroEngineEditor::setUpMacro (Macro& macro, const char* paramID, const juce::String& name)
 {
-    macro.knob.setColour (juce::Slider::rotarySliderFillColourId, Palette::accent);
-    macro.label.setText (name, juce::dontSendNotification);
+    macro.label.setText (name.toUpperCase(), juce::dontSendNotification);
     macro.label.setJustificationType (juce::Justification::centred);
-    macro.label.setColour (juce::Label::textColourId, Palette::text);
+    macro.label.setFont (Fonts::ui (12.0f, true));
+    macro.label.setColour (juce::Label::textColourId, Palette::accent);
+    // 270 degrees of travel, like Potato Kicker; double-click resets to the default.
+    macro.knob.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
+    macro.knob.setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
     addAndMakeVisible (macro.knob);
     addAndMakeVisible (macro.label);
     macro.attachment = std::make_unique<SliderAttachment> (processor.state, paramID, macro.knob);
+    if (auto* param = processor.state.getParameter (paramID))
+        macro.knob.setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
 }
 
 void ZeroEngineEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (Palette::background);
+    // Indigo to purple, like an anodised panel under coloured light.
+    g.setGradientFill (juce::ColourGradient (Palette::backgroundTop, 0.0f, 0.0f,
+                                             Palette::backgroundBottom, 0.0f, (float) getHeight(), false));
+    g.fillAll();
+
+    // Title.
     g.setColour (Palette::text);
-    g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
-    g.drawText ("ZERO ENGINE", 20, 14, 200, 30, juce::Justification::centredLeft);
+    g.setFont (Fonts::ui (22.0f, true));
+    g.drawText ("ZERO ENGINE", 18, 12, 220, 26, juce::Justification::centredLeft);
+    g.setColour (Palette::orange);
+    g.setFont (Fonts::ui (10.0f, true));
+    g.drawText ("FINISHED-SOUND SYNTHESIZER", 19, 36, 220, 12, juce::Justification::centredLeft);
+
+    // Panels: a raised plate with a header strip, a title and a light-blue LED.
+    auto section = [&] (juce::Rectangle<int> r, const juce::String& title)
+    {
+        if (r.isEmpty())
+            return;
+        const auto plate = r.toFloat();
+        g.setGradientFill (juce::ColourGradient (Palette::panel.brighter (0.03f), 0.0f, plate.getY(),
+                                                 Palette::panel.darker (0.08f), 0.0f, plate.getBottom(), false));
+        g.fillRoundedRectangle (plate, 7.0f);
+        g.setColour (Palette::panelEdge);
+        g.drawRoundedRectangle (plate.reduced (0.5f), 7.0f, 1.0f);
+
+        auto strip = plate.withHeight (22.0f).reduced (1.0f, 1.0f);
+        g.setColour (Palette::header);
+        g.fillRoundedRectangle (strip, 6.0f);
+        g.fillRect (strip.withTrimmedTop (8.0f));
+
+        g.setColour (Palette::accent);
+        g.setFont (Fonts::ui (11.0f, true));
+        g.drawText (title, strip.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
+
+        const auto led = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ strip.getRight() - 12.0f, strip.getCentreY() });
+        g.setColour (Palette::accent.withAlpha (0.25f));
+        g.fillEllipse (led.expanded (3.0f));
+        g.setColour (Palette::accent);
+        g.fillEllipse (led);
+    };
+
+    section (displaySection, "DISPLAY");
+    section (meterSection, "OUTPUT");
+    section (generateSection, "GENERATE");
+    section (macroSection, "MACROS");
 }
 
 void ZeroEngineEditor::resized()
 {
-    auto area = getLocalBounds().reduced (20);
+    auto area = getLocalBounds().reduced (16);
 
-    auto top = area.removeFromTop (36);
-    top.removeFromLeft (200);
-    auto outputArea = top.removeFromRight (90);
-    outputKnob.label.setBounds (outputArea.removeFromLeft (50));
+    auto top = area.removeFromTop (44);
+    top.removeFromLeft (240);
+    auto outputArea = top.removeFromRight (104);
+    outputKnob.label.setBounds (outputArea.removeFromLeft (60));
     outputKnob.knob.setBounds (outputArea);
     top.removeFromRight (12);
-    devButton.setBounds (top.removeFromRight (50).reduced (0, 4));
+    devButton.setBounds (top.removeFromRight (44).withSizeKeepingCentre (44, 22));
     top.removeFromRight (8);
-    typeBox.setBounds (top.removeFromRight (130).reduced (0, 4));
+    typeBox.setBounds (top.removeFromRight (120).withSizeKeepingCentre (120, 22));
     top.removeFromRight (8);
-    genreBox.setBounds (top.removeFromRight (150).reduced (0, 4));
+    genreBox.setBounds (top.removeFromRight (140).withSizeKeepingCentre (140, 22));
 
-    area.removeFromTop (12);
-    keyboard.setBounds (area.removeFromBottom (70));
-    area.removeFromBottom (12);
+    area.removeFromTop (10);
+    keyboard.setBounds (area.removeFromBottom (72));
+    area.removeFromBottom (10);
 
-    auto knobRow = area.removeFromBottom (120);
+    // Each panel: a 22 px header strip, then its content inset.
+    auto content = [] (juce::Rectangle<int> r) { return r.withTrimmedTop (22).reduced (8); };
+
+    macroSection = area.removeFromBottom (168);
+    auto knobRow = content (macroSection);
     const auto knobWidth = knobRow.getWidth() / (int) macros.size();
     for (auto& macro : macros)
     {
         auto cell = knobRow.removeFromLeft (knobWidth);
-        macro.label.setBounds (cell.removeFromBottom (20));
-        macro.knob.setBounds (cell.reduced (6));
+        macro.label.setBounds (cell.removeFromBottom (18));
+        macro.knob.setBounds (cell.reduced (4));
     }
 
-    area.removeFromBottom (12);
-    display.setBounds (area);
-    devPanel.setBounds (area);
+    area.removeFromBottom (10);
+    generateSection = area.removeFromRight (170);
+    area.removeFromRight (10);
+    meterSection = area.removeFromRight (190);
+    area.removeFromRight (10);
+    displaySection = area;
+
+    generateButton.setBounds (content (generateSection));
+    levelMeter.setBounds (content (meterSection));
+    display.setBounds (content (displaySection));
+    // The mode menu sits in the header strip, left of the LED.
+    displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
+    devPanel.setBounds (content (displaySection));
 }
