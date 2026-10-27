@@ -34,6 +34,8 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    const FinishingChain::Meters& getMeters() const noexcept { return finishing.getMeters(); }
+
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboardState;
 

@@ -67,6 +67,7 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
     sideGain.reset (fs, 0.02);
     outputGain.reset (fs, 0.02);
     dcCoeff = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / fs);
+    rmsCoeff = coeffFor (0.3, fs); // roughly a momentary-loudness window
 
     const juce::dsp::ProcessSpec spec { fs, (juce::uint32) maxBlock, (juce::uint32) channels };
     for (auto* f : { &xoverLow, &xoverHigh, &lowAllpass, &monoXover })
@@ -105,6 +106,7 @@ void FinishingChain::reset()
     airShelf.reset();
     std::fill (std::begin (dcState), std::end (dcState), 0.0f);
     std::fill (std::begin (dcPrev), std::end (dcPrev), 0.0f);
+    meanSquare = 0.0f;
 }
 
 int FinishingChain::getLatencySamples() const
@@ -127,6 +129,9 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
         lastMonoFreq = s.monoFreq;
     }
 
+    std::fill (std::begin (bandGainSum), std::end (bandGainSum), 0.0f);
+    midEnergy = sideEnergy = clipPeakDb = outPeak = 0.0f;
+
     // Hosts may send blocks bigger than promised; the oversampler can't take them.
     for (int start = 0; start < buffer.getNumSamples(); start += maxBlock)
     {
@@ -139,6 +144,18 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
         widen (chunk, n);
         clipAndGain (chunk, n);
     }
+
+    const auto total = (float) juce::jmax (1, buffer.getNumSamples());
+    meters.driveDb = juce::Decibels::gainToDecibels (drive.getCurrentValue());
+    for (int b = 0; b < 3; ++b)
+        meters.bandGainDb[b] = bandGainSum[b] / total;
+    meters.tiltDb = s.tiltDb;
+    meters.airDb = s.air * 9.0f;
+    meters.monoFreq = s.monoFreq;
+    meters.width = midEnergy > 1.0e-9f ? std::sqrt (sideEnergy / midEnergy) : 0.0f;
+    meters.clipDb = clipPeakDb;
+    meters.rmsDb = juce::Decibels::gainToDecibels (std::sqrt (meanSquare), -100.0f);
+    meters.peakDb = juce::Decibels::gainToDecibels (outPeak, -100.0f);
 }
 
 //==============================================================================
@@ -230,6 +247,7 @@ void FinishingChain::compress (juce::AudioBuffer<float>& buffer, int numSamples,
                        * juce::jlimit (0.0f, 1.0f, (levelDb - floorDb) / floorFadeDb);
 
             const auto gain = juce::Decibels::decibelsToGain (gainDb * depth);
+            bandGainSum[b] += gainDb * depth;
 
             for (int ch = 0; ch < numCh; ++ch)
                 out[ch] += split[ch][b] * gain;
@@ -285,6 +303,10 @@ void FinishingChain::widen (juce::AudioBuffer<float>& buffer, int numSamples)
 
         left[i] = bass + mid + side;
         right[i] = bass + mid - side;
+
+        const auto fullMid = bass + mid;
+        midEnergy += fullMid * fullMid;
+        sideEnergy += side * side;
     }
 }
 
@@ -295,6 +317,7 @@ void FinishingChain::clipAndGain (juce::AudioBuffer<float>& buffer, int numSampl
     for (int i = 0; i < numSamples; ++i)
     {
         const auto gain = outputGain.getNextValue();
+        auto square = 0.0f;
 
         for (int ch = 0; ch < numCh; ++ch)
         {
@@ -303,9 +326,17 @@ void FinishingChain::clipAndGain (juce::AudioBuffer<float>& buffer, int numSampl
 
             // Linear up to the knee, then eases into a 0 dBFS ceiling.
             if (ax > clipKnee)
+            {
                 x = std::copysign (clipKnee + (1.0f - clipKnee) * std::tanh ((ax - clipKnee) / (1.0f - clipKnee)), x);
+                clipPeakDb = juce::jmax (clipPeakDb, juce::Decibels::gainToDecibels (ax / std::abs (x)));
+            }
 
-            buffer.setSample (ch, i, x * gain);
+            const auto y = x * gain;
+            buffer.setSample (ch, i, y);
+            square += y * y;
+            outPeak = juce::jmax (outPeak, std::abs (y));
         }
+
+        meanSquare += rmsCoeff * (square / (float) numCh - meanSquare);
     }
 }

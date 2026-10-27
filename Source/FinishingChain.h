@@ -25,6 +25,20 @@ public:
 
     int getLatencySamples() const;
 
+    // What the chain is doing, for the display. Written per block on the
+    // audio thread, read on the message thread.
+    struct Meters
+    {
+        std::atomic<float> driveDb { 0 };
+        std::atomic<float> bandGainDb[3] {};   // low, mid, high; + is upward
+        std::atomic<float> tiltDb { 0 }, airDb { 0 };
+        std::atomic<float> monoFreq { 120 }, width { 0 }; // side/mid ratio of the output
+        std::atomic<float> clipDb { 0 };       // peak reduction this block
+        std::atomic<float> rmsDb { -100 }, peakDb { -100 };
+    };
+
+    const Meters& getMeters() const noexcept { return meters; }
+
 private:
     // RBJ high shelf, transposed direct form II. Coefficients are plain floats,
     // so updating them on the audio thread is allocation-free.
@@ -60,6 +74,11 @@ private:
 
     juce::dsp::LinkwitzRileyFilter<float> xoverLow, xoverHigh, lowAllpass, monoXover;
     Band bands[3];
+
+    Meters meters;
+    float bandGainSum[3] {};
+    float meanSquare = 0.0f, rmsCoeff = 0.0f;
+    float midEnergy = 0.0f, sideEnergy = 0.0f, clipPeakDb = 0.0f, outPeak = 0.0f;
 
     Shelf tilt, airShelf;
     float lastTiltDb = -100.0f, lastAir = -1.0f, lastMonoFreq = -1.0f;

@@ -2,11 +2,22 @@
 
 #include "PluginProcessor.h"
 
-// Placeholder for the main display (profile map / target-vs-current meters later).
-class DisplayPanel : public juce::Component
+// "Why it's finished": one column per finishing stage, in chain order, each
+// with a live meter and a plain-words caption.
+class DisplayPanel : public juce::Component,
+                     private juce::Timer
 {
 public:
+    explicit DisplayPanel (const FinishingChain::Meters& meters);
     void paint (juce::Graphics& g) override;
+
+private:
+    void timerCallback() override;
+
+    const FinishingChain::Meters& meters;
+
+    // Smoothed copies of the meters, for drawing.
+    float drive = 0, bands[3] {}, tilt = 0, air = 0, monoFreq = 120, width = 0, clip = 0, rms = -100, peak = -100;
 };
 
 class ZeroEngineEditor : public juce::AudioProcessorEditor
