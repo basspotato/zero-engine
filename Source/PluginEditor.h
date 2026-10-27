@@ -21,6 +21,10 @@ public:
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
     void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
     juce::Font getLabelFont (juce::Label&) override; // knob value boxes in the mono face
+    juce::Font getAlertWindowTitleFont() override;
+    juce::Font getAlertWindowMessageFont() override;
+    juce::Font getAlertWindowFont() override;
+    void drawAlertBox (juce::Graphics&, juce::AlertWindow&, const juce::Rectangle<int>& textArea, juce::TextLayout&) override;
 };
 
 // Output meter: L/R peak and RMS bars on a dB scale with peak hold and clip
@@ -200,7 +204,10 @@ private:
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);
     void refreshFavourites();
     void refreshHistoryButtons();
+    static constexpr int designWidth = 900, designHeight = 600;
+    float uiScale() const { return (float) getWidth() / (float) designWidth; }
     void renameCurrentFavourite();
+    juce::Component::SafePointer<juce::AlertWindow> renameDialog;
     static constexpr int renameId = 10001, deleteId = 10002; // Favourites menu actions
 
     // Panel areas, set in resized() and drawn in paint() behind the components.

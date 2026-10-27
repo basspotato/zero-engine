@@ -193,6 +193,48 @@ namespace
         return problems;
     }
 
+    // The mod wheel must change the sound (it adds to Motion), and not allocate.
+    juce::StringArray checkModWheel()
+    {
+        auto render = [] (int wheel)
+        {
+            ZeroEngineProcessor engine;
+            loadProfile (engine, genreNames.indexOf ("Dubstep"), typeNames.indexOf ("Bass"));
+            engine.setPlayConfigDetails (0, 2, 48000.0, 512);
+            engine.prepareToPlay (48000.0, 512);
+
+            juce::AudioBuffer<float> block (2, 512), out (1, 512 * 60);
+            juce::MidiBuffer midi;
+            for (int b = 0; b < 60; ++b)
+            {
+                midi.clear();
+                if (b == 0)
+                {
+                    midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, wheel), 0);
+                    midi.addEvent (juce::MidiMessage::noteOn (1, 36, (juce::uint8) 110), 0);
+                }
+                block.clear();
+                engine.processBlock (block, midi);
+                out.copyFrom (0, b * 512, block, 0, 0, 512);
+            }
+            return out;
+        };
+
+        const auto still = render (0), moving = render (127);
+        double difference = 0.0, energy = 0.0;
+        for (int i = 0; i < still.getNumSamples(); ++i)
+        {
+            const auto d = still.getSample (0, i) - moving.getSample (0, i);
+            difference += d * d;
+            energy += still.getSample (0, i) * still.getSample (0, i);
+        }
+
+        juce::StringArray problems;
+        if (difference < energy * 0.01)
+            problems.add ("full mod wheel barely changed the sound");
+        return problems;
+    }
+
     juce::StringArray checkState()
     {
         ZeroEngineProcessor a;
@@ -236,6 +278,17 @@ int runTests()
 
     std::printf ("Favourites save/recall... ");
     if (const auto problems = checkFavourites(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Mod wheel drives Motion... ");
+    if (const auto problems = checkModWheel(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

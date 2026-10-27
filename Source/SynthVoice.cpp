@@ -179,7 +179,7 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto blend = p.blend->load();
     const auto basePos = p.wavePos->load();
     const auto modToPos = juce::jlimit (-1.0f, 1.0f, p.modToPos->load() + macroMap.offset (MacroTarget::modToPos));
-    const auto motion = p.motion->load();
+    const auto motion = macroMap.motion(); // the knob plus the mod wheel
     const auto lfoToPos = juce::jlimit (0.0f, 1.0f, p.lfoToPos->load() + motion * 0.5f + macroMap.offset (MacroTarget::lfoToPos));
     const auto lfoToPitch = p.lfoToPitch->load() * 2.0f; // semitones
     // Synced: one cycle per note division of the host tempo, so wobbles stay on

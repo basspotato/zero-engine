@@ -93,6 +93,13 @@ ZeroLookAndFeel::ZeroLookAndFeel()
     setColour (juce::ToggleButton::tickDisabledColourId, Palette::text.withAlpha (0.3f));
     setColour (juce::TextEditor::backgroundColourId, Palette::screen);
     setColour (juce::TextEditor::textColourId, Palette::text);
+    setColour (juce::TextEditor::outlineColourId, Palette::panelEdge);
+    setColour (juce::TextEditor::focusedOutlineColourId, Palette::accent);
+    setColour (juce::TextEditor::highlightColourId, Palette::orange.withAlpha (0.4f));
+    setColour (juce::CaretComponent::caretColourId, Palette::yellow);
+    setColour (juce::AlertWindow::backgroundColourId, Palette::panel);
+    setColour (juce::AlertWindow::textColourId, Palette::text);
+    setColour (juce::AlertWindow::outlineColourId, Palette::panelEdge);
 }
 
 void ZeroLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
@@ -135,6 +142,24 @@ juce::Font ZeroLookAndFeel::getPopupMenuFont()
 juce::Font ZeroLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)
 {
     return Fonts::ui (juce::jmin (12.0f, (float) buttonHeight * 0.62f), true, 0.08f);
+}
+
+juce::Font ZeroLookAndFeel::getAlertWindowTitleFont()   { return Fonts::ui (15.0f, true, 0.06f); }
+juce::Font ZeroLookAndFeel::getAlertWindowMessageFont() { return Fonts::ui (12.5f); }
+juce::Font ZeroLookAndFeel::getAlertWindowFont()        { return Fonts::ui (12.0f); }
+
+void ZeroLookAndFeel::drawAlertBox (juce::Graphics& g, juce::AlertWindow& alert, const juce::Rectangle<int>& textArea, juce::TextLayout& text)
+{
+    // A panel with the console's header strip and an orange title.
+    const auto plate = alert.getLocalBounds().toFloat();
+    g.fillAll (Palette::panel);
+    g.setColour (Palette::header);
+    g.fillRect (plate.withHeight (4.0f));
+    g.setColour (Palette::panelEdge);
+    g.drawRect (plate, 1.0f);
+
+    g.setColour (Palette::orange);
+    text.draw (g, textArea.toFloat());
 }
 
 juce::Font ZeroLookAndFeel::getLabelFont (juce::Label& label)
@@ -1160,11 +1185,17 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, Palette::accent.withAlpha (0.35f));
     keyboard.setColour (juce::MidiKeyboardComponent::shadowColourId, juce::Colours::black.withAlpha (0.4f));
 
-    setSize (900, 600);
+    // Resizable, keeping proportions; everything scales from the 900 x 600 design.
+    setResizable (true, true);
+    setResizeLimits (designWidth, designHeight, designWidth * 2, designHeight * 2);
+    getConstrainer()->setFixedAspectRatio ((double) designWidth / designHeight);
+    setSize (designWidth, designHeight);
 }
 
 ZeroEngineEditor::~ZeroEngineEditor()
 {
+    if (renameDialog != nullptr)
+        delete renameDialog.getComponent(); // never outlive the look-and-feel it uses
     setLookAndFeel (nullptr);
 }
 
@@ -1195,15 +1226,23 @@ void ZeroEngineEditor::renameCurrentFavourite()
     refreshFavourites(); // put the selection back on the current sound while the box is open
 
     auto* dialog = new juce::AlertWindow ("Rename favourite", {}, juce::MessageBoxIconType::NoIcon, this);
+    dialog->setLookAndFeel (&lookAndFeel);
     dialog->addTextEditor ("name", currentFavourite);
     dialog->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
     dialog->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    dialog->enterModalState (true, juce::ModalCallbackFunction::create ([this, dialog] (int result)
+    renameDialog = dialog;
+
+    // The editor may close while the box is open; the destructor deletes the box,
+    // and the callback then finds the editor gone and does nothing.
+    juce::Component::SafePointer<ZeroEngineEditor> editor (this);
+    dialog->enterModalState (true, juce::ModalCallbackFunction::create ([editor, dialog] (int result)
     {
+        if (editor == nullptr)
+            return;
         if (result == 1)
-            if (const auto name = processor.renameFavourite (currentFavourite, dialog->getTextEditorContents ("name")); name.isNotEmpty())
-                currentFavourite = name;
-        refreshFavourites();
+            if (const auto name = editor->processor.renameFavourite (editor->currentFavourite, dialog->getTextEditorContents ("name")); name.isNotEmpty())
+                editor->currentFavourite = name;
+        editor->refreshFavourites();
     }), true);
 }
 
@@ -1229,6 +1268,7 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
     g.setGradientFill (juce::ColourGradient (Palette::backgroundTop, 0.0f, 0.0f,
                                              Palette::backgroundBottom, 0.0f, (float) getHeight(), false));
     g.fillAll();
+    g.addTransform (juce::AffineTransform::scale (uiScale())); // drawn at the design size, scaled
 
     // Title.
     g.setColour (Palette::text);
@@ -1274,7 +1314,7 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
 
 void ZeroEngineEditor::resized()
 {
-    auto area = getLocalBounds().reduced (16);
+    auto area = juce::Rectangle<int> (designWidth, designHeight).reduced (16);
 
     auto top = area.removeFromTop (44);
     top.removeFromLeft (240);
@@ -1327,4 +1367,10 @@ void ZeroEngineEditor::resized()
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
     advancedPanel.setBounds (displaySection.getUnion (macroSection).getUnion (generateSection));
+
+    // Scale every child with the window: layout is done at the 900 x 600 design size.
+    const auto transform = juce::AffineTransform::scale (uiScale());
+    for (auto* child : getChildren())
+        if (dynamic_cast<juce::ResizableCornerComponent*> (child) == nullptr) // the resize handle stays put
+            child->setTransform (transform);
 }

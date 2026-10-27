@@ -46,12 +46,21 @@ public:
     {
         auto sum = 0.0f;
         for (int m = 0; m < MacroIndex::count; ++m)
-            sum += (macros[m]->load() - centre[m].load()) * amount[m][target].load();
+        {
+            const auto value = m == MacroIndex::motion ? motion() : macros[m]->load();
+            sum += (value - centre[m].load()) * amount[m][target].load();
+        }
         return sum;
     }
+
+    // The mod wheel (0..1) adds on top of the Motion knob, up to full Motion.
+    // Audio thread writes, voices read.
+    void setModWheel (float amount01) noexcept { wheel.store (juce::jlimit (0.0f, 1.0f, amount01)); }
+    float motion() const noexcept { return juce::jlimit (0.0f, 1.0f, macros[MacroIndex::motion]->load() + wheel.load()); }
 
 private:
     std::atomic<float>* macros[MacroIndex::count];
     std::atomic<float> centre[MacroIndex::count] {};
+    std::atomic<float> wheel { 0.0f };
     std::atomic<float> amount[MacroIndex::count][MacroTarget::count] {};
 };

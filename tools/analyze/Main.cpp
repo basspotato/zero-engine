@@ -387,9 +387,31 @@ int main (int argc, char* argv[])
         std::printf ("Live wavetable position %.3f (knob %.3f)\n", engine.getLivePosition(),
                      engine.state.getRawParameterValue (ParamIDs::wavePos)->load());
 
-        // Extra arguments click buttons by their text, in order (e.g. ADVANCED FILTER).
+        // Extra arguments click buttons by their text, in order (e.g. ADVANCED FILTER);
+        // "size=WxH" resizes the window first (e.g. size=1350x900).
         for (int a = 2; a < args.size(); ++a)
         {
+            if (args[a] == "dialog") // the rename dialog, written next to the snapshot
+            {
+                juce::AlertWindow dialog ("Rename favourite", {}, juce::MessageBoxIconType::NoIcon, editor.get());
+                dialog.setLookAndFeel (&editor->getLookAndFeel());
+                dialog.addTextEditor ("name", "Trap Pad 1");
+                dialog.addButton ("Rename", 1);
+                dialog.addButton ("Cancel", 0);
+                dialog.setSize (dialog.getWidth(), dialog.getHeight());
+                juce::FileOutputStream dialogOut (argFile (args, 1, {}).withFileExtension ("dialog.png"));
+                dialogOut.setPosition (0);
+                dialogOut.truncate();
+                juce::PNGImageFormat().writeImageToStream (dialog.createComponentSnapshot (dialog.getLocalBounds()), dialogOut);
+                dialog.setLookAndFeel (nullptr);
+                continue;
+            }
+            if (args[a].startsWith ("size="))
+            {
+                const auto size = args[a].fromFirstOccurrenceOf ("=", false, false);
+                editor->setSize (size.upToFirstOccurrenceOf ("x", false, false).getIntValue(), size.fromFirstOccurrenceOf ("x", false, false).getIntValue());
+                continue;
+            }
             std::function<juce::Button* (juce::Component&)> find = [&] (juce::Component& c) -> juce::Button*
             {
                 if (auto* b = dynamic_cast<juce::Button*> (&c); b != nullptr && b->getButtonText() == args[a])

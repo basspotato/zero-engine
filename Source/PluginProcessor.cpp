@@ -251,6 +251,11 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
+    // Mod wheel (CC 1) rides on top of the Motion macro.
+    for (const auto metadata : midi)
+        if (const auto message = metadata.getMessage(); message.isControllerOfType (1))
+            macroMap.setModWheel ((float) message.getControllerValue() / 127.0f);
+
     // Host tempo for the delay and synced LFOs; 120 BPM when there is none (standalone).
     auto bpm = 120.0;
     if (auto* host = getPlayHead())
