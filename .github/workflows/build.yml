@@ -1,0 +1,65 @@
+name: Build plugin
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # On failure, posts the tail of the output as an annotation so it shows on the run page.
+      - name: Configure (newest installed Visual Studio, x64)
+        shell: pwsh
+        run: |
+          cmake --version
+          cmake -S . -B build -A x64 *>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content configure.log -Tail 40) -join '%0A'
+            Write-Output "::error title=Configure failed::$tail"
+            exit 1
+          }
+
+      - name: Build VST3 and standalone (Release)
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target ZeroEngine_VST3 ZeroEngine_Standalone --parallel *>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            $errs = (Select-String -Path build.log -Pattern ' error ' | Select-Object -First 30 | ForEach-Object { $_.Line }) -join '%0A'
+            Write-Output "::error title=Build failed::$errs"
+            exit 1
+          }
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zero-Engine-VST3-Windows-x64
+          path: build/ZeroEngine_artefacts/Release/VST3/
+          if-no-files-found: error
+
+      - name: Upload standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zero-Engine-Standalone-Windows-x64
+          path: build/ZeroEngine_artefacts/Release/Standalone/
+          if-no-files-found: error
+
+      - name: Validate with pluginval
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip" -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval
+          $exe = Get-ChildItem -Path pluginval -Recurse -Filter pluginval.exe | Select-Object -First 1
+          & $exe.FullName --strictness-level 5 --validate-in-process --timeout-ms 180000 --validate "build/ZeroEngine_artefacts/Release/VST3/Zero Engine.vst3" *>&1 | Tee-Object -FilePath pluginval.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content pluginval.log -Tail 40) -join '%0A'
+            Write-Output "::error title=pluginval failed::$tail"
+            exit 1
+          }
+          Write-Output "::notice title=pluginval::Passed at strictness level 5"
