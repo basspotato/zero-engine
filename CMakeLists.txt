@@ -30,6 +30,7 @@ target_sources(ZeroEngine
     PRIVATE
         Source/PluginProcessor.cpp
         Source/FinishingChain.cpp
+        Source/SpectralCompressor.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
@@ -73,6 +74,7 @@ target_sources(ZeroAnalyze
         tools/analyze/Harmonics.cpp
         Source/PluginProcessor.cpp
         Source/FinishingChain.cpp
+        Source/SpectralCompressor.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
