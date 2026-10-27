@@ -18,6 +18,8 @@ namespace ParamIDs
 
     // Engine parameters (set by profiles later; exposed in the dev panel for now).
     inline constexpr auto waveTable = "waveTable";
+    inline constexpr auto waveTableB = "waveTableB"; // blended in by tableMix, at the same position
+    inline constexpr auto tableMix = "tableMix";
     inline constexpr auto wavePos = "wavePos";
     inline constexpr auto unison  = "unison";
     inline constexpr auto detune  = "detune";
@@ -111,6 +113,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
                                                        NormalisableRange<float> (-24.0f, 6.0f), 0.0f));
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::waveTable, 1 }, "Wave Table", waveTableNames, 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::waveTableB, 1 }, "Wave Table B", waveTableNames, 1));
+    unit (ParamIDs::tableMix, "Table Blend", 0.0f);
     unit (ParamIDs::wavePos, "Wave Position", 0.5f);
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::unison, 1 }, "Unison Voices", 1, 7, 5));
     unit (ParamIDs::detune, "Unison Detune", 0.35f);

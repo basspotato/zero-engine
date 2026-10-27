@@ -31,7 +31,7 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::glide),     get (ParamIDs::bendRange),
           get (ParamIDs::filterMode), get (ParamIDs::filterCutoff), get (ParamIDs::filterRes), get (ParamIDs::filterEnv),
           get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff), get (ParamIDs::velToCutoff), get (ParamIDs::velSens),
-          get (ParamIDs::waveTable) };
+          get (ParamIDs::waveTable), get (ParamIDs::waveTableB), get (ParamIDs::tableMix) };
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -209,6 +209,9 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
                                     + (lfoToPitch + juce::jmax (0.0f, modToPitch) + juce::jmax (0.0f, bendSemis)) / 12.0);
     const auto mipLevel = WavetableBank::levelFor (maxFreq, sampleRate);
     const auto table = juce::jlimit (0, WavetableBank::numBanks - 1, (int) p.waveTable->load());
+    const auto tableB = juce::jlimit (0, WavetableBank::numBanks - 1, (int) p.waveTableB->load());
+    const auto tableMix = juce::jlimit (0.0f, 1.0f, p.tableMix->load() + macroMap.offset (MacroTarget::tableMix));
+    const auto blendTables = tableMix > 1.0e-3f && tableB != table;
 
     // Filter. Fully open low-pass with no modulation is skipped, so profiles
     // that don't use it sound exactly as before.
@@ -236,7 +239,9 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         float l = 0.0f, r = 0.0f;
         for (int v = 0; v < voices; ++v)
         {
-            const auto s = bank.lookup (table, mipLevel, pos, phases[v]);
+            auto s = bank.lookup (table, mipLevel, pos, phases[v]);
+            if (blendTables)
+                s += tableMix * (bank.lookup (tableB, mipLevel, pos, phases[v]) - s);
             l += s * gainL[v];
             r += s * gainR[v];
 

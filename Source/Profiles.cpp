@@ -22,6 +22,7 @@ namespace
         p.filterMode = 1.0f;        // Low 24, fully open: bypassed
         p.filterCutoff = 20000.0f;
         p.velSens = 1.0f;
+        p.waveTableB = growlTable;  // unused while tableMix is 0
         p.delayTime = 2.0f;         // 1/8 dotted
         p.delayFeedback = 0.35f;
         p.reverbSize = 0.6f;
@@ -160,8 +161,8 @@ namespace
                     p.glide = 0.08f; // overlapping notes slide
                     break;
 
-                case dubstep: // talking wobble: the LFO sweeps the vowel formants
-                    p.waveTable = growlTable; p.wavePos = 0.5f;
+                case dubstep: // hybrid wobble: the classic Basic sweep blended with the talking vowel sweep
+                    p.waveTable = 0.0f; p.waveTableB = growlTable; p.tableMix = 0.5f; p.wavePos = 0.5f;
                     p.lfoRate = 3.0f; p.lfoShape = sine; p.lfoToPos = 0.7f;
                     break;
 
@@ -257,9 +258,10 @@ namespace
                     a[M::punch][T::ampDecay] = 0.0f; a[M::weight][T::tilt] = -1.0f;
                     break;
 
-                case dubstep: // Motion speeds and deepens the wobble
+                case dubstep: // Motion speeds and deepens the wobble; Grit leans from classic wobble into growl
                     a[M::motion][T::lfoRate] = 2.0f; a[M::motion][T::lfoToPos] = 0.3f;
                     a[M::punch][T::ottDepth] = 0.5f;
+                    a[M::grit][T::tableMix] = 0.7f;
                     break;
 
                 case drumAndBass: // Motion opens the reese
@@ -329,6 +331,8 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::air,    p.air);
 
     set (ParamIDs::waveTable, p.waveTable);
+    set (ParamIDs::waveTableB, p.waveTableB);
+    set (ParamIDs::tableMix, p.tableMix);
     set (ParamIDs::wavePos, p.wavePos);
     set (ParamIDs::unison,  p.unison);
     set (ParamIDs::detune,  p.detune);

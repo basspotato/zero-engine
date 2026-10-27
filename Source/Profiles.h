@@ -13,6 +13,7 @@ struct Profile
 
     // Oscillator: waveTable is an index into waveTableNames.
     float waveTable, wavePos, unison, detune, blend;
+    float waveTableB, tableMix; // second table blended in at the same position
 
     // Envelopes (seconds, sustain 0..1).
     float ampAttack, ampDecay, ampSustain, ampRelease;
