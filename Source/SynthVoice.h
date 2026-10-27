@@ -49,6 +49,8 @@ private:
         std::atomic<float>* lfoShape;
         std::atomic<float>* lfoToPos;
         std::atomic<float>* lfoToPitch;
+        std::atomic<float>* modToPitch;
+        std::atomic<float>* subOctave;
     } p;
 
     void updateEnvelopes();

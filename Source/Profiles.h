@@ -15,7 +15,10 @@ struct Profile
 
     // Envelopes (seconds, sustain 0..1).
     float ampAttack, ampDecay, ampSustain, ampRelease;
-    float modAttack, modDecay, modSustain, modRelease, modToPos;
+    float modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch;
+
+    // Sine sub: -1 = octave below the note, 0 = at the note.
+    float subOctave;
 
     // LFO.
     float lfoRate, lfoShape, lfoToPos, lfoToPitch;

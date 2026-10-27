@@ -26,7 +26,7 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state)
           get (ParamIDs::ampAttack), get (ParamIDs::ampDecay),   get (ParamIDs::ampSustain), get (ParamIDs::ampRelease),
           get (ParamIDs::modAttack), get (ParamIDs::modDecay),   get (ParamIDs::modSustain), get (ParamIDs::modRelease),
           get (ParamIDs::modToPos),  get (ParamIDs::lfoRate),    get (ParamIDs::lfoShape),  get (ParamIDs::lfoToPos),
-          get (ParamIDs::lfoToPitch) };
+          get (ParamIDs::lfoToPitch), get (ParamIDs::modToPitch), get (ParamIDs::subOctave) };
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -128,7 +128,9 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto lfoToPos = juce::jmin (1.0f, p.lfoToPos->load() + motion * 0.5f);
     const auto lfoToPitch = p.lfoToPitch->load() * 2.0f; // semitones
     const auto lfoInc = (float) (p.lfoRate->load() / sampleRate);
+    const auto modToPitch = p.modToPitch->load(); // semitones at full mod envelope
     const auto subLevel = p.weight->load() * 0.8f;
+    const auto subRatio = p.subOctave->load() < -0.5f ? 0.5 : 1.0;
 
     // Per unison voice: pitch ratio and equal-power stereo gains.
     double ratios[maxUnison];
@@ -148,7 +150,7 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     }
 
     // Choose the mip level for the highest pitch this block can reach.
-    const auto maxFreq = frequency * std::pow (2.0, maxCents / 1200.0 + lfoToPitch / 12.0);
+    const auto maxFreq = frequency * std::pow (2.0, maxCents / 1200.0 + (lfoToPitch + juce::jmax (0.0f, modToPitch)) / 12.0);
     const auto mipLevel = WavetableBank::levelFor (maxFreq, sampleRate);
 
     for (int i = 0; i < numSamples; ++i)
@@ -156,7 +158,7 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         const auto lfo = nextLfo (lfoInc);
         const auto mod = modEnv.getNextSample();
         const auto pos = juce::jlimit (0.0f, 1.0f, basePos + mod * modToPos + lfo * lfoToPos * 0.5f);
-        const auto inc = frequency * std::exp2 (lfo * lfoToPitch / 12.0f) / sampleRate;
+        const auto inc = frequency * std::exp2 ((lfo * lfoToPitch + mod * modToPitch) / 12.0f) / sampleRate;
 
         float l = 0.0f, r = 0.0f;
         for (int v = 0; v < voices; ++v)
@@ -171,7 +173,7 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         }
 
         const auto sub = std::sin (juce::MathConstants<double>::twoPi * subPhase) * subLevel;
-        subPhase += inc * 0.5;
+        subPhase += inc * subRatio;
         if (subPhase >= 1.0)
             subPhase -= 1.0;
 

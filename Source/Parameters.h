@@ -32,6 +32,8 @@ namespace ParamIDs
     inline constexpr auto modSustain = "modSustain";
     inline constexpr auto modRelease = "modRelease";
     inline constexpr auto modToPos   = "modToPos";
+    inline constexpr auto modToPitch = "modToPitch";
+    inline constexpr auto subOctave  = "subOctave";
 
     inline constexpr auto lfoRate    = "lfoRate";
     inline constexpr auto lfoShape   = "lfoShape";
@@ -96,6 +98,10 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     seconds (ParamIDs::modRelease, "Mod Release", 5.0f, 0.3f);
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::modToPos, 1 }, "Mod Env > Position",
                                                        NormalisableRange<float> (-1.0f, 1.0f), 0.0f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::modToPitch, 1 }, "Mod Env > Pitch",
+                                                       NormalisableRange<float> (-24.0f, 24.0f), 0.0f,
+                                                       AudioParameterFloatAttributes().withLabel ("st")));
+    layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::subOctave, 1 }, "Sub Octave", -1, 0, -1));
 
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::lfoRate, 1 }, "LFO Rate",
                                                        NormalisableRange<float> (0.05f, 20.0f, 0.0f, 0.3f), 2.0f,

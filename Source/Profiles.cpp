@@ -17,6 +17,7 @@ namespace
         p.lfoShape = sine;
         p.monoFreq = 120.0f;
         p.stereoWidth = 1.0f;
+        p.subOctave = -1.0f;
 
         switch (type)
         {
@@ -26,6 +27,7 @@ namespace
                 p.ampAttack = 0.002f; p.ampDecay = 0.3f; p.ampSustain = 0.9f; p.ampRelease = 0.12f;
                 p.modAttack = 0.0f; p.modDecay = 0.25f; p.modSustain = 0.2f; p.modRelease = 0.2f; p.modToPos = -0.2f;
                 p.ottDepth = 0.45f; p.tilt = -1.0f; p.monoFreq = 150.0f; p.stereoWidth = 0.8f;
+                p.subOctave = 0.0f; // an octave below a bass note is inaudible and just eats headroom
                 break;
 
             case lead:
@@ -111,9 +113,12 @@ namespace
         {
             switch (genre)
             {
-                case trap: // 808: sine, single voice, long sustain-free tail
+                case trap: // 808: held sine with a fast pitch drop, driven for harmonics
                     p.wavePos = sineWave; p.unison = 1; p.detune = 0.0f;
-                    p.ampDecay = 1.5f; p.ampSustain = 0.0f; p.ampRelease = 0.4f; p.modToPos = 0.0f;
+                    p.ampAttack = 0.001f; p.ampSustain = 1.0f; p.ampRelease = 0.5f;
+                    p.modAttack = 0.0f; p.modDecay = 0.07f; p.modSustain = 0.0f; p.modRelease = 0.05f;
+                    p.modToPos = 0.0f; p.modToPitch = 12.0f;
+                    p.grit = 0.6f; p.punch = 0.7f; p.ottDepth = 0.3f; p.tilt = 0.0f;
                     p.monoFreq = 300.0f;
                     break;
 
@@ -121,8 +126,10 @@ namespace
                     p.lfoRate = 3.0f; p.lfoShape = sine; p.lfoToPos = 0.7f;
                     break;
 
-                case drumAndBass: // reese: wide detuned saws, mono low end
-                    p.unison = 5; p.detune = 0.45f; p.lfoRate = 0.3f; p.lfoShape = triangle; p.lfoToPos = 0.2f;
+                case drumAndBass: // reese: detuned saws over a solid sub at the note
+                    p.unison = 5; p.detune = 0.4f; p.blend = 0.6f;
+                    p.lfoRate = 0.3f; p.lfoShape = triangle; p.lfoToPos = 0.2f;
+                    p.weight = 0.9f; p.tilt = 0.0f;
                     break;
 
                 case techno: // rolling, short
@@ -201,6 +208,8 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::modSustain, p.modSustain);
     set (ParamIDs::modRelease, p.modRelease);
     set (ParamIDs::modToPos,   p.modToPos);
+    set (ParamIDs::modToPitch, p.modToPitch);
+    set (ParamIDs::subOctave,  p.subOctave);
 
     set (ParamIDs::lfoRate,    p.lfoRate);
     set (ParamIDs::lfoShape,   p.lfoShape);
