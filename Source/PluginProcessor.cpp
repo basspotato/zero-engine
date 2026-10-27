@@ -36,7 +36,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     WavetableBank::get(); // build tables here, never on the audio thread
 
     for (int i = 0; i < numVoices; ++i)
-        synth.addVoice (new ZeroVoice (state, macroMap, i));
+        synth.addVoice (new ZeroVoice (state, macroMap, hostBpm, i));
 
     synth.addSound (new ZeroSound());
 
@@ -100,6 +100,14 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
+    // Host tempo for the delay and synced LFOs; 120 BPM when there is none (standalone).
+    auto bpm = 120.0;
+    if (auto* host = getPlayHead())
+        if (const auto position = host->getPosition())
+            if (const auto hostTempo = position->getBpm())
+                bpm = juce::jlimit (40.0, 300.0, *hostTempo);
+    hostBpm.store ((float) bpm);
+
     // Sub Split: voices write their sub to a third channel that skips the
     // chain. A block bigger than prepared falls back to the mixed path rather
     // than allocating here.
@@ -150,13 +158,6 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
     settings.outputDb = output.load() + levelTrim.load();
-
-    // Delay follows the host tempo; 120 BPM when there is none (standalone).
-    auto bpm = 120.0;
-    if (auto* host = getPlayHead())
-        if (const auto position = host->getPosition())
-            if (const auto hostBpm = position->getBpm())
-                bpm = juce::jlimit (40.0, 300.0, *hostBpm);
 
     const auto beats = delayTimeBeats[juce::jlimit (0, (int) std::size (delayTimeBeats) - 1, (int) delayTime.load())];
     settings.delaySeconds  = (float) (beats * 60.0 / bpm);

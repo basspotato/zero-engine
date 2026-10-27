@@ -53,6 +53,7 @@ private:
     void timerCallback() override;
 
     MacroMap macroMap;
+    std::atomic<float> hostBpm { 120.0f }; // for tempo-synced LFOs; 120 when the host gives none
     ZeroSynth synth;
     std::atomic<int> appliedGenre { -1 }, appliedType { -1 };
     FinishingChain finishing;

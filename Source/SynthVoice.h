@@ -18,7 +18,7 @@ public:
 
     // index seeds the voice's randomness (unison start phases, S&H), so a
     // fresh engine renders identically; phases still vary from note to note.
-    ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& macroMap, int index);
+    ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& macroMap, const std::atomic<float>& hostBpm, int index);
 
     bool canPlaySound (juce::SynthesiserSound* sound) override;
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel) override;
@@ -72,6 +72,7 @@ private:
         std::atomic<float>* waveTableB;
         std::atomic<float>* tableMix;
         std::atomic<float>* subOn;
+        std::atomic<float>* lfoSync;
     } p;
 
     void setVelocity (float velocity);
@@ -112,6 +113,7 @@ private:
     Svf filters[2][2]; // [stage][channel]
 
     const MacroMap& macroMap;
+    const std::atomic<float>& hostBpm; // set by the processor each block
 
     void updateEnvelopes();
     float nextLfo (float increment);

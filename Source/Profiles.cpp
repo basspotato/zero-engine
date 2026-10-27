@@ -6,6 +6,8 @@ namespace
     enum Genre { edm, dubstep, techno, techHouse, trap, synthwave, drumAndBass, pop, house, trance, futureBass, hardstyle };
     enum Type  { bass, lead, chord, pad, pluck, fx };
     enum Lfo   { sine, triangle, saw, square, sampleHold };
+    // lfoSyncNames indices: one LFO cycle per note division of the host tempo.
+    constexpr float syncQuarterTriplet = 4.0f, syncEighth = 5.0f, syncSixteenth = 7.0f;
 
     // Wave positions across the Basic frames: sine, triangle, saw, square, pulse.
     constexpr float sineWave = 0.0f, sawWave = 0.5f, squareWave = 0.75f;
@@ -102,7 +104,7 @@ namespace
                 p.wavePos = 0.8f; p.unison = 5; p.detune = 0.6f; p.blend = 0.7f;
                 p.ampAttack = 0.3f; p.ampDecay = 2.0f; p.ampSustain = 0.5f; p.ampRelease = 2.5f;
                 p.modAttack = 2.0f; p.modDecay = 2.0f; p.modSustain = 0.5f; p.modRelease = 2.0f; p.modToPos = 0.5f;
-                p.lfoRate = 4.0f; p.lfoShape = sampleHold; p.lfoToPos = 0.6f; p.lfoToPitch = 0.2f;
+                p.lfoRate = 4.0f; p.lfoSync = syncEighth; p.lfoShape = sampleHold; p.lfoToPos = 0.6f; p.lfoToPitch = 0.2f; // steps on 1/8s
                 p.ottDepth = 0.5f; p.tilt = 1.0f; p.stereoWidth = 0.7f; // references sit at 4-43% side; 1.5 went anti-phase
                 p.delayMix = 0.2f; p.reverbMix = 0.4f; p.reverbSize = 0.8f;
                 break;
@@ -319,7 +321,7 @@ namespace
                     break;
 
                 case dubstep: // classic wobble: the LFO sweeps the Basic shapes
-                    p.lfoRate = 3.0f; p.lfoShape = sine; p.lfoToPos = 0.7f;
+                    p.lfoRate = 3.0f; p.lfoSync = syncQuarterTriplet; p.lfoShape = sine; p.lfoToPos = 0.7f; // 3 Hz at 120 BPM
                     break;
 
                 case drumAndBass: // deep rolling reese: darker detuned wave over a heavy sub
@@ -385,7 +387,7 @@ namespace
                 case dubstep: // screech: harsh table moved at 1/16 (140 BPM), driven and squashed, mono
                     p.waveTable = harshTable; p.wavePos = 0.8f; p.unison = 3; p.detune = 0.25f;
                     p.modToPos = 0.2f;
-                    p.lfoRate = 9.33f; p.lfoShape = square; p.lfoToPos = 0.2f; p.lfoToPitch = 0.0f;
+                    p.lfoRate = 9.33f; p.lfoSync = syncSixteenth; p.lfoShape = square; p.lfoToPos = 0.2f; p.lfoToPitch = 0.0f;
                     p.grit = 0.75f; p.motion = 0.5f; p.air = 0.5f; p.width = 0.5f;
                     p.ottDepth = 0.8f; p.tilt = 2.5f; p.stereoWidth = 1.0f;
                     p.delayMix = 0.1f; p.reverbMix = 0.1f;
@@ -647,6 +649,7 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
 
     set (ParamIDs::lfoRate,    p.lfoRate);
     set (ParamIDs::lfoShape,   p.lfoShape);
+    set (ParamIDs::lfoSync,    p.lfoSync);
     set (ParamIDs::lfoToPos,   p.lfoToPos);
     set (ParamIDs::lfoToPitch, p.lfoToPitch);
 

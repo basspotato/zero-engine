@@ -35,6 +35,7 @@ struct Profile
 
     // LFO.
     float lfoRate, lfoShape, lfoToPos, lfoToPitch;
+    float lfoSync; // index into lfoSyncNames: 0 = free (lfoRate Hz), else locked to the host tempo
 
     // Space: delay time is an index into delayTimeNames.
     float delayMix, delayTime, delayFeedback, reverbMix, reverbSize;

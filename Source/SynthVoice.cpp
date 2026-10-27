@@ -17,8 +17,8 @@ namespace
     }
 }
 
-ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map, int index)
-    : macroMap (map), random (0x5eed + index)
+ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map, const std::atomic<float>& bpm, int index)
+    : macroMap (map), hostBpm (bpm), random (0x5eed + index)
 {
     auto get = [&] (const char* id) { return state.getRawParameterValue (id); };
 
@@ -31,7 +31,8 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::glide),     get (ParamIDs::bendRange),
           get (ParamIDs::filterMode), get (ParamIDs::filterCutoff), get (ParamIDs::filterRes), get (ParamIDs::filterEnv),
           get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff), get (ParamIDs::velToCutoff), get (ParamIDs::velSens),
-          get (ParamIDs::waveTable), get (ParamIDs::waveTableB), get (ParamIDs::tableMix), get (ParamIDs::subOn) };
+          get (ParamIDs::waveTable), get (ParamIDs::waveTableB), get (ParamIDs::tableMix), get (ParamIDs::subOn),
+          get (ParamIDs::lfoSync) };
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -180,7 +181,11 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto motion = p.motion->load();
     const auto lfoToPos = juce::jlimit (0.0f, 1.0f, p.lfoToPos->load() + motion * 0.5f + macroMap.offset (MacroTarget::lfoToPos));
     const auto lfoToPitch = p.lfoToPitch->load() * 2.0f; // semitones
-    const auto lfoRate = juce::jlimit (0.05f, 40.0f, p.lfoRate->load() * std::exp2 (macroMap.offset (MacroTarget::lfoRate)));
+    // Synced: one cycle per note division of the host tempo, so wobbles stay on
+    // the beat at any BPM. Motion still doubles the rate per unit (the next division).
+    const auto sync = juce::jlimit (0, (int) std::size (lfoSyncBeats) - 1, (int) p.lfoSync->load());
+    const auto baseRate = sync > 0 ? hostBpm.load() / 60.0f / lfoSyncBeats[sync] : p.lfoRate->load();
+    const auto lfoRate = juce::jlimit (0.05f, 40.0f, baseRate * std::exp2 (macroMap.offset (MacroTarget::lfoRate)));
     const auto lfoInc = (float) (lfoRate / sampleRate);
     const auto modToPitch = juce::jlimit (-36.0f, 36.0f, p.modToPitch->load() + macroMap.offset (MacroTarget::modToPitch)); // semitones at full mod envelope
     const auto subLevel = p.subOn->load() > 0.5f ? p.weight->load() * 0.8f : 0.0f;

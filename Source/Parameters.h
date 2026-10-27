@@ -43,6 +43,7 @@ namespace ParamIDs
 
     inline constexpr auto lfoRate    = "lfoRate";
     inline constexpr auto lfoShape   = "lfoShape";
+    inline constexpr auto lfoSync    = "lfoSync";     // Off, or a note division of the host tempo
     inline constexpr auto lfoToPos   = "lfoToPos";
     inline constexpr auto lfoToPitch = "lfoToPitch";
 
@@ -80,6 +81,8 @@ inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech
                                                 "Drum & Bass", "Pop", "House", "Trance", "Future Bass", "Hardstyle" };
 inline const juce::StringArray typeNames     { "Bass", "Lead", "Chord", "Pad", "Pluck", "FX" };
 inline const juce::StringArray lfoShapeNames { "Sine", "Triangle", "Saw", "Square", "Sample & Hold" };
+inline const juce::StringArray lfoSyncNames  { "Off", "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
+inline constexpr float lfoSyncBeats[]       { 0.0f, 4.0f, 2.0f, 1.0f, 2.0f / 3.0f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f }; // one LFO cycle, in beats
 // Append only: saved sessions store the index.
 inline const juce::StringArray waveTableNames  { "Basic", "Growl", "Digital", "Organ", "FM", "Wavefold",
                                                  "PWM", "Neuro", "Bell", "Choir", "Harsh", "Analog", "Jupiter" };
@@ -151,6 +154,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
                                                        NormalisableRange<float> (0.05f, 20.0f, 0.0f, 0.3f), 2.0f,
                                                        AudioParameterFloatAttributes().withLabel ("Hz")));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::lfoShape, 1 }, "LFO Shape", lfoShapeNames, 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::lfoSync, 1 }, "LFO Sync", lfoSyncNames, 0));
     unit (ParamIDs::lfoToPos,   "LFO > Position", 0.0f);
     unit (ParamIDs::lfoToPitch, "LFO > Pitch",    0.0f);
 
