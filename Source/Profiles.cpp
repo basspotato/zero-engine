@@ -301,6 +301,35 @@ namespace
             p.grit = 0.25f; p.tilt = 4.0f; p.air = 0.7f; p.ottDepth = 0.8f;
             p.delayMix = 0.35f; p.delayTime = 2.0f; p.delayFeedback = 0.45f; p.reverbMix = 0.4f; p.reverbSize = 0.85f;
         }
+
+        if (genre == techno && type == fx)
+        {
+            // Riser (owner: the old random-stepping FX was all over the place): a noisy,
+            // bit-crushed wash through a band-pass that sweeps up five octaves while the
+            // pitch climbs a fifth, driven, into a plate-like room. No random steps.
+            p.waveTable = harshTable; p.wavePos = 0.9f; p.unison = 7; p.detune = 0.7f; p.blend = 0.8f;
+            p.ampAttack = 0.8f; p.ampDecay = 1.0f; p.ampSustain = 1.0f; p.ampRelease = 1.2f;
+            p.modAttack = 3.0f; p.modDecay = 1.0f; p.modSustain = 1.0f; p.modRelease = 1.0f;
+            p.modToPos = 0.0f; p.modToPitch = 7.0f;
+            p.filterMode = 2.0f; p.filterCutoff = 250.0f; p.filterRes = 0.35f; p.filterEnv = 5.5f; p.filterKeytrack = 0.0f;
+            p.lfoSync = 0.0f; p.lfoToPos = 0.0f; p.lfoToPitch = 0.0f; p.lfoToCutoff = 0.0f;
+            p.grit = 0.5f; p.ottDepth = 0.6f; p.tilt = 0.0f; p.width = 0.6f; p.motion = 0.0f;
+            p.delayMix = 0.15f; p.delayTime = 2.0f; p.delayFeedback = 0.3f; p.reverbMix = 0.35f; p.reverbSize = 0.7f;
+        }
+
+        if (genre == trap && type == fx)
+        {
+            // Impact (owner: the old one was all over the place): a boom that drops two
+            // octaves into the note, with the sub following it down, driven, short room.
+            p.waveTable = 0.0f; p.wavePos = 0.2f; p.unison = 3; p.detune = 0.15f;
+            p.ampAttack = 0.001f; p.ampDecay = 1.2f; p.ampSustain = 0.0f; p.ampRelease = 0.6f;
+            p.modAttack = 0.0f; p.modDecay = 0.5f; p.modSustain = 0.0f; p.modRelease = 0.3f;
+            p.modToPos = 0.0f; p.modToPitch = 24.0f;
+            p.filterMode = 1.0f; p.filterCutoff = 4000.0f; p.filterRes = 0.0f; p.filterEnv = 0.0f;
+            p.lfoSync = 0.0f; p.lfoToPos = 0.0f; p.lfoToPitch = 0.0f; p.lfoToCutoff = 0.0f;
+            p.weight = 0.4f; p.grit = 0.55f; p.punch = 0.8f; p.ottDepth = 0.5f; p.tilt = 1.0f; p.motion = 0.0f;
+            p.delayMix = 0.15f; p.delayTime = 1.0f; p.delayFeedback = 0.3f; p.reverbMix = 0.3f; p.reverbSize = 0.75f;
+        }
     }
 
     // Signature sounds that a shift alone can't reach.
@@ -318,6 +347,7 @@ namespace
                     p.grit = 0.6f; p.punch = 0.7f; p.ottDepth = 0.3f; p.tilt = 0.0f;
                     p.monoFreq = 300.0f;
                     p.glide = 0.08f; // overlapping notes slide
+                    p.levelTrim = -3.0f; // owner: it came in hot and pinned the meter; peaks now about -3 dBFS
                     break;
 
                 case dubstep: // classic wobble: the LFO sweeps the Basic shapes

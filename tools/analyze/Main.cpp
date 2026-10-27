@@ -300,6 +300,28 @@ int main (int argc, char* argv[])
                                argFile (args, 2, "analysis/freesound/refs"),
                                args.size() > 3 ? args[3].getIntValue() : 450);
 
+    if (command == "segments" && args.size() >= 2)
+    {
+        // Loudness and brightness of a WAV in slices, to check how a sound moves
+        // over time (a riser should brighten, an impact should fall away).
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (argFile (args, 1, {})));
+        if (reader == nullptr)
+            return usage();
+        const auto slice = args.size() > 2 ? args[2].getDoubleValue() : 0.5;
+        const auto sliceSamples = (int) (slice * reader->sampleRate);
+        juce::AudioBuffer<float> audio (2, sliceSamples);
+        std::printf ("%8s %8s %10s\n", "from s", "LUFS", "centroid");
+        for (juce::int64 start = 0; start + sliceSamples <= reader->lengthInSamples; start += sliceSamples)
+        {
+            reader->read (&audio, 0, sliceSamples, start, true, true);
+            const auto d = analyse (audio, reader->sampleRate);
+            std::printf ("%8.2f %8.1f %10.0f\n", (double) start / reader->sampleRate, d.lufs, d.centroidHz);
+        }
+        return 0;
+    }
+
     if (command == "gencheck")
     {
         // Generate's render-and-check: time per click and how many of the 6
