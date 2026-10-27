@@ -7,8 +7,9 @@ namespace MacroIndex  { enum { weight, grit, punch, width, motion, air, count };
 
 // Secondary targets a macro can push. Units: ottDepth, detune, modToPos and
 // lfoToPos in their own 0..1 ranges; tilt in dB; ampDecay and lfoRate in
-// octaves (x2 per unit); modToPitch in semitones.
-namespace MacroTarget { enum { ottDepth, tilt, detune, ampDecay, modToPos, lfoToPos, lfoRate, modToPitch, count }; }
+// octaves (x2 per unit); modToPitch in semitones; filterCutoff and
+// filterEnv in octaves.
+namespace MacroTarget { enum { ottDepth, tilt, detune, ampDecay, modToPos, lfoToPos, lfoRate, modToPitch, filterCutoff, filterEnv, count }; }
 
 struct MacroDirections
 {

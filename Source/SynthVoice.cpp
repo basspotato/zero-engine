@@ -28,7 +28,9 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::modAttack), get (ParamIDs::modDecay),   get (ParamIDs::modSustain), get (ParamIDs::modRelease),
           get (ParamIDs::modToPos),  get (ParamIDs::lfoRate),    get (ParamIDs::lfoShape),  get (ParamIDs::lfoToPos),
           get (ParamIDs::lfoToPitch), get (ParamIDs::modToPitch), get (ParamIDs::subOctave),
-          get (ParamIDs::glide),     get (ParamIDs::bendRange) };
+          get (ParamIDs::glide),     get (ParamIDs::bendRange),
+          get (ParamIDs::filterMode), get (ParamIDs::filterCutoff), get (ParamIDs::filterRes), get (ParamIDs::filterEnv),
+          get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff) };
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -80,6 +82,10 @@ void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*
 {
     pitch = targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
     pitchWheelMoved (pitchWheel);
+
+    for (auto& stage : filters)
+        for (auto& f : stage)
+            f = {};
     level = velocity * 0.3f;
 
     // Random start phases keep unison voices from starting phase-locked (a flat, phasey attack).
@@ -106,6 +112,20 @@ void ZeroVoice::stopNote (float, bool allowTailOff)
         ampEnv.reset();
         modEnv.reset();
         clearCurrentNote();
+    }
+}
+
+float ZeroVoice::filterSample (int ch, float x, int mode, const Svf::Coeffs& resonant, const Svf::Coeffs& flat) noexcept
+{
+    float low, band, high;
+    filters[0][ch].process (x, resonant, low, band, high);
+
+    switch (mode)
+    {
+        case 0:  return low;
+        case 1:  filters[1][ch].process (low, flat, low, band, high); return low; // second, unresonant stage: 24 dB/oct
+        case 2:  return band;
+        default: return high;
     }
 }
 
@@ -181,6 +201,20 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
                                     + (lfoToPitch + juce::jmax (0.0f, modToPitch) + juce::jmax (0.0f, bendSemis)) / 12.0);
     const auto mipLevel = WavetableBank::levelFor (maxFreq, sampleRate);
 
+    // Filter. Fully open low-pass with no modulation is skipped, so profiles
+    // that don't use it sound exactly as before.
+    const auto filterMode = (int) p.filterMode->load();
+    const auto cutoff = p.filterCutoff->load() * std::exp2 (macroMap.offset (MacroTarget::filterCutoff));
+    const auto filterEnv = p.filterEnv->load() + macroMap.offset (MacroTarget::filterEnv);
+    const auto keytrack = p.filterKeytrack->load();
+    const auto lfoToCutoff = p.lfoToCutoff->load();
+    const auto filterOn = filterMode > 1 || cutoff < 19000.0f || std::abs (filterEnv) > 1.0e-3f
+                       || lfoToCutoff > 1.0e-3f || keytrack > 1.0e-3f;
+    const auto k = 2.0f * (1.0f - 0.97f * p.filterRes->load());
+    const auto maxCutoff = (float) (0.45 * sampleRate);
+    const auto middleC = std::log2 (261.63);
+    Svf::Coeffs resonant, flat;
+
     for (int i = 0; i < numSamples; ++i)
     {
         const auto lfo = nextLfo (lfoInc);
@@ -199,6 +233,21 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
             phases[v] += inc * ratios[v];
             if (phases[v] >= 1.0)
                 phases[v] -= 1.0;
+        }
+
+        if (filterOn)
+        {
+            if ((i & 7) == 0) // cutoff modulation at 1/8 rate is plenty and saves the tan()
+            {
+                const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC);
+                const auto fc = juce::jlimit (20.0f, maxCutoff, cutoff * std::exp2 (octaves));
+                const auto g = std::tan (juce::MathConstants<float>::pi * fc / (float) sampleRate);
+                resonant = Svf::make (g, k);
+                flat = Svf::make (g, juce::MathConstants<float>::sqrt2);
+            }
+
+            l = filterSample (0, l, filterMode, resonant, flat);
+            r = filterSample (1, r, filterMode, resonant, flat);
         }
 
         const auto sub = std::sin (juce::MathConstants<double>::twoPi * subPhase) * subLevel;

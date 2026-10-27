@@ -58,7 +58,47 @@ private:
         std::atomic<float>* subOctave;
         std::atomic<float>* glide;
         std::atomic<float>* bendRange;
+        std::atomic<float>* filterMode;
+        std::atomic<float>* filterCutoff;
+        std::atomic<float>* filterRes;
+        std::atomic<float>* filterEnv;
+        std::atomic<float>* filterKeytrack;
+        std::atomic<float>* lfoToCutoff;
     } p;
+
+    // Topology-preserving state-variable filter (Zavalishin), one channel, one stage.
+    struct Svf
+    {
+        float ic1 = 0.0f, ic2 = 0.0f;
+
+        struct Coeffs { float k = 2.0f, a1 = 1.0f, a2 = 0.0f, a3 = 0.0f; };
+
+        static Coeffs make (float g, float k) noexcept
+        {
+            Coeffs c;
+            c.k = k;
+            c.a1 = 1.0f / (1.0f + g * (g + k));
+            c.a2 = g * c.a1;
+            c.a3 = g * c.a2;
+            return c;
+        }
+
+        void process (float x, const Coeffs& c, float& low, float& band, float& high) noexcept
+        {
+            const auto v3 = x - ic2;
+            const auto v1 = c.a1 * ic1 + c.a2 * v3;
+            const auto v2 = ic2 + c.a2 * ic1 + c.a3 * v3;
+            ic1 = 2.0f * v1 - ic1;
+            ic2 = 2.0f * v2 - ic2;
+            low = v2;
+            band = v1;
+            high = x - c.k * v1 - v2;
+        }
+    };
+
+    float filterSample (int ch, float x, int mode, const Svf::Coeffs& resonant, const Svf::Coeffs& flat) noexcept;
+
+    Svf filters[2][2]; // [stage][channel]
 
     const MacroMap& macroMap;
 

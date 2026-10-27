@@ -18,6 +18,8 @@ namespace
         p.monoFreq = 120.0f;
         p.stereoWidth = 1.0f;
         p.subOctave = -1.0f;
+        p.filterMode = 1.0f;        // Low 24, fully open: bypassed
+        p.filterCutoff = 20000.0f;
 
         switch (type)
         {
@@ -62,7 +64,8 @@ namespace
                 p.weight = 0.1f; p.grit = 0.2f; p.punch = 0.8f; p.width = 0.6f; p.motion = 0.0f; p.air = 0.4f;
                 p.wavePos = 0.6f; p.unison = 3; p.detune = 0.2f; p.blend = 0.5f;
                 p.ampAttack = 0.001f; p.ampDecay = 0.35f; p.ampSustain = 0.0f; p.ampRelease = 0.3f;
-                p.modAttack = 0.0f; p.modDecay = 0.15f; p.modSustain = 0.0f; p.modRelease = 0.2f; p.modToPos = -0.45f;
+                p.modAttack = 0.0f; p.modDecay = 0.15f; p.modSustain = 0.0f; p.modRelease = 0.2f; p.modToPos = -0.2f;
+                p.filterCutoff = 500.0f; p.filterRes = 0.25f; p.filterEnv = 5.5f; p.filterKeytrack = 0.5f; // classic filter pluck
                 p.lfoRate = 1.0f;
                 p.ottDepth = 0.5f; p.tilt = 0.5f; p.monoFreq = 150.0f; p.stereoWidth = 1.1f;
                 break;
@@ -136,12 +139,14 @@ namespace
                     p.glide = 0.03f;
                     break;
 
-                case techno: // rolling, short
+                case techno: // rolling, short, filter-plucked
                     p.ampDecay = 0.18f; p.ampSustain = 0.3f; p.modToPos = -0.35f;
+                    p.filterCutoff = 250.0f; p.filterRes = 0.35f; p.filterEnv = 4.0f;
                     break;
 
-                case synthwave: // square-ish analog bass
+                case synthwave: // square-ish analog filter bass
                     p.wavePos = squareWave; p.unison = 1; p.grit = 0.15f;
+                    p.filterCutoff = 700.0f; p.filterRes = 0.3f; p.filterEnv = 3.0f;
                     break;
 
                 default:
@@ -174,11 +179,12 @@ namespace
         a[M::width][T::detune]    = 0.2f;
         a[M::motion][T::lfoRate]  = 1.0f;
         a[M::air][T::tilt]        = 1.0f;
+        a[M::air][T::filterCutoff] = 1.0f; // opens the filter where one is in use
 
         switch (type)
         {
             case bass:  a[M::punch][T::modToPos] = -0.2f; break; // stronger wave pluck
-            case pluck: a[M::punch][T::modToPos] = -0.3f; a[M::punch][T::ampDecay] = -1.0f; break;
+            case pluck: a[M::punch][T::modToPos] = -0.3f; a[M::punch][T::ampDecay] = -1.0f; a[M::punch][T::filterEnv] = 2.0f; break;
             case chord: a[M::width][T::detune] = 0.3f; break;
             case pad:   a[M::motion][T::lfoToPos] = 0.3f; a[M::motion][T::detune] = 0.15f; a[M::punch][T::ottDepth] = 0.15f; break;
             case fx:    a[M::motion][T::lfoRate] = 2.0f; a[M::motion][T::modToPitch] = 12.0f; break;
@@ -280,6 +286,13 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::modToPos,   p.modToPos);
     set (ParamIDs::modToPitch, p.modToPitch);
     set (ParamIDs::subOctave,  p.subOctave);
+
+    set (ParamIDs::filterMode,     p.filterMode);
+    set (ParamIDs::filterCutoff,   p.filterCutoff);
+    set (ParamIDs::filterRes,      p.filterRes);
+    set (ParamIDs::filterEnv,      p.filterEnv);
+    set (ParamIDs::filterKeytrack, p.filterKeytrack);
+    set (ParamIDs::lfoToCutoff,    p.lfoToCutoff);
 
     set (ParamIDs::playMode,   p.playMode);
     set (ParamIDs::glide,      p.glide);

@@ -40,6 +40,14 @@ namespace ParamIDs
     inline constexpr auto lfoToPos   = "lfoToPos";
     inline constexpr auto lfoToPitch = "lfoToPitch";
 
+    // Filter (per voice; the sub bypasses it).
+    inline constexpr auto filterMode     = "filterMode";
+    inline constexpr auto filterCutoff   = "filterCutoff";
+    inline constexpr auto filterRes      = "filterRes";
+    inline constexpr auto filterEnv      = "filterEnv";
+    inline constexpr auto filterKeytrack = "filterKeytrack";
+    inline constexpr auto lfoToCutoff    = "lfoToCutoff";
+
     // Playing.
     inline constexpr auto playMode  = "playMode";
     inline constexpr auto glide     = "glide";
@@ -56,6 +64,7 @@ inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech
                                                 "Drum & Bass", "Pop", "House", "Trance", "Future Bass", "Hardstyle" };
 inline const juce::StringArray typeNames     { "Bass", "Lead", "Chord", "Pad", "Pluck", "FX" };
 inline const juce::StringArray lfoShapeNames { "Sine", "Triangle", "Saw", "Square", "Sample & Hold" };
+inline const juce::StringArray filterModeNames { "Low 12", "Low 24", "Band", "High" };
 inline const juce::StringArray playModeNames { "Poly", "Mono", "Legato" }; // Legato: overlapping notes slide without retriggering
 
 inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
@@ -115,6 +124,21 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::lfoShape, 1 }, "LFO Shape", lfoShapeNames, 0));
     unit (ParamIDs::lfoToPos,   "LFO > Position", 0.0f);
     unit (ParamIDs::lfoToPitch, "LFO > Pitch",    0.0f);
+
+    auto octaves = [&] (const char* id, const char* name, float min, float max)
+    {
+        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { id, 1 }, name, NormalisableRange<float> (min, max), 0.0f,
+                                                           AudioParameterFloatAttributes().withLabel ("oct")));
+    };
+
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::filterMode, 1 }, "Filter Mode", filterModeNames, 1));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::filterCutoff, 1 }, "Filter Cutoff",
+                                                       NormalisableRange<float> (20.0f, 20000.0f, 0.0f, 0.25f), 20000.0f,
+                                                       AudioParameterFloatAttributes().withLabel ("Hz")));
+    unit (ParamIDs::filterRes, "Filter Resonance", 0.0f);
+    octaves (ParamIDs::filterEnv, "Mod Env > Cutoff", -8.0f, 8.0f);
+    unit (ParamIDs::filterKeytrack, "Filter Keytrack", 0.0f);
+    octaves (ParamIDs::lfoToCutoff, "LFO > Cutoff", 0.0f, 6.0f);
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::playMode, 1 }, "Play Mode", playModeNames, 0));
     seconds (ParamIDs::glide, "Glide", 2.0f, 0.0f);
