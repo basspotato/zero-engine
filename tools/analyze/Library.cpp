@@ -98,7 +98,36 @@ std::vector<Item> analyseFolder (const juce::File& root)
     return items;
 }
 
-juce::AudioBuffer<float> renderProfile (int genre, int type, const Profile* candidate)
+int groupNote (const std::vector<const Item*>& items, int type)
+{
+    std::vector<double> notes;
+    for (auto* item : items)
+        if (item->d.pitchHz > 0.0)
+            notes.push_back (69.0 + 12.0 * std::log2 (item->d.pitchHz / 440.0));
+
+    if (notes.empty() || notes.size() * 2 < items.size())
+        return -1;
+
+    std::nth_element (notes.begin(), notes.begin() + (std::ptrdiff_t) (notes.size() / 2), notes.end());
+    const auto note = (int) std::round (notes[notes.size() / 2]);
+    return type == 0 ? juce::jlimit (24, 60, note) : juce::jlimit (36, 96, note);
+}
+
+int matchedRoot (int genre, int type, int referenceNote)
+{
+    if (referenceNote < 0)
+        return -1;
+
+    const auto own = analyse (renderProfile (genre, type), renderRate).pitchHz;
+    if (own <= 0.0)
+        return -1;
+
+    const auto ownNote = (int) std::round (69.0 + 12.0 * std::log2 (own / 440.0));
+    const auto root = phraseFor (type).notes.front() + (referenceNote - ownNote);
+    return type == 0 ? juce::jlimit (12, 60, root) : juce::jlimit (36, 96, root);
+}
+
+juce::AudioBuffer<float> renderProfile (int genre, int type, const Profile* candidate, int rootNote)
 {
     ZeroEngineProcessor engine;
     engine.loadProfile (genre, type, candidate != nullptr ? *candidate : makeProfile (genre, type));
@@ -106,7 +135,14 @@ juce::AudioBuffer<float> renderProfile (int genre, int type, const Profile* cand
     engine.setPlayConfigDetails (0, 2, renderRate, renderBlock);
     engine.prepareToPlay (renderRate, renderBlock);
 
-    const auto phrase = phraseFor (type);
+    auto phrase = phraseFor (type);
+    if (rootNote >= 0)
+    {
+        const auto shift = rootNote - phrase.notes.front();
+        for (auto& note : phrase.notes)
+            note += shift;
+    }
+
     const auto offAt = (int) (phrase.hold * renderRate);
     const auto total = (int) ((phrase.hold + phrase.tail) * renderRate);
 

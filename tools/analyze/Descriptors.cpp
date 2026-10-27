@@ -110,6 +110,72 @@ namespace
         const auto gated = gatedMean (relativeGate);
         return gated > 0.0 ? toLufs (gated) : -100.0;
     }
+
+    // YIN fundamental estimate (de Cheveigné & Kawahara 2002) on up to 24
+    // loud frames of the mid signal, 30 Hz to 2 kHz. Returns the median of
+    // the frames that found a clear period, or 0.
+    double estimatePitch (const std::vector<float>& mid, double fs, const std::vector<int>& frameStarts)
+    {
+        const auto minLag = (int) (fs / 2000.0), maxLag = (int) (fs / 30.0);
+        const auto window = maxLag;
+        std::vector<double> diff ((size_t) maxLag + 1), cmnd ((size_t) maxLag + 1);
+        std::vector<double> estimates;
+
+        for (auto start : frameStarts)
+        {
+            if (start + window + maxLag >= (int) mid.size())
+                continue;
+
+            for (int lag = 1; lag <= maxLag; ++lag)
+            {
+                double sum = 0.0;
+                for (int i = 0; i < window; ++i)
+                {
+                    const auto d = (double) mid[(size_t) (start + i)] - mid[(size_t) (start + i + lag)];
+                    sum += d * d;
+                }
+                diff[(size_t) lag] = sum;
+            }
+
+            // Cumulative mean normalised difference.
+            double running = 0.0;
+            cmnd[0] = 1.0;
+            for (int lag = 1; lag <= maxLag; ++lag)
+            {
+                running += diff[(size_t) lag];
+                cmnd[(size_t) lag] = running > 0.0 ? diff[(size_t) lag] * lag / running : 1.0;
+            }
+
+            // First dip under the threshold, walked down to its bottom.
+            int found = -1;
+            for (int lag = minLag + 1; lag < maxLag; ++lag)
+            {
+                if (cmnd[(size_t) lag] < 0.15)
+                {
+                    while (lag + 1 < maxLag && cmnd[(size_t) lag + 1] < cmnd[(size_t) lag])
+                        ++lag;
+                    found = lag;
+                    break;
+                }
+            }
+
+            if (found > minLag && found < maxLag)
+            {
+                // Parabolic interpolation around the dip.
+                const auto a = cmnd[(size_t) found - 1], b = cmnd[(size_t) found], c = cmnd[(size_t) found + 1];
+                const auto denom = a - 2.0 * b + c;
+                const auto shift = std::abs (denom) > 1.0e-12 ? 0.5 * (a - c) / denom : 0.0;
+                estimates.push_back (fs / ((double) found + juce::jlimit (-1.0, 1.0, shift)));
+            }
+        }
+
+        // Need most frames to agree before trusting it.
+        if (estimates.size() < juce::jmax<size_t> (2, frameStarts.size() / 2))
+            return 0.0;
+
+        std::nth_element (estimates.begin(), estimates.begin() + (std::ptrdiff_t) (estimates.size() / 2), estimates.end());
+        return estimates[estimates.size() / 2];
+    }
 }
 
 Descriptors analyse (const juce::AudioBuffer<float>& audio, double fs)
@@ -152,6 +218,25 @@ Descriptors analyse (const juce::AudioBuffer<float>& audio, double fs)
 
     const auto loudest = frameRms.empty() ? 0.0 : *std::max_element (frameRms.begin(), frameRms.end());
     const auto activeThreshold = juce::jmax (loudest * 0.01, 3.0e-4); // within 40 dB of the loudest, above -70 dBFS
+
+    // Pitch from up to 24 evenly spread active frames.
+    {
+        std::vector<float> mid ((size_t) n);
+        for (int i = 0; i < n; ++i)
+            mid[(size_t) i] = 0.5f * (left[i] + right[i]);
+
+        std::vector<int> active;
+        for (size_t f = 0; f < frameRms.size(); ++f)
+            if (frameRms[f] >= activeThreshold)
+                active.push_back ((int) f * hop);
+
+        std::vector<int> picked;
+        const auto stride = juce::jmax<size_t> (1, active.size() / 24);
+        for (size_t i = 0; i < active.size(); i += stride)
+            picked.push_back (active[i]);
+
+        d.pitchHz = estimatePitch (mid, fs, picked);
+    }
 
     double midEnergy = 0.0, sideEnergy = 0.0, lr = 0.0, ll = 0.0, rr = 0.0;
 

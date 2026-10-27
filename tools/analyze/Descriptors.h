@@ -16,6 +16,7 @@ struct Descriptors
     double sidePct = 0;        // side share of energy: 0 = mono, 50 = uncorrelated
     double correlation = 1;    // L/R correlation, -1..1
     double seconds = 0;        // length of the analysed audio
+    double pitchHz = 0;        // median fundamental (YIN), 0 when unpitched or unclear
 };
 
 Descriptors analyse (const juce::AudioBuffer<float>& audio, double sampleRate);
@@ -38,4 +39,5 @@ inline constexpr DescriptorField descriptorFields[] {
     { "sub_pct",     "%",    &Descriptors::subPct },
     { "side_pct",    "%",    &Descriptors::sidePct },
     { "correlation", "",     &Descriptors::correlation },
+    { "pitch_hz",    "Hz",   &Descriptors::pitchHz },
 };

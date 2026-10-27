@@ -10,11 +10,36 @@ namespace
     struct Target
     {
         double lufs, plr, centroidHz, bassPct, sidePct;
+        int note = -1; // render at this MIDI note (-1: the type's default)
     };
 
     Target targetFrom (const Descriptors& d)
     {
         return { d.lufs, d.plr, d.centroidHz, d.bassPct, d.sidePct };
+    }
+
+    double median (std::vector<double> v)
+    {
+        std::nth_element (v.begin(), v.begin() + (std::ptrdiff_t) (v.size() / 2), v.end());
+        return v[v.size() / 2];
+    }
+
+    // Median per dimension, so a few odd files (loops, wrong octave, mislabelled)
+    // can't drag the target.
+    Target targetFrom (const std::vector<const Item*>& members, int type)
+    {
+        auto column = [&] (double Descriptors::* m)
+        {
+            std::vector<double> v;
+            for (auto* item : members)
+                v.push_back (item->d.*m);
+            return median (v);
+        };
+
+        Target t { column (&Descriptors::lufs), column (&Descriptors::plr), column (&Descriptors::centroidHz),
+                   column (&Descriptors::bassPct), column (&Descriptors::sidePct) };
+        t.note = groupNote (members, type);
+        return t;
     }
 
     // The values the tuner may move, with search bounds and step sizes.
@@ -38,11 +63,11 @@ namespace
         return { true, p.levelTrim, p.ottDepth, p.tilt, p.weight, p.stereoWidth };
     }
 
-    Descriptors measure (int genre, int type, const ProfileTrim& trim)
+    Descriptors measure (int genre, int type, const ProfileTrim& trim, int note)
     {
         auto profile = makeProfile (genre, type);
         applyTrim (profile, trim);
-        return analyse (renderProfile (genre, type, &profile), renderRate);
+        return analyse (renderProfile (genre, type, &profile, note), renderRate);
     }
 
     // Squared errors in units of compare's verdict thresholds: 1.0 per
@@ -78,7 +103,7 @@ namespace
     {
         Result r;
         r.trim = trimOf (makeProfile (genre, type));
-        r.before = measure (genre, type, r.trim);
+        r.before = measure (genre, type, r.trim, target.note);
         ++r.renders;
 
         auto best = r.before;
@@ -102,7 +127,7 @@ namespace
                         continue;
                     value = moved;
 
-                    const auto d = measure (genre, type, candidate);
+                    const auto d = measure (genre, type, candidate, target.note);
                     ++r.renders;
                     if (const auto l = loss (d, target, false); l < bestLoss)
                     {
@@ -129,7 +154,7 @@ namespace
         }
 
         r.trim.levelDb = juce::jlimit (-18.0f, 12.0f, r.trim.levelDb + (float) (target.lufs - best.lufs));
-        r.after = measure (genre, type, r.trim);
+        r.after = measure (genre, type, r.trim, target.note);
         ++r.renders;
         return r;
     }
@@ -205,17 +230,27 @@ int tuneProfiles (const juce::File& refFolder, const juce::File& headerToWrite)
             continue;
         }
 
-        Target target {};
+        auto target = targetFrom (members, type);
+        target.note = matchedRoot (genre, type, target.note);
+
+        std::printf ("\n%s (%d refs, rendering at %s)\n", groupName (genre, type).toRawUTF8(), (int) members.size(),
+                     target.note >= 0 ? juce::MidiMessage::getMidiNoteName (target.note, true, true, 3).toRawUTF8()
+                                      : "the default note");
+
+        // Files far from the group on two or more dimensions are probably loops,
+        // the wrong octave or mislabelled; list them so they can be pruned.
         for (auto* m : members)
         {
-            target.lufs += m->d.lufs;          target.plr += m->d.plr;
-            target.centroidHz += m->d.centroidHz; target.bassPct += m->d.bassPct;
-            target.sidePct += m->d.sidePct;
+            juce::StringArray far;
+            if (std::abs (m->d.lufs - target.lufs) > 4.5)        far.add ("loudness");
+            if (std::abs (m->d.plr - target.plr) > 4.5)          far.add ("dynamics");
+            if (std::abs (std::log2 (juce::jmax (20.0, m->d.centroidHz) / juce::jmax (20.0, target.centroidHz))) > 0.45)
+                                                                 far.add ("brightness");
+            if (std::abs (m->d.bassPct - target.bassPct) > 15.0) far.add ("bass");
+            if (std::abs (m->d.sidePct - target.sidePct) > 12.0) far.add ("width");
+            if (far.size() >= 2)
+                std::printf ("    suspect: %s (%s)\n", m->name.toRawUTF8(), far.joinIntoString (", ").toRawUTF8());
         }
-        const auto n = (double) members.size();
-        target = { target.lufs / n, target.plr / n, target.centroidHz / n, target.bassPct / n, target.sidePct / n };
-
-        std::printf ("\n%s (%d refs)\n", groupName (genre, type).toRawUTF8(), (int) members.size());
         const auto result = tunePair (genre, type, target);
         report (target, result);
         trims[genre][type] = result.trim;
@@ -260,7 +295,7 @@ int tuneTest()
         hidden.weight = juce::jlimit (0.0f, 1.0f, hidden.weight + c.weight);
         hidden.stereoWidth = juce::jlimit (0.0f, 2.0f, hidden.stereoWidth + c.width);
 
-        const auto target = targetFrom (measure (genre, type, hidden));
+        const auto target = targetFrom (measure (genre, type, hidden, -1));
 
         std::printf ("\n%s (hidden: level %+.1f, OTT %+.2f, tilt %+.1f, Weight %+.2f, width %+.2f)\n",
                      groupName (genre, type).toRawUTF8(), c.level, c.ott, c.tilt, c.weight, c.width);

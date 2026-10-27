@@ -45,9 +45,9 @@ namespace
         }
     }
 
-    Item renderAndAnalyse (int genre, int type, const juce::File& wavDir)
+    Item renderAndAnalyse (int genre, int type, const juce::File& wavDir, int rootNote = -1)
     {
-        const auto audio = renderProfile (genre, type);
+        const auto audio = renderProfile (genre, type, nullptr, rootNote);
 
         Item item;
         item.genre = genre;
@@ -140,7 +140,7 @@ namespace
                 continue;
             }
 
-            renders.push_back (renderAndAnalyse (genre, type, outDir.getChildFile ("renders")));
+            renders.push_back (renderAndAnalyse (genre, type, outDir.getChildFile ("renders"), matchedRoot (genre, type, groupNote (members, type))));
             const auto& engine = renders.back().d;
 
             std::printf ("  %-12s %10s %8s %10s %8s\n", "", "ref", "+/-", "engine", "diff");
