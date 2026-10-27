@@ -3,6 +3,7 @@
 #include "Parameters.h"
 #include "SynthVoice.h"
 #include "Wavetable.h"
+#include "Profiles.h"
 
 namespace
 {
@@ -27,6 +28,22 @@ ZeroEngineProcessor::ZeroEngineProcessor()
         synth.addVoice (new ZeroVoice (state));
 
     synth.addSound (new ZeroSound());
+
+    timerCallback(); // start on the default genre/type's profile
+    startTimerHz (10);
+}
+
+void ZeroEngineProcessor::timerCallback()
+{
+    const auto genre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
+    const auto type = (int) state.getRawParameterValue (ParamIDs::type)->load();
+
+    if (genre == appliedGenre && type == appliedType)
+        return;
+
+    appliedGenre = genre;
+    appliedType = type;
+    applyProfile (state, makeProfile (genre, type));
 }
 
 void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -80,7 +97,13 @@ void ZeroEngineProcessor::setStateInformation (const void* data, int sizeInBytes
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (state.state.getType()))
+        {
             state.replaceState (juce::ValueTree::fromXml (*xml));
+
+            // The saved values already include any tweaks; don't overwrite them with the profile.
+            appliedGenre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
+            appliedType = (int) state.getRawParameterValue (ParamIDs::type)->load();
+        }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

@@ -4,7 +4,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "FinishingChain.h"
 
-class ZeroEngineProcessor : public juce::AudioProcessor
+class ZeroEngineProcessor : public juce::AudioProcessor,
+                            private juce::Timer
 {
 public:
     ZeroEngineProcessor();
@@ -36,7 +37,11 @@ public:
     juce::MidiKeyboardState keyboardState;
 
 private:
+    // Watches Genre/Type on the message thread and loads the matching profile.
+    void timerCallback() override;
+
     juce::Synthesiser synth;
+    std::atomic<int> appliedGenre { -1 }, appliedType { -1 };
     FinishingChain finishing;
 
     std::atomic<float>& grit;
