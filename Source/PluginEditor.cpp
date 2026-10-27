@@ -380,9 +380,24 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
     }
 
     // Edges join corners that differ in one coordinate; nearer in w is brighter.
-    // Light blue at rest, flaring orange to yellow through the fold, with a glow pass.
+    // Light blue at rest; a wide faint pass adds glow.
     const auto glow = highlighted ? 1.0f : 0.75f;
-    const auto colour = Palette::accent.interpolatedWith (Palette::orange.interpolatedWith (Palette::yellow, pulse), pulse);
+    // A smooth fade that stays saturated: blue goes round the colour wheel through
+    // violet and magenta into orange (a straight blend would pass through grey),
+    // then on to yellow at the deepest point.
+    auto aroundTheWheel = [] (juce::Colour from, juce::Colour to, float t)
+    {
+        auto hueTo = to.getHue();
+        if (hueTo < from.getHue())
+            hueTo += 1.0f; // always travel upwards: blue -> violet -> magenta -> red/orange
+        auto hue = from.getHue() + t * (hueTo - from.getHue());
+        hue -= std::floor (hue);
+        return juce::Colour (hue, juce::jmap (t, from.getSaturation(), to.getSaturation()),
+                             juce::jmap (t, from.getBrightness(), to.getBrightness()), 1.0f);
+    };
+    const auto shade = juce::jlimit (0.0f, 1.0f, pulse);
+    const auto colour = shade < 0.6f ? aroundTheWheel (Palette::accent, Palette::orange, shade / 0.6f)
+                                     : Palette::orange.interpolatedWith (Palette::yellow, (shade - 0.6f) / 0.4f);
     for (const auto pass : { 0, 1 })
         for (int a = 0; a < 16; ++a)
             for (int bit = 1; bit < 16; bit <<= 1)
@@ -802,6 +817,26 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
         generateButton.fold();
     };
     addAndMakeVisible (generateButton);
+
+    // Favourites: save the current sound (generated or tweaked) and recall it later.
+    saveButton.onClick = [this]
+    {
+        if (const auto name = processor.saveFavourite(); name.isNotEmpty())
+        {
+            refreshFavourites();
+            favouritesBox.setSelectedId (1, juce::dontSendNotification); // the newest is listed first
+        }
+    };
+    favouritesBox.setTextWhenNothingSelected ("Favourites");
+    favouritesBox.setTextWhenNoChoicesAvailable ("Nothing saved yet");
+    favouritesBox.onChange = [this]
+    {
+        if (favouritesBox.getSelectedId() > 0)
+            processor.loadFavourite (favouritesBox.getText());
+    };
+    addAndMakeVisible (saveButton);
+    addAndMakeVisible (favouritesBox);
+    refreshFavourites();
     addAndMakeVisible (keyboard);
 
     devButton.setClickingTogglesState (true);
@@ -826,6 +861,12 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
 ZeroEngineEditor::~ZeroEngineEditor()
 {
     setLookAndFeel (nullptr);
+}
+
+void ZeroEngineEditor::refreshFavourites()
+{
+    favouritesBox.clear (juce::dontSendNotification);
+    favouritesBox.addItemList (processor.getFavourites(), 1);
 }
 
 void ZeroEngineEditor::setUpMacro (Macro& macro, const char* paramID, const juce::String& name)
@@ -933,7 +974,13 @@ void ZeroEngineEditor::resized()
     area.removeFromRight (10);
     displaySection = area;
 
-    generateButton.setBounds (content (generateSection));
+    auto generateArea = content (generateSection);
+    auto favouritesRow = generateArea.removeFromBottom (20);
+    generateArea.removeFromBottom (6);
+    saveButton.setBounds (favouritesRow.removeFromRight (44));
+    favouritesRow.removeFromRight (4);
+    favouritesBox.setBounds (favouritesRow);
+    generateButton.setBounds (generateArea);
     levelMeter.setBounds (content (meterSection));
     display.setBounds (content (displaySection));
     // The mode menu sits in the header strip, left of the LED.

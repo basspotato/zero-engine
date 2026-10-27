@@ -6,6 +6,7 @@
 #include "MacroMap.h"
 #include "SynthVoice.h"
 #include "Profiles.h"
+#include <optional>
 
 class ZeroEngineProcessor : public juce::AudioProcessor,
                             private juce::Timer
@@ -59,11 +60,33 @@ public:
     // current Genre/Type's profile. Switching Genre or Type loads a designed profile as usual.
     void generate (juce::int64 seed = juce::Time::currentTimeMillis());
 
+    // Message thread: favourites are whole sounds (every parameter) saved as
+    // files, named "<Genre> <Type> <n>", so a generated sound is never lost.
+    juce::String saveFavourite();            // the name it was saved under, or empty on failure
+    juce::StringArray getFavourites() const; // newest first
+    bool loadFavourite (const juce::String& name);
+    void setFavouritesFolder (const juce::File& folder) { favouritesFolder = folder; } // for tests
+
+    // How many of the last Generate's candidates passed the check (out of 6), for tests and tuning.
+    int getLastGenerateFits() const noexcept { return lastGenerateFits; }
+
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboardState;
 
 private:
     void timerCallback() override;
+    bool restoreState (const juce::XmlElement&);
+
+    // Generate's render-and-check (message thread, ~0.15 s per click).
+    struct SoundCheck { float levelDb = -100, centroidHz = 0, bassPct = 0, sidePct = 0; };
+    SoundCheck measureProfile (int genre, int type, const Profile&);
+    Profile pickGeneratedProfile (int genre, int type, juce::Random&);
+    std::unique_ptr<ZeroEngineProcessor> checker; // private engine for the check renders, made on first use
+    int lastGenerateFits = 0;
+    std::array<std::optional<SoundCheck>, 12 * 6> designedChecks; // genre * 6 + type
+
+    juce::File favouritesFolder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                      .getChildFile ("Zero Engine").getChildFile ("Favourites");
 
     MacroMap macroMap;
     std::atomic<float> hostBpm { 120.0f }; // for tempo-synced LFOs; 120 when the host gives none

@@ -129,6 +129,36 @@ namespace
 
     // Saved state must restore every parameter exactly, without the profile
     // overwriting tweaks on load.
+    // A generated sound saved as a favourite must come back exactly, in a new
+    // instance, from a scratch folder (never the owner's real favourites).
+    juce::StringArray checkFavourites()
+    {
+        juce::TemporaryFile folderName;
+        const auto folder = folderName.getFile();
+        folder.createDirectory();
+
+        ZeroEngineProcessor a;
+        a.setFavouritesFolder (folder);
+        loadProfile (a, genreNames.indexOf ("Trap"), typeNames.indexOf ("Pad"));
+        a.generate (12345);
+        const auto name = a.saveFavourite();
+
+        ZeroEngineProcessor b;
+        b.setFavouritesFolder (folder);
+        juce::StringArray problems;
+        if (name.isEmpty() || ! b.getFavourites().contains (name) || ! b.loadFavourite (name))
+            problems.add ("could not save and reload \"" + name + "\"");
+        b.syncProfile(); // a timer tick after loading must not reapply the profile
+
+        for (auto* param : a.getParameters())
+            if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (param))
+                if (std::abs (param->getValue() - b.state.getParameter (withId->getParameterID())->getValue()) > 1.0e-5f)
+                    problems.add (withId->getParameterID() + " differs after reload");
+
+        folder.deleteRecursively();
+        return problems;
+    }
+
     juce::StringArray checkState()
     {
         ZeroEngineProcessor a;
@@ -169,6 +199,17 @@ namespace
 int runTests()
 {
     int failures = 0;
+
+    std::printf ("Favourites save/recall... ");
+    if (const auto problems = checkFavourites(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
 
     std::printf ("State save/load... ");
     if (const auto problems = checkState(); problems.isEmpty())

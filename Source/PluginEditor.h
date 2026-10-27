@@ -86,6 +86,9 @@ public:
     // Starts the fold animation.
     void fold();
 
+    // Freezes the animation at a point of the fold (0..1), for preview images.
+    void showFoldAt (float progress) { foldStart = -1.0; foldProgress = progress; repaint(); }
+
     void paintButton (juce::Graphics&, bool highlighted, bool down) override;
 
 private:
@@ -127,6 +130,8 @@ private:
     juce::ComboBox displayMode; // in the DISPLAY header strip
     LevelMeter levelMeter;
     TesseractButton generateButton;
+    juce::ComboBox favouritesBox;            // recall a saved sound
+    juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite
 
     // Temporary: all engine parameters as plain sliders, shown in place of the display.
     juce::GenericAudioProcessorEditor devPanel;
@@ -134,6 +139,7 @@ private:
     juce::MidiKeyboardComponent keyboard;
 
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);
+    void refreshFavourites();
 
     // Panel areas, set in resized() and drawn in paint() behind the components.
     juce::Rectangle<int> displaySection, meterSection, generateSection, macroSection;

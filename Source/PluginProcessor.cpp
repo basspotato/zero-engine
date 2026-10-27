@@ -80,7 +80,127 @@ void ZeroEngineProcessor::generate (juce::int64 seed)
 {
     syncProfile(); // a Genre/Type change not yet picked up by the timer
     juce::Random random (seed);
-    loadProfile (appliedGenre, appliedType, generateProfile (appliedGenre, appliedType, random));
+    const int genre = appliedGenre, type = appliedType;
+    loadProfile (genre, type, pickGeneratedProfile (genre, type, random));
+}
+
+ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (int genre, int type, const Profile& profile)
+{
+    // A third of a second of a note (or a triad for chords and pads) through a private
+    // engine, then the four measurements that explain most mix-to-mix variation:
+    // loudness, brightness, bass and width.
+    constexpr double rate = 48000.0;
+    constexpr int block = 512, length = 16384; // 0.34 s
+    constexpr int fftOrder = 12, fftSize = 1 << fftOrder;
+
+    if (checker == nullptr)
+        checker = std::make_unique<ZeroEngineProcessor>();
+    checker->setPlayConfigDetails (0, 2, rate, block);
+    checker->prepareToPlay (rate, block); // fresh voices and tails for every candidate
+    // Measure the tone, not the fade-in: slow attacks (pads, FX) would otherwise
+    // be compared part-way up their swell.
+    auto heard = profile;
+    heard.ampAttack = juce::jmin (heard.ampAttack, 0.01f);
+    heard.modAttack = juce::jmin (heard.modAttack, 0.01f);
+    checker->loadProfile (genre, type, heard);
+
+    juce::AudioBuffer<float> out (2, length), chunk (2, block);
+    juce::MidiBuffer midi;
+    const auto root = type == 0 ? 36 : type == 4 || type == 1 ? 72 : 60; // bass C2, lead/pluck C5, else C4
+    const auto chord = type == 2 || type == 3;
+    constexpr int intervals[] { 0, 4, 7 };
+
+    for (int pos = 0; pos < length; pos += block)
+    {
+        midi.clear();
+        if (pos == 0)
+            for (int i = 0; i < (chord ? 3 : 1); ++i)
+                midi.addEvent (juce::MidiMessage::noteOn (1, root + intervals[i], (juce::uint8) 110), 0);
+        chunk.clear();
+        checker->processBlock (chunk, midi);
+        for (int ch = 0; ch < 2; ++ch)
+            out.copyFrom (ch, pos, chunk, ch, 0, juce::jmin (block, length - pos));
+    }
+
+    SoundCheck m;
+    double mid2 = 0.0, side2 = 0.0;
+    for (int i = 0; i < length; ++i)
+    {
+        const auto l = out.getSample (0, i), r = out.getSample (1, i);
+        mid2 += 0.25 * (l + r) * (l + r);
+        side2 += 0.25 * (l - r) * (l - r);
+    }
+    m.levelDb = (float) juce::Decibels::gainToDecibels (std::sqrt ((mid2 + side2) / length), -100.0);
+    m.sidePct = (float) (100.0 * side2 / juce::jmax (1.0e-12, mid2 + side2));
+
+    // Spectrum of the held part (the last 4096 samples, mid channel).
+    std::vector<float> fft ((size_t) fftSize * 2, 0.0f);
+    for (int i = 0; i < fftSize; ++i)
+    {
+        const auto s = length - fftSize + i;
+        const auto hann = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftSize - 1));
+        fft[(size_t) i] = 0.5f * (out.getSample (0, s) + out.getSample (1, s)) * hann;
+    }
+    juce::dsp::FFT (fftOrder).performFrequencyOnlyForwardTransform (fft.data());
+
+    double total = 0.0, weighted = 0.0, bass = 0.0;
+    for (int bin = 1; bin < fftSize / 2; ++bin)
+    {
+        const auto hz = bin * rate / fftSize;
+        const auto e = (double) fft[(size_t) bin] * fft[(size_t) bin];
+        total += e;
+        weighted += e * hz;
+        if (hz < 150.0)
+            bass += e;
+    }
+    m.centroidHz = (float) (total > 0.0 ? weighted / total : 0.0);
+    m.bassPct = (float) (total > 0.0 ? 100.0 * bass / total : 0.0);
+    return m;
+}
+
+Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random)
+{
+    // Render-and-check: several variations, each measured against the designed
+    // profile; keep those that still sit in the genre/type's character, then
+    // choose among them at random so results stay varied. If none fit, the
+    // closest one wins.
+    constexpr int candidates = 6;
+    // The designed profile never changes while running, so measure it once.
+    auto& cached = designedChecks[(size_t) (genre * 6 + type)];
+    if (! cached.has_value())
+        cached = measureProfile (genre, type, makeProfile (genre, type));
+    const auto target = *cached;
+
+    std::vector<std::pair<Profile, float>> fits;
+    Profile closest {};
+    auto closestDistance = std::numeric_limits<float>::max();
+
+    for (int i = 0; i < candidates; ++i)
+    {
+        const auto profile = generateProfile (genre, type, random);
+        const auto m = measureProfile (genre, type, profile);
+
+        // Each term is 1.0 at the edge of "still the same kind of sound".
+        const auto loudness = std::abs (m.levelDb - target.levelDb) / 6.0f;
+        const auto brightness = std::abs (std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz))) / 0.8f;
+        const auto bass = std::abs (m.bassPct - target.bassPct) / 20.0f;
+        const auto spread = std::abs (m.sidePct - target.sidePct) / 20.0f;
+        const auto worst = juce::jmax (juce::jmax (loudness, brightness), juce::jmax (bass, spread));
+        const auto silent = m.levelDb < target.levelDb - 20.0f;
+
+        if (! silent && worst <= 1.0f)
+            fits.push_back ({ profile, worst });
+        if (! silent && worst < closestDistance)
+        {
+            closest = profile;
+            closestDistance = worst;
+        }
+    }
+
+    lastGenerateFits = (int) fits.size();
+    if (! fits.empty())
+        return fits[(size_t) random.nextInt ((int) fits.size())].first;
+    return closestDistance < std::numeric_limits<float>::max() ? closest : makeProfile (genre, type);
 }
 
 void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -210,15 +330,56 @@ void ZeroEngineProcessor::getStateInformation (juce::MemoryBlock& destData)
 void ZeroEngineProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
-        if (xml->hasTagName (state.state.getType()))
-        {
-            state.replaceState (juce::ValueTree::fromXml (*xml));
+        restoreState (*xml);
+}
 
-            // The saved values already include any tweaks; don't overwrite them with the profile.
-            appliedGenre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
-            appliedType = (int) state.getRawParameterValue (ParamIDs::type)->load();
-            loadMacroMap (macroMap, makeProfile (appliedGenre, appliedType));
-        }
+bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml)
+{
+    if (! xml.hasTagName (state.state.getType()))
+        return false;
+
+    state.replaceState (juce::ValueTree::fromXml (xml));
+
+    // The saved values already include any tweaks; don't overwrite them with the profile.
+    appliedGenre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
+    appliedType = (int) state.getRawParameterValue (ParamIDs::type)->load();
+    loadMacroMap (macroMap, makeProfile (appliedGenre, appliedType));
+    return true;
+}
+
+juce::String ZeroEngineProcessor::saveFavourite()
+{
+    favouritesFolder.createDirectory();
+    const auto base = genreNames[appliedGenre] + " " + typeNames[appliedType];
+
+    int number = 1;
+    while (favouritesFolder.getChildFile (base + " " + juce::String (number) + ".xml").exists())
+        ++number;
+
+    const auto name = base + " " + juce::String (number);
+    if (auto xml = state.copyState().createXml())
+        if (xml->writeTo (favouritesFolder.getChildFile (name + ".xml")))
+            return name;
+    return {};
+}
+
+juce::StringArray ZeroEngineProcessor::getFavourites() const
+{
+    auto files = favouritesFolder.findChildFiles (juce::File::findFiles, false, "*.xml");
+    std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b)
+               { return a.getLastModificationTime() > b.getLastModificationTime(); });
+
+    juce::StringArray names;
+    for (const auto& file : files)
+        names.add (file.getFileNameWithoutExtension());
+    return names;
+}
+
+bool ZeroEngineProcessor::loadFavourite (const juce::String& name)
+{
+    if (auto xml = juce::XmlDocument::parse (favouritesFolder.getChildFile (name + ".xml")))
+        return restoreState (*xml);
+    return false;
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

@@ -25,6 +25,7 @@
 #include "Tuner.h"
 #include "Harmonics.h"
 #include "../../Source/PluginProcessor.h"
+#include "../../Source/PluginEditor.h"
 #include "../../Source/Parameters.h"
 
 namespace
@@ -298,6 +299,63 @@ int main (int argc, char* argv[])
         return fetchFreesound (argFile (args, 1, "analysis/freesound/shortlist.csv"),
                                argFile (args, 2, "analysis/freesound/refs"),
                                args.size() > 3 ? args[3].getIntValue() : 450);
+
+    if (command == "gencheck")
+    {
+        // Generate's render-and-check: time per click and how many of the 6
+        // candidates still fit the genre/type, 3 clicks per profile.
+        std::printf ("%-24s %8s %s\n", "profile", "ms/click", "fits of 6");
+        double totalMs = 0.0;
+        int totalFits = 0, clicks = 0;
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+            {
+                ZeroEngineProcessor engine;
+                auto* genre = engine.state.getParameter (ParamIDs::genre);
+                auto* type = engine.state.getParameter (ParamIDs::type);
+                genre->setValueNotifyingHost (genre->convertTo0to1 ((float) g));
+                type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
+                engine.syncProfile();
+
+                juce::String fits;
+                const auto start = juce::Time::getMillisecondCounterHiRes();
+                for (int s = 1; s <= 3; ++s)
+                {
+                    engine.generate (s * 7919 + g * 31 + t);
+                    fits << engine.getLastGenerateFits() << " ";
+                    totalFits += engine.getLastGenerateFits();
+                }
+                const auto ms = (juce::Time::getMillisecondCounterHiRes() - start) / 3.0;
+                totalMs += ms * 3.0;
+                clicks += 3;
+                std::printf ("%-24s %8.0f %s\n", (genreNames[g] + " " + typeNames[t]).toRawUTF8(), ms, fits.toRawUTF8());
+            }
+        std::printf ("\nAverage %.0f ms per click; %.1f of 6 candidates fit on average.\n", totalMs / clicks, (double) totalFits / clicks);
+        return 0;
+    }
+
+    if (command == "foldstrip" && args.size() >= 2)
+    {
+        // The Generate tesseract at 11 points through its fold, side by side.
+        TesseractButton tesseract;
+        tesseract.setSize (120, 130);
+        const float points[] { 0.0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f };
+        juce::Image strip (juce::Image::ARGB, 120 * (int) std::size (points), 130, true);
+        {
+            juce::Graphics g (strip);
+            for (size_t i = 0; i < std::size (points); ++i)
+            {
+                tesseract.showFoldAt (points[i]);
+                g.drawImageAt (tesseract.createComponentSnapshot (tesseract.getLocalBounds()), 120 * (int) i, 0);
+            }
+        }
+        juce::FileOutputStream out (argFile (args, 1, {}));
+        out.setPosition (0);
+        out.truncate();
+        juce::PNGImageFormat().writeImageToStream (strip, out);
+        std::printf ("Wrote %s\n", argFile (args, 1, {}).getFullPathName().toRawUTF8());
+        return 0;
+    }
 
     if (command == "snapshot" && args.size() >= 2)
     {
