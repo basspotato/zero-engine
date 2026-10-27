@@ -93,7 +93,7 @@ void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*
     for (auto& stage : filters)
         for (auto& f : stage)
             f = {};
-    level = velocity * 0.3f;
+    setVelocity (velocity);
 
     // Random start phases keep unison voices from starting phase-locked (a flat, phasey attack).
     for (auto& phase : phases)
