@@ -42,6 +42,9 @@ public:
     // Where a playing voice is in its wavetable (envelopes and LFOs included), or -1 when silent.
     float getLivePosition() const noexcept { return livePosition.load (std::memory_order_relaxed); }
 
+    // Voices currently sounding (diagnostics).
+    int getActiveVoiceCount() const { int n = 0; for (int i = 0; i < synth.getNumVoices(); ++i) n += synth.getVoice (i)->isVoiceActive() ? 1 : 0; return n; }
+
     // The newest output samples, (L + R) / 2, for the display's waveform and
     // spectrum. The audio thread writes a ring buffer; a read may tear across a
     // block boundary, which is harmless for drawing.

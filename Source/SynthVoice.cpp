@@ -53,6 +53,13 @@ void ZeroVoice::setCurrentPlaybackSampleRate (double newRate)
 
 void ZeroVoice::updateEnvelopes()
 {
+    // juce::ADSR::setParameters recomputes the release speed from the sustain level,
+    // replacing the one noteOff() set from where the envelope actually was. Done
+    // during a release, a low sustain made notes ring on for minutes, and a zero
+    // sustain (plucks, stabs let go mid-decay) made them hang forever.
+    if (releasing)
+        return;
+
     // Punch shortens the amp attack, up to 95%.
     const auto attackScale = 1.0f - 0.95f * p.punch->load();
     const auto decayScale = std::exp2 (macroMap.offset (MacroTarget::ampDecay));
@@ -81,6 +88,7 @@ void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger)
 
     if (retrigger)
     {
+        releasing = false; // a retrigger restarts the envelopes
         setVelocity (velocity);
         updateEnvelopes();
         ampEnv.noteOn();
@@ -90,6 +98,7 @@ void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger)
 
 void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel)
 {
+    releasing = false;
     pitch = targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
     pitchWheelMoved (pitchWheel);
 
@@ -117,6 +126,7 @@ void ZeroVoice::stopNote (float, bool allowTailOff)
 {
     if (allowTailOff)
     {
+        releasing = true;
         ampEnv.noteOff();
         modEnv.noteOff();
     }

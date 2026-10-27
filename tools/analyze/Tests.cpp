@@ -193,6 +193,37 @@ namespace
         return problems;
     }
 
+    // A note let go mid-decay must finish its release, whatever the sustain
+    // (a zero sustain used to hang the voice forever; a tiny one for minutes).
+    juce::StringArray checkReleaseMidDecay()
+    {
+        juce::StringArray problems;
+        for (const auto sustain : { 0.0f, 0.004f, 0.3f })
+        {
+            ZeroEngineProcessor engine;
+            loadProfile (engine, genreNames.indexOf ("EDM"), typeNames.indexOf ("Pluck"));
+            auto set = [&] (const char* id, float v) { auto* q = engine.state.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+            set (ParamIDs::ampDecay, 2.0f);
+            set (ParamIDs::ampSustain, sustain);
+            set (ParamIDs::ampRelease, 0.3f);
+            engine.setPlayConfigDetails (0, 2, 48000.0, 512);
+            engine.prepareToPlay (48000.0, 512);
+
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+            for (int b = 0; b < 48000 * 2 / 512; ++b) // let go at 0.1 s, check at 2 s
+            {
+                midi.clear();
+                if (b == 0)  midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 110), 0);
+                if (b == 10) midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+                engine.processBlock (block, midi);
+            }
+            if (engine.getActiveVoiceCount() > 0)
+                problems.add ("sustain " + juce::String (sustain, 3) + ": still sounding 1.9 s after a 0.3 s release");
+        }
+        return problems;
+    }
+
     // The mod wheel must change the sound (it adds to Motion), and not allocate.
     juce::StringArray checkModWheel()
     {
@@ -278,6 +309,17 @@ int runTests()
 
     std::printf ("Favourites save/recall... ");
     if (const auto problems = checkFavourites(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Release mid-decay... ");
+    if (const auto problems = checkReleaseMidDecay(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

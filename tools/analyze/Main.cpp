@@ -300,6 +300,49 @@ int main (int argc, char* argv[])
                                argFile (args, 2, "analysis/freesound/refs"),
                                args.size() > 3 ? args[3].getIntValue() : 450);
 
+    if (command == "gendebug" && args.size() >= 4)
+    {
+        // One Generate result (genre, type, seed): the parameters that shape its tail,
+        // and its level each second through a 1 s note and 8 s of silence.
+        ZeroEngineProcessor engine;
+        auto* genre = engine.state.getParameter (ParamIDs::genre);
+        auto* type = engine.state.getParameter (ParamIDs::type);
+        genre->setValueNotifyingHost (genre->convertTo0to1 ((float) genreNames.indexOf (args[1])));
+        type->setValueNotifyingHost (type->convertTo0to1 ((float) typeNames.indexOf (args[2])));
+        engine.syncProfile();
+        engine.generate (args[3].getLargeIntValue());
+        for (int a = 4; a < args.size(); ++a) // id=value overrides, to find what holds a tail up
+            if (auto* param = engine.state.getParameter (args[a].upToFirstOccurrenceOf ("=", false, false)))
+                param->setValueNotifyingHost (param->convertTo0to1 (args[a].fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
+
+        for (const auto* id : { ParamIDs::ampSustain, ParamIDs::ampRelease, ParamIDs::waveTable, ParamIDs::filterRes,
+                                ParamIDs::delayMix, ParamIDs::delayFeedback, ParamIDs::reverbMix, ParamIDs::lfoToPos,
+                                ParamIDs::lfoSync, ParamIDs::weight, ParamIDs::ottDepth, ParamIDs::playMode, ParamIDs::glide })
+            std::printf ("%-14s %.3f\n", id, engine.state.getRawParameterValue (id)->load());
+
+        engine.setPlayConfigDetails (0, 2, 48000.0, 512);
+        engine.prepareToPlay (48000.0, 512);
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer midi;
+        float peak = 0.0f;
+        for (int b = 0, second = 0; b < 48000 * 9 / 512; ++b)
+        {
+            midi.clear();
+            if (b == 0)  midi.addEvent (juce::MidiMessage::noteOn (1, 48, (juce::uint8) 110), 0);
+            if (b == 93) midi.addEvent (juce::MidiMessage::noteOff (1, 48), 0);
+            block.clear();
+            engine.processBlock (block, midi);
+            peak = juce::jmax (peak, block.getMagnitude (0, 512));
+            if ((b + 1) * 512 / 48000 > second)
+            {
+                std::printf ("second %d peak %.1f dBFS, %d voices\n", second, juce::Decibels::gainToDecibels (peak), engine.getActiveVoiceCount());
+                peak = 0.0f;
+                ++second;
+            }
+        }
+        return 0;
+    }
+
     if (command == "segments" && args.size() >= 2)
     {
         // Loudness and brightness of a WAV in slices, to check how a sound moves

@@ -121,6 +121,7 @@ private:
     float nextLfo (float increment);
 
     juce::ADSR ampEnv, modEnv;
+    bool releasing = false; // after note-off: envelope settings must not be re-applied (see updateEnvelopes)
     juce::Random random;
 
     // Pitch in octaves (log2 Hz), so glides are even in pitch.
