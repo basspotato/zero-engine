@@ -155,6 +155,15 @@ namespace
                 if (std::abs (param->getValue() - b.state.getParameter (withId->getParameterID())->getValue()) > 1.0e-5f)
                     problems.add (withId->getParameterID() + " differs after reload");
 
+        // Rename, refuse a name that's taken, then delete.
+        const auto second = a.saveFavourite();
+        if (b.renameFavourite (name, "My Pad") != "My Pad" || ! b.getFavourites().contains ("My Pad") || b.getFavourites().contains (name))
+            problems.add ("rename failed");
+        if (b.renameFavourite ("My Pad", second).isNotEmpty())
+            problems.add ("rename overwrote another favourite");
+        if (! b.deleteFavourite ("My Pad") || b.getFavourites().contains ("My Pad"))
+            problems.add ("delete failed");
+
         folder.deleteRecursively();
         return problems;
     }

@@ -404,6 +404,20 @@ juce::StringArray ZeroEngineProcessor::getFavourites() const
     return names;
 }
 
+bool ZeroEngineProcessor::deleteFavourite (const juce::String& name)
+{
+    return favouritesFolder.getChildFile (name + ".xml").deleteFile();
+}
+
+juce::String ZeroEngineProcessor::renameFavourite (const juce::String& name, const juce::String& newName)
+{
+    const auto clean = juce::File::createLegalFileName (newName.trim());
+    const auto target = favouritesFolder.getChildFile (clean + ".xml");
+    if (clean.isEmpty() || target.exists())
+        return {};
+    return favouritesFolder.getChildFile (name + ".xml").moveFileTo (target) ? clean : juce::String();
+}
+
 bool ZeroEngineProcessor::loadFavourite (const juce::String& name)
 {
     if (auto xml = juce::XmlDocument::parse (favouritesFolder.getChildFile (name + ".xml")))

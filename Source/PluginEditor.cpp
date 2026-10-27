@@ -858,6 +858,34 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
             control->menu->addItemList (choice->choices, 1);
             control->menuAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, id, *control->menu);
         }
+        else if (auto* steps = dynamic_cast<juce::AudioParameterInt*> (param);
+                 steps != nullptr && steps->getRange().getLength() <= 2)
+        {
+            // A two- or three-position setting reads better as a menu than a knob.
+            const auto lowest = steps->getRange().getStart();
+            auto stepName = [id] (int v)
+            {
+                if (juce::String (id) == ParamIDs::subOctave)
+                    return juce::String (v < 0 ? "Octave down" : "At note");
+                return juce::String (v);
+            };
+
+            control->menu = std::make_unique<juce::ComboBox>();
+            for (int v = lowest; v <= steps->getRange().getEnd(); ++v)
+                control->menu->addItem (stepName (v), v - lowest + 1);
+
+            auto* menu = control->menu.get();
+            control->stepAttachment = std::make_unique<juce::ParameterAttachment> (*param, [menu, lowest] (float value)
+            {
+                menu->setSelectedId (juce::roundToInt (value) - lowest + 1, juce::dontSendNotification);
+            });
+            auto* attachment = control->stepAttachment.get();
+            menu->onChange = [menu, attachment, lowest]
+            {
+                attachment->setValueAsCompleteGesture ((float) (menu->getSelectedId() - 1 + lowest));
+            };
+            attachment->sendInitialUpdate();
+        }
         else if (dynamic_cast<juce::AudioParameterBool*> (param) != nullptr)
         {
             control->toggle = std::make_unique<juce::ToggleButton> ("ON");
@@ -1087,16 +1115,29 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     {
         if (const auto name = processor.saveFavourite(); name.isNotEmpty())
         {
+            currentFavourite = name;
             refreshFavourites();
-            favouritesBox.setSelectedId (1, juce::dontSendNotification); // the newest is listed first
         }
     };
     favouritesBox.setTextWhenNothingSelected ("Favourites");
     favouritesBox.setTextWhenNoChoicesAvailable ("Nothing saved yet");
     favouritesBox.onChange = [this]
     {
-        if (favouritesBox.getSelectedId() > 0)
-            processor.loadFavourite (favouritesBox.getText());
+        const auto id = favouritesBox.getSelectedId();
+        if (id == renameId)
+            renameCurrentFavourite();
+        else if (id == deleteId)
+        {
+            processor.deleteFavourite (currentFavourite);
+            currentFavourite.clear();
+            refreshFavourites();
+        }
+        else if (id > 0)
+        {
+            currentFavourite = favouritesBox.getText();
+            processor.loadFavourite (currentFavourite);
+            refreshFavourites(); // so Rename and Delete name it
+        }
     };
     addAndMakeVisible (saveButton);
     addAndMakeVisible (favouritesBox);
@@ -1136,7 +1177,34 @@ void ZeroEngineEditor::refreshHistoryButtons()
 void ZeroEngineEditor::refreshFavourites()
 {
     favouritesBox.clear (juce::dontSendNotification);
-    favouritesBox.addItemList (processor.getFavourites(), 1);
+    const auto names = processor.getFavourites();
+    favouritesBox.addItemList (names, 1);
+
+    // Managing the current one lives at the bottom of the same list.
+    if (const auto index = names.indexOf (currentFavourite); index >= 0)
+    {
+        favouritesBox.addSeparator();
+        favouritesBox.addItem ("Rename \"" + currentFavourite + "\"...", renameId);
+        favouritesBox.addItem ("Delete \"" + currentFavourite + "\"", deleteId);
+        favouritesBox.setSelectedId (index + 1, juce::dontSendNotification);
+    }
+}
+
+void ZeroEngineEditor::renameCurrentFavourite()
+{
+    refreshFavourites(); // put the selection back on the current sound while the box is open
+
+    auto* dialog = new juce::AlertWindow ("Rename favourite", {}, juce::MessageBoxIconType::NoIcon, this);
+    dialog->addTextEditor ("name", currentFavourite);
+    dialog->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    dialog->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    dialog->enterModalState (true, juce::ModalCallbackFunction::create ([this, dialog] (int result)
+    {
+        if (result == 1)
+            if (const auto name = processor.renameFavourite (currentFavourite, dialog->getTextEditorContents ("name")); name.isNotEmpty())
+                currentFavourite = name;
+        refreshFavourites();
+    }), true);
 }
 
 void ZeroEngineEditor::setUpMacro (Macro& macro, const char* paramID, const juce::String& name)

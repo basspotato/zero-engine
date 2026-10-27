@@ -97,6 +97,7 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> knobAttachment;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> menuAttachment;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> toggleAttachment;
+        std::unique_ptr<juce::ParameterAttachment> stepAttachment; // a menu over a small integer range
         juce::Component* widget() const;
     };
 
@@ -187,6 +188,7 @@ private:
     LevelMeter levelMeter;
     TesseractButton generateButton;
     juce::ComboBox favouritesBox;            // recall a saved sound
+    juce::String currentFavourite;           // the last one saved or recalled, which Rename and Delete act on
     juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite
     ChevronButton backButton { true }, forwardButton { false }; // Generate history, in the header strip
 
@@ -198,6 +200,8 @@ private:
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);
     void refreshFavourites();
     void refreshHistoryButtons();
+    void renameCurrentFavourite();
+    static constexpr int renameId = 10001, deleteId = 10002; // Favourites menu actions
 
     // Panel areas, set in resized() and drawn in paint() behind the components.
     juce::Rectangle<int> displaySection, meterSection, generateSection, macroSection;

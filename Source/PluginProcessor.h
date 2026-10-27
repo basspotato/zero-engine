@@ -65,6 +65,8 @@ public:
     juce::String saveFavourite();            // the name it was saved under, or empty on failure
     juce::StringArray getFavourites() const; // newest first
     bool loadFavourite (const juce::String& name);
+    bool deleteFavourite (const juce::String& name);
+    juce::String renameFavourite (const juce::String& name, const juce::String& newName); // the new name, or empty if taken or invalid
     void setFavouritesFolder (const juce::File& folder) { favouritesFolder = folder; } // for tests
 
     // How many of the last Generate's candidates passed the check (out of 6), for tests and tuning.
