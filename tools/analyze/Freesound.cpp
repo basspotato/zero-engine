@@ -16,7 +16,7 @@ namespace
     juce::String queryFor (int genre, int type)
     {
         const char* genreWords[] { "edm", "dubstep", "techno", "tech house", "trap", "synthwave",
-                                   "drum and bass", "pop", "house", "trance", "future bass", "hardstyle" };
+                                   "dnb", "pop", "house", "trance", "future bass", "hardstyle" };
         const char* typeWords[]  { "bass", "lead", "chord", "pad", "pluck", "fx" };
 
         if (genreNames[genre] == "Trap" && typeNames[type] == "Bass")
@@ -151,7 +151,8 @@ int screenFreesound (const juce::File& shortlist, int perPair)
                                  .withParameter ("filter", "license:\"Creative Commons 0\" duration:[0.1 TO 15]")
                                  .withParameter ("fields", "id,name,username,license,duration,num_downloads,avg_rating,type,url")
                                  .withParameter ("sort", "downloads_desc")
-                                 .withParameter ("page_size", juce::String (juce::jlimit (1, 150, perPair)))
+                                 // Ask for extra so sounds already listed under another pair don't starve this one.
+                                 .withParameter ("page_size", juce::String (juce::jlimit (1, 150, perPair * 4)))
                                  .withParameter ("token", secret);
 
             int status = 0;
@@ -167,6 +168,9 @@ int screenFreesound (const juce::File& shortlist, int perPair)
             {
                 for (const auto& r : *results)
                 {
+                    if (kept >= perPair)
+                        break;
+
                     const auto id = (int) r.getProperty ("id", 0);
                     if (! seen.insert (id).second)
                         continue; // already listed under another pair
