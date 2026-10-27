@@ -7,7 +7,51 @@ namespace
     constexpr int fftOrder = 11;
     static_assert ((1 << fftOrder) == WavetableBank::tableSize);
 
-    enum Bank { basic, growl, digital, organ };
+    enum Bank { basic, growl, digital, organ, fm, wavefold, pwm, neuro, bell, choir, harsh, analog };
+
+    // These are easier to describe as a waveform than as harmonics; the
+    // constructor analyses them with a forward FFT before band-limiting.
+    bool isTimeDomain (int bank)
+    {
+        return bank == fm || bank == wavefold || bank == pwm || bank == harsh;
+    }
+
+    // One cycle, x in [0, 1).
+    float timeDomainSample (int bank, int frame, float x)
+    {
+        const auto t = juce::MathConstants<float>::twoPi * x;
+
+        switch (bank)
+        {
+            case fm: // two-operator FM, modulator at the carrier's pitch, rising index
+            {
+                constexpr float index[5] { 0.3f, 1.0f, 2.0f, 3.5f, 6.0f };
+                return std::sin (t + index[frame] * std::sin (t));
+            }
+
+            case wavefold: // sine folded back on itself harder each frame
+            {
+                constexpr float gain[5] { 1.0f, 2.0f, 3.5f, 5.5f, 8.0f };
+                return std::sin (gain[frame] * std::sin (t));
+            }
+
+            case pwm: // pulse narrowing from square to a thin spike
+            {
+                constexpr float width[5] { 0.5f, 0.35f, 0.2f, 0.1f, 0.04f };
+                return x < width[frame] ? 1.0f : -1.0f; // DC is removed afterwards
+            }
+
+            default: // harsh: hard-clipped sine, then bit-crushed in the last frames
+            {
+                constexpr float gain[5] { 1.0f, 2.0f, 4.0f, 8.0f, 16.0f };
+                constexpr float steps[5] { 0.0f, 0.0f, 0.0f, 8.0f, 4.0f };
+                auto y = juce::jlimit (-1.0f, 1.0f, gain[frame] * std::sin (t));
+                if (steps[frame] > 0.0f)
+                    y = std::round (y * steps[frame]) / steps[frame];
+                return y;
+            }
+        }
+    }
 
     int maxHarmonic (int level)
     {
@@ -59,6 +103,43 @@ namespace
                 return (1.0f / (float) n) * (1.0f + 3.0f * std::exp (-0.5f * d * d)) * sawSign (n);
             }
 
+            case neuro:
+            {
+                // Bitier, higher formant pairs with a square-ish odd-harmonic lift.
+                constexpr float formants[5][2] { { 10, 16 }, { 14, 24 }, { 18, 32 }, { 9, 40 }, { 22, 48 } };
+                const auto shape = bump (n, formants[frame][0], 0.18f) + bump (n, formants[frame][1], 0.18f) + 0.05f;
+                return shape * (odd ? 1.3f : 0.7f) / std::sqrt ((float) n) * sawSign (n);
+            }
+
+            case bell:
+            {
+                // Sparse, widely spaced partials build up for a metallic ring.
+                constexpr int partials[5] { 4, 7, 11, 17, 25 };
+                if (n == 1)
+                    return 1.0f;
+                for (int i = 0; i <= frame; ++i)
+                    if (partials[i] == n)
+                        return 0.6f / std::sqrt ((float) (i + 1));
+                return 0.0f;
+            }
+
+            case choir:
+            {
+                // Three-formant vowels ooh, oh, ah, eh, ee, placed for a note around C4.
+                constexpr float formants[5][3] { { 1.2f, 3.0f, 9.0f }, { 1.9f, 3.0f, 9.5f }, { 3.0f, 4.4f, 11.0f },
+                                                 { 2.0f, 6.5f, 10.0f }, { 1.1f, 8.8f, 11.5f } };
+                const auto& f = formants[frame];
+                const auto shape = bump (n, f[0], 0.35f) + 0.6f * bump (n, f[1], 0.35f) + 0.3f * bump (n, f[2], 0.35f) + 0.02f;
+                return shape / std::pow ((float) n, 0.7f);
+            }
+
+            case analog:
+            {
+                // Saw with a soft high roll-off, dark to bright.
+                constexpr float rolloff[5] { 8.0f, 15.0f, 30.0f, 60.0f, 200.0f };
+                return (2.0f / (pi * (float) n)) * std::exp (-(float) n / rolloff[frame]) * sawSign (n);
+            }
+
             default: // organ drawbars on harmonics 1, 2, 3, 4, 6, 8
             {
                 constexpr int harmonics[6] { 1, 2, 3, 4, 6, 8 };
@@ -80,19 +161,35 @@ WavetableBank::WavetableBank()
     : data ((size_t) (numBanks * numFrames * numLevels * (tableSize + 1)))
 {
     juce::dsp::FFT fft (fftOrder);
-    std::vector<float> work ((size_t) tableSize * 2);
+    std::vector<float> spectrum ((size_t) tableSize * 2), work ((size_t) tableSize * 2);
 
     for (int bank = 0; bank < numBanks; ++bank)
     {
         for (int frame = 0; frame < numFrames; ++frame)
         {
+            // Full spectrum as interleaved (re, im) bins.
+            std::fill (spectrum.begin(), spectrum.end(), 0.0f);
+            if (isTimeDomain (bank))
+            {
+                for (int i = 0; i < tableSize; ++i)
+                    spectrum[(size_t) i] = timeDomainSample (bank, frame, (float) i / (float) tableSize);
+                fft.performRealOnlyForwardTransform (spectrum.data());
+                spectrum[0] = spectrum[1] = 0.0f; // no DC
+            }
+            else
+            {
+                for (int n = 1; n < tableSize / 2; ++n)
+                    spectrum[(size_t) (2 * n + 1)] = -harmonicAmplitude (bank, frame, n);
+            }
+
             float peak = 0.0f;
 
             for (int level = 0; level < numLevels; ++level)
             {
+                // Keep only the harmonics this octave's mip level can hold.
                 std::fill (work.begin(), work.end(), 0.0f);
-                for (int n = 1; n <= maxHarmonic (level); ++n)
-                    work[(size_t) (2 * n + 1)] = -harmonicAmplitude (bank, frame, n);
+                const auto keep = (size_t) (2 * (maxHarmonic (level) + 1));
+                std::copy (spectrum.begin(), spectrum.begin() + (std::ptrdiff_t) keep, work.begin());
 
                 fft.performRealOnlyInverseTransform (work.data());
 

@@ -9,7 +9,9 @@ namespace
 
     // Wave positions across the Basic frames: sine, triangle, saw, square, pulse.
     constexpr float sineWave = 0.0f, sawWave = 0.5f, squareWave = 0.75f;
-    constexpr float growlTable = 1.0f, digitalTable = 2.0f, organTable = 3.0f; // waveTableNames indices
+    // waveTableNames indices.
+    constexpr float growlTable = 1.0f, digitalTable = 2.0f, organTable = 3.0f, fmTable = 4.0f,
+                    bellTable = 8.0f, choirTable = 9.0f, harshTable = 10.0f, analogTable = 11.0f;
 
     Profile typeTemplate (int type)
     {
@@ -217,6 +219,32 @@ namespace
         if (genre == house && type == chord)
         {
             p.waveTable = organTable; p.wavePos = 0.9f; // organ stab, most drawbars out
+        }
+
+        if (genre == trap && type == pluck)
+        {
+            p.waveTable = bellTable; p.wavePos = 0.6f; // bell pluck
+            p.filterCutoff = 2500.0f; p.filterEnv = 3.0f; // keep the bell's high partials
+        }
+
+        if (genre == synthwave && type == pad)
+        {
+            p.waveTable = analogTable; p.wavePos = 0.6f; // warm analog pad
+        }
+
+        if ((genre == pop || genre == trance) && type == pad)
+        {
+            p.waveTableB = choirTable; p.tableMix = 0.35f; // a little vocal shimmer
+        }
+
+        if (genre == hardstyle && type == bass)
+        {
+            p.waveTable = harshTable; p.wavePos = 0.6f; // distorted kick-bass grit
+        }
+
+        if ((genre == dubstep || genre == drumAndBass) && type == fx)
+        {
+            p.waveTable = fmTable; // metallic sweeps; the FX template's high position and S&H LFO move it
         }
     }
 

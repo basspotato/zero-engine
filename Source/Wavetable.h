@@ -9,7 +9,7 @@ class WavetableBank
 public:
     static constexpr int tableSize = 2048;
     static constexpr int numLevels = 11;
-    static constexpr int numBanks = 4;  // see waveTableNames
+    static constexpr int numBanks = 12; // see waveTableNames
     static constexpr int numFrames = 5; // per bank
 
     WavetableBank();
