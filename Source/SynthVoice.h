@@ -21,10 +21,14 @@ public:
     bool canPlaySound (juce::SynthesiserSound* sound) override;
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel) override;
     void stopNote (float velocity, bool allowTailOff) override;
-    void pitchWheelMoved (int) override {}
+    void pitchWheelMoved (int newValue) override;
     void controllerMoved (int, int) override {}
     void setCurrentPlaybackSampleRate (double newRate) override;
     void renderNextBlock (juce::AudioBuffer<float>& output, int startSample, int numSamples) override;
+
+    // Mono/legato: move this sounding voice to a new note, sliding over the
+    // Glide time. retrigger restarts the envelopes (Mono); Legato doesn't.
+    void glideTo (int midiNote, float velocity, bool retrigger);
 
 private:
     struct Params
@@ -52,6 +56,8 @@ private:
         std::atomic<float>* lfoToPitch;
         std::atomic<float>* modToPitch;
         std::atomic<float>* subOctave;
+        std::atomic<float>* glide;
+        std::atomic<float>* bendRange;
     } p;
 
     const MacroMap& macroMap;
@@ -62,10 +68,37 @@ private:
     juce::ADSR ampEnv, modEnv;
     juce::Random random;
 
-    double frequency = 440.0;
+    // Pitch in octaves (log2 Hz), so glides are even in pitch.
+    double pitch = std::log2 (440.0), targetPitch = std::log2 (440.0);
+    float bend = 0.0f; // pitch wheel, -1..1
     float level = 0.0f;
     double phases[maxUnison] {};
     double subPhase = 0.0;
     float lfoPhase = 0.0f;
     float lfoHeld = 0.0f;
+};
+
+// juce::Synthesiser plus Mono and Legato play modes: one voice and a stack of
+// held notes, so releasing a note slides back to the one still held.
+class ZeroSynth : public juce::Synthesiser
+{
+public:
+    explicit ZeroSynth (juce::AudioProcessorValueTreeState& state);
+
+    void noteOn (int midiChannel, int midiNoteNumber, float velocity) override;
+    void noteOff (int midiChannel, int midiNoteNumber, float velocity, bool allowTailOff) override;
+    void allNotesOff (int midiChannel, bool allowTailOff) override;
+
+private:
+    enum Mode { poly, mono, legato };
+
+    void removeHeld (int note);
+
+    std::atomic<float>& playMode;
+    int lastMode = poly;
+
+    static constexpr int maxHeld = 16;
+    int heldNotes[maxHeld] {};
+    float heldVelocities[maxHeld] {};
+    int numHeld = 0;
 };

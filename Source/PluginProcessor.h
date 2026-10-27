@@ -4,6 +4,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "FinishingChain.h"
 #include "MacroMap.h"
+#include "SynthVoice.h"
 
 class ZeroEngineProcessor : public juce::AudioProcessor,
                             private juce::Timer
@@ -47,7 +48,7 @@ private:
     void timerCallback() override;
 
     MacroMap macroMap;
-    juce::Synthesiser synth;
+    ZeroSynth synth;
     std::atomic<int> appliedGenre { -1 }, appliedType { -1 };
     FinishingChain finishing;
 

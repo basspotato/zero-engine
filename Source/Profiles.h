@@ -21,6 +21,9 @@ struct Profile
     // Sine sub: -1 = octave below the note, 0 = at the note.
     float subOctave;
 
+    // Playing: 0 poly, 1 mono, 2 legato; glide in seconds.
+    float playMode, glide;
+
     // LFO.
     float lfoRate, lfoShape, lfoToPos, lfoToPitch;
 

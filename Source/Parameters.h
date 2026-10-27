@@ -40,6 +40,11 @@ namespace ParamIDs
     inline constexpr auto lfoToPos   = "lfoToPos";
     inline constexpr auto lfoToPitch = "lfoToPitch";
 
+    // Playing.
+    inline constexpr auto playMode  = "playMode";
+    inline constexpr auto glide     = "glide";
+    inline constexpr auto bendRange = "bendRange";
+
     // Finishing chain.
     inline constexpr auto ottDepth    = "ottDepth";
     inline constexpr auto tilt        = "tilt";
@@ -51,6 +56,7 @@ inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech
                                                 "Drum & Bass", "Pop", "House", "Trance", "Future Bass", "Hardstyle" };
 inline const juce::StringArray typeNames     { "Bass", "Lead", "Chord", "Pad", "Pluck", "FX" };
 inline const juce::StringArray lfoShapeNames { "Sine", "Triangle", "Saw", "Square", "Sample & Hold" };
+inline const juce::StringArray playModeNames { "Poly", "Mono", "Legato" }; // Legato: overlapping notes slide without retriggering
 
 inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 {
@@ -109,6 +115,11 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::lfoShape, 1 }, "LFO Shape", lfoShapeNames, 0));
     unit (ParamIDs::lfoToPos,   "LFO > Position", 0.0f);
     unit (ParamIDs::lfoToPitch, "LFO > Pitch",    0.0f);
+
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::playMode, 1 }, "Play Mode", playModeNames, 0));
+    seconds (ParamIDs::glide, "Glide", 2.0f, 0.0f);
+    layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::bendRange, 1 }, "Bend Range", 0, 24, 2,
+                                                     AudioParameterIntAttributes().withLabel ("st")));
 
     unit (ParamIDs::ottDepth, "OTT Depth", 0.35f);
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::tilt, 1 }, "Tilt",

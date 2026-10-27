@@ -14,6 +14,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       state (*this, nullptr, "ZeroEngine", createParameterLayout()),
       macroMap (state),
+      synth (state),
       grit (*state.getRawParameterValue (ParamIDs::grit)),
       air (*state.getRawParameterValue (ParamIDs::air)),
       width (*state.getRawParameterValue (ParamIDs::width)),

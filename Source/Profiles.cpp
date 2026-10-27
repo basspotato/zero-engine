@@ -28,6 +28,7 @@ namespace
                 p.modAttack = 0.0f; p.modDecay = 0.25f; p.modSustain = 0.2f; p.modRelease = 0.2f; p.modToPos = -0.2f;
                 p.ottDepth = 0.45f; p.tilt = -1.0f; p.monoFreq = 150.0f; p.stereoWidth = 0.8f;
                 p.subOctave = 0.0f; // an octave below a bass note is inaudible and just eats headroom
+                p.playMode = 2.0f;  // legato: basses play one note at a time
                 break;
 
             case lead:
@@ -120,6 +121,7 @@ namespace
                     p.modToPos = 0.0f; p.modToPitch = 12.0f;
                     p.grit = 0.6f; p.punch = 0.7f; p.ottDepth = 0.3f; p.tilt = 0.0f;
                     p.monoFreq = 300.0f;
+                    p.glide = 0.08f; // overlapping notes slide
                     break;
 
                 case dubstep: // wobble
@@ -131,6 +133,7 @@ namespace
                     p.lfoRate = 0.25f; p.lfoShape = triangle; p.lfoToPos = 0.15f;
                     p.weight = 1.0f; p.grit = 0.4f; p.motion = 0.1f; p.air = 0.0f;
                     p.ottDepth = 0.4f; p.tilt = -2.5f; p.monoFreq = 150.0f;
+                    p.glide = 0.03f;
                     break;
 
                 case techno: // rolling, short
@@ -277,6 +280,9 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::modToPos,   p.modToPos);
     set (ParamIDs::modToPitch, p.modToPitch);
     set (ParamIDs::subOctave,  p.subOctave);
+
+    set (ParamIDs::playMode,   p.playMode);
+    set (ParamIDs::glide,      p.glide);
 
     set (ParamIDs::lfoRate,    p.lfoRate);
     set (ParamIDs::lfoShape,   p.lfoShape);

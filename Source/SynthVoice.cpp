@@ -27,7 +27,8 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::ampAttack), get (ParamIDs::ampDecay),   get (ParamIDs::ampSustain), get (ParamIDs::ampRelease),
           get (ParamIDs::modAttack), get (ParamIDs::modDecay),   get (ParamIDs::modSustain), get (ParamIDs::modRelease),
           get (ParamIDs::modToPos),  get (ParamIDs::lfoRate),    get (ParamIDs::lfoShape),  get (ParamIDs::lfoToPos),
-          get (ParamIDs::lfoToPitch), get (ParamIDs::modToPitch), get (ParamIDs::subOctave) };
+          get (ParamIDs::lfoToPitch), get (ParamIDs::modToPitch), get (ParamIDs::subOctave),
+          get (ParamIDs::glide),     get (ParamIDs::bendRange) };
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -57,9 +58,28 @@ void ZeroVoice::updateEnvelopes()
                             p.modSustain->load(), juce::jmax (0.005f, p.modRelease->load()) });
 }
 
-void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*, int)
+void ZeroVoice::pitchWheelMoved (int newValue)
 {
-    frequency = juce::MidiMessage::getMidiNoteInHertz (midiNote);
+    bend = juce::jlimit (-1.0f, 1.0f, (float) (newValue - 8192) / 8192.0f);
+}
+
+void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger)
+{
+    targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
+
+    if (retrigger)
+    {
+        level = velocity * 0.3f;
+        updateEnvelopes();
+        ampEnv.noteOn();
+        modEnv.noteOn();
+    }
+}
+
+void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel)
+{
+    pitch = targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
+    pitchWheelMoved (pitchWheel);
     level = velocity * 0.3f;
 
     // Random start phases keep unison voices from starting phase-locked (a flat, phasey attack).
@@ -153,7 +173,12 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     }
 
     // Choose the mip level for the highest pitch this block can reach.
-    const auto maxFreq = frequency * std::pow (2.0, maxCents / 1200.0 + (lfoToPitch + juce::jmax (0.0f, modToPitch)) / 12.0);
+    const auto bendSemis = bend * p.bendRange->load();
+    const auto glideTime = p.glide->load();
+    const auto glideCoeff = glideTime > 0.0005f ? 1.0 - std::exp (-3.0 / (glideTime * sampleRate)) : 1.0; // ~95% there at glideTime
+
+    const auto maxFreq = std::exp2 (juce::jmax (pitch, targetPitch) + maxCents / 1200.0
+                                    + (lfoToPitch + juce::jmax (0.0f, modToPitch) + juce::jmax (0.0f, bendSemis)) / 12.0);
     const auto mipLevel = WavetableBank::levelFor (maxFreq, sampleRate);
 
     for (int i = 0; i < numSamples; ++i)
@@ -161,7 +186,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         const auto lfo = nextLfo (lfoInc);
         const auto mod = modEnv.getNextSample();
         const auto pos = juce::jlimit (0.0f, 1.0f, basePos + mod * modToPos + lfo * lfoToPos * 0.5f);
-        const auto inc = frequency * std::exp2 ((lfo * lfoToPitch + mod * modToPitch) / 12.0f) / sampleRate;
+        pitch += glideCoeff * (targetPitch - pitch);
+        const auto inc = std::exp2 (pitch + (lfo * lfoToPitch + mod * modToPitch + bendSemis) / 12.0) / sampleRate;
 
         float l = 0.0f, r = 0.0f;
         for (int v = 0; v < voices; ++v)
@@ -188,4 +214,87 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
 
     if (! ampEnv.isActive())
         clearCurrentNote();
+}
+
+//==============================================================================
+ZeroSynth::ZeroSynth (juce::AudioProcessorValueTreeState& state)
+    : playMode (*state.getRawParameterValue (ParamIDs::playMode))
+{
+}
+
+void ZeroSynth::removeHeld (int note)
+{
+    for (int i = 0; i < numHeld; ++i)
+    {
+        if (heldNotes[i] == note)
+        {
+            for (int j = i + 1; j < numHeld; ++j)
+            {
+                heldNotes[j - 1] = heldNotes[j];
+                heldVelocities[j - 1] = heldVelocities[j];
+            }
+            --numHeld;
+            return;
+        }
+    }
+}
+
+void ZeroSynth::noteOn (int midiChannel, int midiNoteNumber, float velocity)
+{
+    const auto mode = (int) playMode.load();
+    if (mode != lastMode)
+    {
+        // Switching modes mid-note would strand voices the other mode can't see.
+        allNotesOff (0, true);
+        lastMode = mode;
+    }
+
+    if (mode == poly)
+    {
+        Synthesiser::noteOn (midiChannel, midiNoteNumber, velocity);
+        return;
+    }
+
+    removeHeld (midiNoteNumber);
+    if (numHeld == maxHeld)
+        removeHeld (heldNotes[0]); // drop the oldest
+    heldNotes[numHeld] = midiNoteNumber;
+    heldVelocities[numHeld] = velocity;
+    ++numHeld;
+
+    auto* voice = dynamic_cast<ZeroVoice*> (getVoice (0));
+    if (voice == nullptr)
+        return;
+
+    if (voice->isVoiceActive())
+        voice->glideTo (midiNoteNumber, velocity, mode == mono || numHeld == 1); // legato only slides while a key is held
+    else
+        startVoice (voice, getSound (0).get(), midiChannel, midiNoteNumber, velocity);
+}
+
+void ZeroSynth::noteOff (int midiChannel, int midiNoteNumber, float velocity, bool allowTailOff)
+{
+    if (lastMode == poly)
+    {
+        Synthesiser::noteOff (midiChannel, midiNoteNumber, velocity, allowTailOff);
+        return;
+    }
+
+    const auto wasCurrent = numHeld > 0 && heldNotes[numHeld - 1] == midiNoteNumber;
+    removeHeld (midiNoteNumber);
+
+    auto* voice = dynamic_cast<ZeroVoice*> (getVoice (0));
+    if (voice == nullptr || ! voice->isVoiceActive())
+        return;
+
+    if (numHeld == 0)
+        stopVoice (voice, velocity, allowTailOff);
+    else if (wasCurrent)
+        voice->glideTo (heldNotes[numHeld - 1], heldVelocities[numHeld - 1], lastMode == mono);
+}
+
+void ZeroSynth::allNotesOff (int midiChannel, bool allowTailOff)
+{
+    numHeld = 0;
+    Synthesiser::allNotesOff (midiChannel, allowTailOff);
 }
