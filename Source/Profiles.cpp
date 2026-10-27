@@ -160,6 +160,147 @@ namespace
         p.reverbMix = juce::jlimit (0.0f, 1.0f, p.reverbMix + verb);
     }
 
+    // Profiles with too few references to tune (fewer than 3), designed from
+    // reports/Artist sound design targets.md instead. Runs last, so it wins.
+    void applyResearchedGaps (Profile& p, int genre, int type)
+    {
+        if (genre == edm && type == bass)
+        {
+            // Foghorn (Chase & Status "Baddadan"): bright stacked partials over the
+            // clean sub; organ drawbars give the strong 3rd harmonic (+19 st), blended
+            // with a saw, brightened by the mod envelope at each note.
+            p.waveTable = organTable; p.wavePos = 0.5f; p.waveTableB = 0.0f; p.tableMix = 0.5f;
+            p.unison = 3; p.detune = 0.15f;
+            p.ampAttack = 0.002f; p.ampSustain = 1.0f; p.ampRelease = 0.024f;
+            p.modAttack = 0.005f; p.modDecay = 0.15f; p.modSustain = 0.3f; p.modToPos = 0.3f;
+            p.filterCutoff = 6000.0f; p.filterKeytrack = 0.5f;
+            p.weight = 0.7f; p.grit = 0.7f; p.punch = 0.6f; p.width = 0.2f; p.air = 0.3f;
+            p.ottDepth = 0.75f; p.tilt = 2.0f;
+        }
+
+        if (genre == dubstep && type == chord)
+        {
+            // Melodic-dubstep drop chord (Seven Lions, Illenium): two saw stacks of
+            // 7 voices with low detune, a quick pitch blip, driven after the high-pass.
+            p.wavePos = sawWave; p.unison = 7; p.detune = 0.25f; p.blend = 0.8f;
+            p.ampAttack = 0.01f; p.ampDecay = 0.5f; p.ampSustain = 1.0f; p.ampRelease = 0.35f;
+            p.modAttack = 0.0f; p.modDecay = 0.05f; p.modSustain = 0.0f; p.modToPos = 0.0f; p.modToPitch = 3.0f;
+            p.lfoRate = 0.3f; p.lfoShape = triangle; p.lfoToPos = 0.0f;
+            p.grit = 0.35f; p.ottDepth = 0.4f; p.air = 0.55f; p.tilt = 1.5f; p.width = 0.8f;
+            p.reverbMix = 0.2f;
+        }
+
+        if (genre == techno && type == pluck)
+        {
+            // Melodic-techno pluck: saw through a 24 dB low-pass with a strong, short
+            // envelope; dotted-1/8 echoes.
+            p.wavePos = sawWave; p.unison = 2; p.detune = 0.15f;
+            p.ampDecay = 0.22f; p.ampRelease = 0.15f;
+            p.modDecay = 0.18f; p.modToPos = 0.0f;
+            p.filterCutoff = 800.0f; p.filterRes = 0.3f; p.filterEnv = 4.0f;
+            p.grit = 0.35f; p.width = 0.5f; p.ottDepth = 0.4f; p.tilt = 2.0f;
+            p.delayMix = 0.2f; p.delayTime = 2.0f;
+        }
+
+        if (genre == techHouse && type == bass)
+        {
+            // Fisher / Chris Lake / Stussy roller: near-sine, mono, a short plucky
+            // low-pass envelope at 150 Hz, light saturation on the mids only.
+            p.wavePos = 0.15f; p.unison = 1; p.detune = 0.0f;
+            p.ampAttack = 0.002f; p.ampDecay = 0.2f; p.ampSustain = 0.7f; p.ampRelease = 0.04f;
+            p.modAttack = 0.0f; p.modDecay = 0.12f; p.modSustain = 0.1f; p.modToPos = 0.0f;
+            p.filterCutoff = 450.0f; p.filterRes = 0.0f; p.filterEnv = 2.0f; p.velToCutoff = 1.0f;
+            p.weight = 0.85f; p.grit = 0.3f; p.punch = 0.6f; p.width = 0.05f; p.air = 0.0f;
+            p.ottDepth = 0.2f;
+        }
+
+        if (genre == techHouse && type == chord)
+        {
+            // Minor-7th stab: two saws, a closed low-pass that snaps open, dotted echoes.
+            p.wavePos = sawWave; p.unison = 2; p.detune = 0.15f;
+            p.ampAttack = 0.001f; p.ampDecay = 0.5f; p.ampSustain = 0.5f; p.ampRelease = 0.25f;
+            p.modAttack = 0.0f; p.modDecay = 0.25f; p.modSustain = 0.0f; p.modToPos = 0.0f;
+            p.filterCutoff = 2500.0f; p.filterEnv = 2.0f; p.filterKeytrack = 0.5f;
+            p.lfoToPos = 0.0f;
+            p.grit = 0.4f; p.punch = 0.6f; p.width = 0.5f; p.ottDepth = 0.7f; p.stereoWidth = 0.9f; p.tilt = 1.0f;
+            p.delayMix = 0.15f; p.reverbMix = 0.15f;
+        }
+
+        if (genre == techHouse && type == pad)
+        {
+            // Filtered chord-pad rather than an ambient wash; slow cutoff drift.
+            p.wavePos = sawWave; p.unison = 3; p.detune = 0.15f;
+            p.ampAttack = 0.5f; p.ampSustain = 1.0f; p.ampRelease = 2.0f;
+            p.modToPos = 0.0f;
+            p.filterMode = 0.0f; p.filterCutoff = 4000.0f; p.lfoToCutoff = 0.15f;
+            p.lfoRate = 0.12f; p.lfoToPos = 0.0f;
+            p.grit = 0.05f; p.ottDepth = 0.3f; p.air = 0.5f; p.tilt = 1.5f; p.levelTrim = 5.0f;
+        }
+
+        if (genre == trap && type == chord)
+        {
+            // Festival brass (RL Grime): a saw stack whose low-pass swells open, distorted.
+            p.wavePos = sawWave; p.unison = 5; p.detune = 0.3f;
+            p.ampAttack = 0.015f; p.ampDecay = 0.5f; p.ampSustain = 1.0f; p.ampRelease = 0.3f;
+            p.modAttack = 0.05f; p.modDecay = 0.4f; p.modSustain = 0.5f; p.modToPos = 0.0f;
+            p.filterMode = 0.0f; p.filterCutoff = 1400.0f; p.filterEnv = 3.0f; p.filterKeytrack = 0.5f;
+            p.lfoToPos = 0.0f;
+            p.grit = 0.55f; p.ottDepth = 0.5f; p.width = 0.7f; p.air = 0.45f; p.tilt = 2.5f;
+        }
+
+        if (genre == trap && type == pad)
+        {
+            // Dark choir pad (Metro Boomin palette): low unison, static low-pass, big reverb.
+            p.waveTable = choirTable; p.wavePos = 0.3f; p.waveTableB = analogTable; p.tableMix = 0.3f;
+            p.unison = 3; p.detune = 0.2f;
+            p.ampAttack = 0.5f; p.ampSustain = 1.0f; p.ampRelease = 2.0f;
+            p.modToPos = 0.0f;
+            p.filterMode = 0.0f; p.filterCutoff = 4500.0f;
+            p.lfoRate = 0.2f; p.lfoToPos = 0.15f;
+            p.grit = 0.05f; p.ottDepth = 0.2f; p.air = 0.35f; p.tilt = 1.5f; p.levelTrim = 5.0f;
+            p.reverbMix = 0.4f;
+        }
+
+        if (genre == synthwave && type == chord)
+        {
+            // Jupiter / Juno chord: the owner's Jupiter bank over an analog saw, slow
+            // brassy swell, PWM-like movement at chorus rate.
+            p.waveTable = jupiterTable; p.wavePos = 0.85f; p.waveTableB = analogTable; p.tableMix = 0.5f;
+            p.unison = 3; p.detune = 0.2f;
+            p.ampAttack = 0.2f; p.ampDecay = 1.5f; p.ampSustain = 0.7f; p.ampRelease = 0.6f;
+            p.modToPos = 0.0f;
+            p.filterMode = 0.0f; p.filterCutoff = 6000.0f; p.filterRes = 0.1f;
+            p.lfoRate = 0.5f; p.lfoShape = triangle; p.lfoToPos = 0.15f;
+            p.grit = 0.1f; p.ottDepth = 0.25f; p.width = 0.8f; p.tilt = 2.0f;
+            p.reverbMix = 0.3f;
+        }
+
+        if (genre == synthwave && type == pad)
+        {
+            // Jupiter-8 pad: the owner's Jupiter bank with an analog saw, long envelope,
+            // gentle low-pass, Juno-chorus-rate movement.
+            p.waveTable = jupiterTable; p.wavePos = 0.8f; p.waveTableB = analogTable; p.tableMix = 0.5f;
+            p.unison = 3; p.detune = 0.2f;
+            p.ampAttack = 0.8f; p.ampSustain = 0.9f; p.ampRelease = 3.0f;
+            p.modToPos = 0.0f;
+            p.filterMode = 0.0f; p.filterCutoff = 4500.0f; p.filterRes = 0.1f;
+            p.lfoRate = 0.5f; p.lfoShape = triangle; p.lfoToPos = 0.2f;
+            p.grit = 0.05f; p.ottDepth = 0.2f; p.tilt = 1.5f; p.stereoWidth = 0.7f; p.levelTrim = 3.5f;
+            p.reverbMix = 0.4f;
+        }
+
+        if (genre == synthwave && type == fx)
+        {
+            // Laser zap: a saw diving two octaves into the note, into dotted-1/8 echoes and a hall.
+            p.waveTable = 0.0f; p.wavePos = sawWave; p.unison = 3; p.detune = 0.3f;
+            p.ampAttack = 0.001f; p.ampDecay = 0.6f; p.ampSustain = 0.2f; p.ampRelease = 1.0f;
+            p.modAttack = 0.0f; p.modDecay = 0.25f; p.modSustain = 0.0f; p.modToPos = 0.0f; p.modToPitch = 24.0f;
+            p.lfoToPos = 0.0f; p.lfoToPitch = 0.0f;
+            p.grit = 0.25f; p.tilt = 4.0f; p.air = 0.7f; p.ottDepth = 0.8f;
+            p.delayMix = 0.35f; p.delayTime = 2.0f; p.delayFeedback = 0.45f; p.reverbMix = 0.4f; p.reverbSize = 0.85f;
+        }
+    }
+
     // Signature sounds that a shift alone can't reach.
     void applySignature (Profile& p, int genre, int type)
     {
@@ -339,6 +480,8 @@ namespace
         {
             p.waveTable = fmTable; // metallic sweeps; the FX template's high position and S&H LFO move it
         }
+
+        applyResearchedGaps (p, genre, type);
     }
 
     MacroDirections macroDirections (int genre, int type)
