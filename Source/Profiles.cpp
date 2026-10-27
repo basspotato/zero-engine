@@ -22,6 +22,17 @@ namespace
         p.stereoWidth = 1.0f;
         p.subOctave = -1.0f;
         p.midHighPass = 120.0f;     // only used when subSplit is on
+        p.subOn = 1.0f;
+
+        // The other half of clean sub, dirty mids: everything that isn't a bass
+        // or FX leaves the low end to the bass (bass_clarity.md).
+        if (type == lead || type == chord || type == pad || type == pluck)
+        {
+            p.subOn = 0.0f;
+            p.subSplit = 1.0f;      // the split path is what applies the high-pass
+            p.midHighPass = (type == chord || type == pad) ? 150.0f : 200.0f;
+        }
+
         p.filterMode = 1.0f;        // Low 24, fully open: bypassed
         p.filterCutoff = 20000.0f;
         p.velSens = 1.0f;
@@ -280,6 +291,10 @@ namespace
         a[M::air][T::filterCutoff] = 1.0f; // opens the filter where one is in use
         a[M::air][T::reverbMix]   = type == bass ? 0.0f : 0.15f;
 
+        // With no sub on these types, Weight adds body by lowering the high-pass.
+        if (type == lead || type == chord || type == pad || type == pluck)
+            a[M::weight][T::midHighPass] = -1.5f;
+
         switch (type)
         {
             case bass:  a[M::punch][T::modToPos] = -0.2f; break; // stronger wave pluck
@@ -402,6 +417,7 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::modToPos,   p.modToPos);
     set (ParamIDs::modToPitch, p.modToPitch);
     set (ParamIDs::subOctave,  p.subOctave);
+    set (ParamIDs::subOn,      p.subOn);
     set (ParamIDs::subSplit,   p.subSplit);
     set (ParamIDs::midHighPass, p.midHighPass);
 

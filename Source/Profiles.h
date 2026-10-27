@@ -23,6 +23,7 @@ struct Profile
     // Sine sub: -1 = octave below the note, 0 = at the note. subSplit (0/1)
     // keeps it clean and out of the chain, high-passing the rest at midHighPass Hz.
     float subOctave, subSplit, midHighPass;
+    float subOn; // 0 for leads, chords, pads and plucks: the bass owns the sub
 
     // Filter: mode 0 Low 12, 1 Low 24, 2 Band, 3 High; cutoff in Hz; env,
     // LFO amount in octaves.

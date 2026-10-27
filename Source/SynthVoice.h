@@ -71,6 +71,7 @@ private:
         std::atomic<float>* waveTable;
         std::atomic<float>* waveTableB;
         std::atomic<float>* tableMix;
+        std::atomic<float>* subOn;
     } p;
 
     void setVelocity (float velocity);

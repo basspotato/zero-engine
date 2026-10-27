@@ -31,7 +31,7 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::glide),     get (ParamIDs::bendRange),
           get (ParamIDs::filterMode), get (ParamIDs::filterCutoff), get (ParamIDs::filterRes), get (ParamIDs::filterEnv),
           get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff), get (ParamIDs::velToCutoff), get (ParamIDs::velSens),
-          get (ParamIDs::waveTable), get (ParamIDs::waveTableB), get (ParamIDs::tableMix) };
+          get (ParamIDs::waveTable), get (ParamIDs::waveTableB), get (ParamIDs::tableMix), get (ParamIDs::subOn) };
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -183,7 +183,7 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto lfoRate = juce::jlimit (0.05f, 40.0f, p.lfoRate->load() * std::exp2 (macroMap.offset (MacroTarget::lfoRate)));
     const auto lfoInc = (float) (lfoRate / sampleRate);
     const auto modToPitch = juce::jlimit (-36.0f, 36.0f, p.modToPitch->load() + macroMap.offset (MacroTarget::modToPitch)); // semitones at full mod envelope
-    const auto subLevel = p.weight->load() * 0.8f;
+    const auto subLevel = p.subOn->load() > 0.5f ? p.weight->load() * 0.8f : 0.0f;
     const auto subRatio = p.subOctave->load() < -0.5f ? 0.5 : 1.0;
 
     // Per unison voice: pitch ratio and equal-power stereo gains.

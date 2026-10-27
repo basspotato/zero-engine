@@ -124,7 +124,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.tiltDb   = juce::jlimit (-6.0f, 6.0f, tilt.load() + macroMap.offset (MacroTarget::tilt));
     settings.air      = air.load();
     settings.monoFreq = monoFreq.load();
-    settings.midHighPassHz = midHighPass.load();
+    settings.midHighPassHz = juce::jlimit (20.0f, 1000.0f, midHighPass.load() * std::exp2 (macroMap.offset (MacroTarget::midHighPass)));
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
     settings.outputDb = output.load() + levelTrim.load();
 

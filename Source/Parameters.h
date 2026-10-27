@@ -37,6 +37,7 @@ namespace ParamIDs
     inline constexpr auto modToPos   = "modToPos";
     inline constexpr auto modToPitch = "modToPitch";
     inline constexpr auto subOctave  = "subOctave";
+    inline constexpr auto subOn      = "subOn";       // leads, chords, pads and plucks leave the sub to the bass
     inline constexpr auto subSplit   = "subSplit";    // clean sub skips the finishing chain until the clipper
     inline constexpr auto midHighPass = "midHighPass"; // high-pass on everything but the sub, when split
 
@@ -140,6 +141,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
                                                        NormalisableRange<float> (-24.0f, 24.0f), 0.0f,
                                                        AudioParameterFloatAttributes().withLabel ("st")));
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::subOctave, 1 }, "Sub Octave", -1, 0, -1));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::subOn, 1 }, "Sub On", true));
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::subSplit, 1 }, "Sub Split", false));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::midHighPass, 1 }, "Mid High-Pass",
                                                        NormalisableRange<float> (40.0f, 400.0f, 0.0f, 0.5f), 120.0f,
