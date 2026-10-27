@@ -366,8 +366,7 @@ namespace
         // lent to other genres' leads: its width, air, squash and space as a
         // floor, with each genre's own grit and tilt kept on top. Genres with a
         // lead of their own (below) stay out of it so they don't all sound alike.
-        const auto bigLead = genre == edm || genre == futureBass || genre == drumAndBass
-                          || genre == pop || genre == house;
+        const auto bigLead = genre == edm;
         if (type == lead && bigLead)
         {
             p.unison = 7;
@@ -439,6 +438,50 @@ namespace
                     p.ottDepth = 0.55f; p.tilt = 0.75f; p.stereoWidth = 0.8f;
                     p.delayMix = 0.25f; p.reverbMix = 0.3f; p.reverbSize = 0.8f; // dotted 1/8 from the template
                     p.playMode = 2.0f; p.glide = 0.06f;
+                    break;
+
+                case futureBass: // vocal-chop-like lead (Illenium, San Holo, Flume): choir formants over a saw,
+                                 // a scoop up into each note, formants moving at 1/8
+                    p.waveTable = choirTable; p.wavePos = 0.6f; p.waveTableB = 0.0f; p.tableMix = 0.5f; // B: Basic at saw-ish
+                    p.unison = 5; p.detune = 0.4f;
+                    p.ampAttack = 0.005f; p.ampSustain = 0.85f; p.ampRelease = 0.25f;
+                    p.modAttack = 0.0f; p.modDecay = 0.08f; p.modSustain = 0.0f; p.modToPos = 0.0f; p.modToPitch = -2.0f;
+                    p.lfoSync = syncEighth; p.lfoShape = triangle; p.lfoToPos = 0.15f; p.lfoToPitch = 0.0f;
+                    p.grit = 0.2f; p.air = 0.5f; p.width = 0.75f;
+                    p.ottDepth = 0.7f; p.tilt = 1.0f;
+                    p.delayMix = 0.2f; p.reverbMix = 0.25f;
+                    break;
+
+                case drumAndBass: // sharp mono stab-lead (Sub Focus, Wilkinson): sync-peak table, quick bright
+                                  // envelope sweep, glide, driven
+                    p.waveTable = digitalTable; p.wavePos = 0.5f; p.unison = 5; p.detune = 0.35f;
+                    p.ampAttack = 0.002f; p.ampDecay = 0.4f; p.ampSustain = 0.7f; p.ampRelease = 0.15f;
+                    p.modAttack = 0.0f; p.modDecay = 0.2f; p.modSustain = 0.2f; p.modToPos = 0.3f;
+                    p.lfoToPitch = 0.0f;
+                    p.grit = 0.45f; p.air = 0.4f; p.width = 0.5f;
+                    p.ottDepth = 0.6f; p.tilt = 1.0f;
+                    p.delayMix = 0.15f; p.delayTime = 1.0f; p.reverbMix = 0.15f; // 1/8 echoes
+                    p.playMode = 1.0f; p.glide = 0.04f;
+                    break;
+
+                case pop: // clean, bright lead between saw and square: light unison, vibrato, polished
+                    p.wavePos = 0.65f; p.unison = 3; p.detune = 0.15f;
+                    p.ampAttack = 0.005f; p.ampSustain = 0.85f; p.ampRelease = 0.25f;
+                    p.modToPos = 0.0f;
+                    p.lfoRate = 5.5f; p.lfoToPitch = 0.04f;
+                    p.grit = 0.15f; p.air = 0.6f; p.width = 0.6f;
+                    p.ottDepth = 0.5f; p.tilt = 2.0f;
+                    p.delayMix = 0.15f; p.reverbMix = 0.2f;
+                    break;
+
+                case house: // electric-keys lead: soft FM bell-piano tone that decays, dotted echoes
+                    p.waveTable = fmTable; p.wavePos = 0.7f; p.unison = 2; p.detune = 0.1f;
+                    p.ampAttack = 0.002f; p.ampDecay = 0.6f; p.ampSustain = 0.65f; p.ampRelease = 0.3f;
+                    p.modAttack = 0.0f; p.modDecay = 0.4f; p.modSustain = 0.2f; p.modToPos = 0.25f; // brighter on the strike
+                    p.lfoToPitch = 0.0f;
+                    p.grit = 0.3f; p.air = 0.45f; p.width = 0.5f;
+                    p.ottDepth = 0.55f; p.tilt = 2.0f;
+                    p.delayMix = 0.2f; p.reverbMix = 0.2f;
                     break;
 
                 default:
