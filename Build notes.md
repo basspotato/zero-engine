@@ -38,6 +38,9 @@ Points pulled from the research report ([AI finished sound VST engine](reports/A
   - supersaw unison stacks
   - OTT-style multiband upward/downward compression
 
+## Sound design principles
+- **Clean sub, dirty mids.** One clean mono sine owns everything below ~100–150 Hz and skips the distortion and OTT; the movement and grit live in a high-passed mid layer (~150 Hz to 3.5 kHz). Applies to every bass profile (dubstep first), and the other half applies to leads, chords, pads and plucks: high-pass them so nothing fights the sub. Research, the engine gap and a per-profile table: [bass clarity](research_notes/bass_clarity.md).
+
 ## Open items
 - Generation mode decision (generate vs. note-on vs. hybrid).
 - Still to verify from the report: Unisynth's current features, licenses for Diff-MST / ST-ITO / synth-proxy / CTAG / model weights.
