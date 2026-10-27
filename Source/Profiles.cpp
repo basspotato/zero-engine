@@ -126,10 +126,11 @@ namespace
                     p.lfoRate = 3.0f; p.lfoShape = sine; p.lfoToPos = 0.7f;
                     break;
 
-                case drumAndBass: // reese: detuned saws over a solid sub at the note
-                    p.unison = 5; p.detune = 0.4f; p.blend = 0.6f;
-                    p.lfoRate = 0.3f; p.lfoShape = triangle; p.lfoToPos = 0.2f;
-                    p.weight = 0.9f; p.tilt = 0.0f;
+                case drumAndBass: // deep rolling reese: darker detuned wave over a heavy sub
+                    p.wavePos = 0.35f; p.unison = 5; p.detune = 0.3f; p.blend = 0.5f;
+                    p.lfoRate = 0.25f; p.lfoShape = triangle; p.lfoToPos = 0.15f;
+                    p.weight = 1.0f; p.grit = 0.4f; p.motion = 0.1f; p.air = 0.0f;
+                    p.ottDepth = 0.4f; p.tilt = -2.5f; p.monoFreq = 150.0f;
                     break;
 
                 case techno: // rolling, short
