@@ -13,6 +13,16 @@ cmake --build build --config Release --target ZeroEngine_VST3 ZeroEngine_Standal
 
 JUCE 8 is fetched by CMake. Outputs land in `build/ZeroEngine_artefacts/Release/` (`VST3/Zero Engine.vst3`, `Standalone/Zero Engine.exe`).
 
+## Analysis tool (offline, not shipped)
+
+`tools/analyze/` builds `ZeroAnalyze.exe` (target `ZeroAnalyze`, output in `build/ZeroAnalyze_artefacts/Release/`). It measures loudness (BS.1770 LUFS, peak-to-loudness ratio), brightness (centroid, % above 4 kHz), bass (% below 150/60 Hz) and width (side share, correlation).
+
+- `ZeroAnalyze analyze <folder> [out.csv]`: measure any folder of audio.
+- `ZeroAnalyze render [outDir]`: render all 72 profiles to WAV and measure them.
+- `ZeroAnalyze compare <refFolder> [outDir]`: measure references laid out as `<Genre>/<Type>/*.wav`, render the matching profiles, print ref vs engine.
+
+Output goes to `analysis/` by default (git-ignored).
+
 ## Layout
 
 - `Source/Parameters.h`: parameter IDs and layout (APVTS)

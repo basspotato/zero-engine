@@ -36,11 +36,14 @@ public:
 
     const FinishingChain::Meters& getMeters() const noexcept { return finishing.getMeters(); }
 
+    // Message thread: loads the profile for the current Genre/Type if it changed.
+    // Runs on a timer; offline tools call it directly after setting Genre/Type.
+    void syncProfile();
+
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboardState;
 
 private:
-    // Watches Genre/Type on the message thread and loads the matching profile.
     void timerCallback() override;
 
     MacroMap macroMap;

@@ -30,11 +30,16 @@ ZeroEngineProcessor::ZeroEngineProcessor()
 
     synth.addSound (new ZeroSound());
 
-    timerCallback(); // start on the default genre/type's profile
+    syncProfile(); // start on the default genre/type's profile
     startTimerHz (10);
 }
 
 void ZeroEngineProcessor::timerCallback()
+{
+    syncProfile();
+}
+
+void ZeroEngineProcessor::syncProfile()
 {
     const auto genre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
     const auto type = (int) state.getRawParameterValue (ParamIDs::type)->load();

@@ -49,3 +49,33 @@ target_link_libraries(ZeroEngine
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# Offline tool: measures reference sounds and engine renders (loudness,
+# brightness, bass, width). Builds the engine sources directly so renders
+# match the plugin exactly. Not shipped.
+juce_add_console_app(ZeroAnalyze PRODUCT_NAME "ZeroAnalyze")
+
+target_sources(ZeroAnalyze
+    PRIVATE
+        tools/analyze/Main.cpp
+        tools/analyze/Descriptors.cpp
+        Source/PluginProcessor.cpp
+        Source/FinishingChain.cpp
+        Source/Profiles.cpp
+        Source/PluginEditor.cpp
+        Source/SynthVoice.cpp
+        Source/Wavetable.cpp)
+
+target_compile_definitions(ZeroAnalyze
+    PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JucePlugin_Name="Zero Engine")
+
+target_link_libraries(ZeroAnalyze
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_dsp
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
