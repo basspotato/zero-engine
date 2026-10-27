@@ -30,7 +30,7 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::lfoToPitch), get (ParamIDs::modToPitch), get (ParamIDs::subOctave),
           get (ParamIDs::glide),     get (ParamIDs::bendRange),
           get (ParamIDs::filterMode), get (ParamIDs::filterCutoff), get (ParamIDs::filterRes), get (ParamIDs::filterEnv),
-          get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff) };
+          get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff), get (ParamIDs::velToCutoff), get (ParamIDs::velSens) };
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -65,13 +65,20 @@ void ZeroVoice::pitchWheelMoved (int newValue)
     bend = juce::jlimit (-1.0f, 1.0f, (float) (newValue - 8192) / 8192.0f);
 }
 
+void ZeroVoice::setVelocity (float velocity)
+{
+    noteVelocity = velocity;
+    const auto sensitivity = p.velSens->load();
+    level = 0.3f * (1.0f - sensitivity + sensitivity * velocity);
+}
+
 void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger)
 {
     targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
 
     if (retrigger)
     {
-        level = velocity * 0.3f;
+        setVelocity (velocity);
         updateEnvelopes();
         ampEnv.noteOn();
         modEnv.noteOn();
@@ -204,7 +211,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     // Filter. Fully open low-pass with no modulation is skipped, so profiles
     // that don't use it sound exactly as before.
     const auto filterMode = (int) p.filterMode->load();
-    const auto cutoff = p.filterCutoff->load() * std::exp2 (macroMap.offset (MacroTarget::filterCutoff));
+    const auto velocityOctaves = p.velToCutoff->load() * (noteVelocity - 1.0f); // softer notes are darker
+    const auto cutoff = p.filterCutoff->load() * std::exp2 (macroMap.offset (MacroTarget::filterCutoff) + velocityOctaves);
     const auto filterEnv = p.filterEnv->load() + macroMap.offset (MacroTarget::filterEnv);
     const auto keytrack = p.filterKeytrack->load();
     const auto lfoToCutoff = p.lfoToCutoff->load();
@@ -337,9 +345,29 @@ void ZeroSynth::noteOff (int midiChannel, int midiNoteNumber, float velocity, bo
         return;
 
     if (numHeld == 0)
-        stopVoice (voice, velocity, allowTailOff);
+    {
+        if (! sustainDown)
+            stopVoice (voice, velocity, allowTailOff);
+    }
     else if (wasCurrent)
         voice->glideTo (heldNotes[numHeld - 1], heldVelocities[numHeld - 1], lastMode == mono);
+}
+
+void ZeroSynth::handleSustainPedal (int midiChannel, bool isDown)
+{
+    // The base class tracks keys per voice, which a gliding mono voice doesn't
+    // follow, so mono/legato handles the pedal itself.
+    if (lastMode == poly)
+    {
+        Synthesiser::handleSustainPedal (midiChannel, isDown);
+        return;
+    }
+
+    sustainDown = isDown;
+
+    if (! isDown && numHeld == 0)
+        if (auto* voice = getVoice (0); voice != nullptr && voice->isVoiceActive())
+            stopVoice (voice, 0.0f, true);
 }
 
 void ZeroSynth::allNotesOff (int midiChannel, bool allowTailOff)

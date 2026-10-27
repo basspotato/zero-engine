@@ -64,7 +64,12 @@ private:
         std::atomic<float>* filterEnv;
         std::atomic<float>* filterKeytrack;
         std::atomic<float>* lfoToCutoff;
+        std::atomic<float>* velToCutoff;
+        std::atomic<float>* velSens;
     } p;
+
+    void setVelocity (float velocity);
+    float noteVelocity = 1.0f;
 
     // Topology-preserving state-variable filter (Zavalishin), one channel, one stage.
     struct Svf
@@ -128,6 +133,7 @@ public:
     void noteOn (int midiChannel, int midiNoteNumber, float velocity) override;
     void noteOff (int midiChannel, int midiNoteNumber, float velocity, bool allowTailOff) override;
     void allNotesOff (int midiChannel, bool allowTailOff) override;
+    void handleSustainPedal (int midiChannel, bool isDown) override;
 
 private:
     enum Mode { poly, mono, legato };
@@ -141,4 +147,5 @@ private:
     int heldNotes[maxHeld] {};
     float heldVelocities[maxHeld] {};
     int numHeld = 0;
+    bool sustainDown = false; // mono/legato: the last note keeps sounding until the pedal lifts
 };

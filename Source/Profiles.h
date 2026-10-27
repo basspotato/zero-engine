@@ -24,6 +24,7 @@ struct Profile
     // Filter: mode 0 Low 12, 1 Low 24, 2 Band, 3 High; cutoff in Hz; env,
     // LFO amount in octaves.
     float filterMode, filterCutoff, filterRes, filterEnv, filterKeytrack, lfoToCutoff;
+    float velToCutoff, velSens;
 
     // Playing: 0 poly, 1 mono, 2 legato; glide in seconds.
     float playMode, glide;

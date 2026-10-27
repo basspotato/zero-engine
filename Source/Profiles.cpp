@@ -20,6 +20,7 @@ namespace
         p.subOctave = -1.0f;
         p.filterMode = 1.0f;        // Low 24, fully open: bypassed
         p.filterCutoff = 20000.0f;
+        p.velSens = 1.0f;
         p.delayTime = 2.0f;         // 1/8 dotted
         p.delayFeedback = 0.35f;
         p.reverbSize = 0.6f;
@@ -72,6 +73,7 @@ namespace
                 p.ampAttack = 0.001f; p.ampDecay = 0.35f; p.ampSustain = 0.0f; p.ampRelease = 0.3f;
                 p.modAttack = 0.0f; p.modDecay = 0.15f; p.modSustain = 0.0f; p.modRelease = 0.2f; p.modToPos = -0.2f;
                 p.filterCutoff = 500.0f; p.filterRes = 0.25f; p.filterEnv = 5.5f; p.filterKeytrack = 0.5f; // classic filter pluck
+                p.velToCutoff = 1.5f;
                 p.lfoRate = 1.0f;
                 p.ottDepth = 0.5f; p.tilt = 0.5f; p.monoFreq = 150.0f; p.stereoWidth = 1.1f;
                 p.delayMix = 0.2f; p.delayTime = 1.0f; p.delayFeedback = 0.4f; p.reverbMix = 0.25f; // 1/8 echoes
@@ -171,12 +173,12 @@ namespace
 
                 case techno: // rolling, short, filter-plucked
                     p.ampDecay = 0.18f; p.ampSustain = 0.3f; p.modToPos = -0.35f;
-                    p.filterCutoff = 250.0f; p.filterRes = 0.35f; p.filterEnv = 4.0f;
+                    p.filterCutoff = 250.0f; p.filterRes = 0.35f; p.filterEnv = 4.0f; p.velToCutoff = 1.0f;
                     break;
 
                 case synthwave: // square-ish analog filter bass
                     p.wavePos = squareWave; p.unison = 1; p.grit = 0.15f;
-                    p.filterCutoff = 700.0f; p.filterRes = 0.3f; p.filterEnv = 3.0f;
+                    p.filterCutoff = 700.0f; p.filterRes = 0.3f; p.filterEnv = 3.0f; p.velToCutoff = 1.0f;
                     break;
 
                 default:
@@ -325,6 +327,8 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::filterEnv,      p.filterEnv);
     set (ParamIDs::filterKeytrack, p.filterKeytrack);
     set (ParamIDs::lfoToCutoff,    p.lfoToCutoff);
+    set (ParamIDs::velToCutoff,    p.velToCutoff);
+    set (ParamIDs::velSens,        p.velSens);
 
     set (ParamIDs::playMode,   p.playMode);
     set (ParamIDs::glide,      p.glide);

@@ -47,6 +47,8 @@ namespace ParamIDs
     inline constexpr auto filterEnv      = "filterEnv";
     inline constexpr auto filterKeytrack = "filterKeytrack";
     inline constexpr auto lfoToCutoff    = "lfoToCutoff";
+    inline constexpr auto velToCutoff    = "velToCutoff";
+    inline constexpr auto velSens        = "velSens";
 
     // Playing.
     inline constexpr auto playMode  = "playMode";
@@ -148,6 +150,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     octaves (ParamIDs::filterEnv, "Mod Env > Cutoff", -8.0f, 8.0f);
     unit (ParamIDs::filterKeytrack, "Filter Keytrack", 0.0f);
     octaves (ParamIDs::lfoToCutoff, "LFO > Cutoff", 0.0f, 6.0f);
+    octaves (ParamIDs::velToCutoff, "Velocity > Cutoff", 0.0f, 4.0f); // full velocity = as set; softer = darker
+    unit (ParamIDs::velSens, "Velocity > Level", 1.0f);
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::playMode, 1 }, "Play Mode", playModeNames, 0));
     seconds (ParamIDs::glide, "Glide", 2.0f, 0.0f);
