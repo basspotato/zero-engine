@@ -195,6 +195,8 @@ private:
     juce::String currentFavourite;           // the last one saved or recalled, which Rename and Delete act on
     juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite
     ChevronButton backButton { true }, forwardButton { false }; // Generate history, in the header strip
+    ChevronButton genrePrev { true }, genreNext { false }, typePrev { true }, typeNext { false }; // step through the menus
+    void stepChoice (const char* paramID, int direction);
 
     // Every engine parameter, in tabs; ADVANCED opens it over the panels.
     AdvancedPanel advancedPanel;

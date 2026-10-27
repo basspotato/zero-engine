@@ -405,9 +405,12 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
     fillScreen (g, bounds);
 
     auto hint = bounds.removeFromBottom (18.0f);
-    g.setColour ((highlighted ? Palette::yellow : Palette::text).withAlpha (highlighted ? 0.9f : 0.45f));
-    g.setFont (Fonts::ui (9.0f, true));
-    g.drawText ("CLICK FOR A NEW SOUND", hint, juce::Justification::centred);
+    if (highlighted) // the hint only appears on mouse-over
+    {
+        g.setColour (Palette::yellow.withAlpha (0.9f));
+        g.setFont (Fonts::ui (9.0f, true));
+        g.drawText ("CLICK FOR A NEW SOUND", hint, juce::Justification::centred);
+    }
 
     // Fold: shrink towards the centre while turning a half turn through w (the
     // outer cube passes through the inner one), then open out again.
@@ -1109,6 +1112,13 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     typeBox.addItemList (typeNames, 1);
     addAndMakeVisible (genreBox);
     addAndMakeVisible (typeBox);
+
+    genrePrev.onClick = [this] { stepChoice (ParamIDs::genre, -1); };
+    genreNext.onClick = [this] { stepChoice (ParamIDs::genre, 1); };
+    typePrev.onClick  = [this] { stepChoice (ParamIDs::type, -1); };
+    typeNext.onClick  = [this] { stepChoice (ParamIDs::type, 1); };
+    for (auto* arrow : { &genrePrev, &genreNext, &typePrev, &typeNext })
+        addAndMakeVisible (arrow);
     genreAttachment = std::make_unique<ComboAttachment> (processor.state, ParamIDs::genre, genreBox);
     typeAttachment  = std::make_unique<ComboAttachment> (processor.state, ParamIDs::type, typeBox);
 
@@ -1196,6 +1206,20 @@ ZeroEngineEditor::~ZeroEngineEditor()
     if (renameDialog != nullptr)
         delete renameDialog.getComponent(); // never outlive the look-and-feel it uses
     setLookAndFeel (nullptr);
+}
+
+void ZeroEngineEditor::stepChoice (const char* paramID, int direction)
+{
+    // Wraps round, and loads the new profile at once rather than on the next timer tick.
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (processor.state.getParameter (paramID)))
+    {
+        const auto count = choice->choices.size();
+        const auto next = (choice->getIndex() + direction + count) % count;
+        choice->beginChangeGesture();
+        choice->setValueNotifyingHost (choice->convertTo0to1 ((float) next));
+        choice->endChangeGesture();
+        processor.syncProfile();
+    }
 }
 
 void ZeroEngineEditor::showAdvanced (bool show)
@@ -1333,9 +1357,14 @@ void ZeroEngineEditor::resized()
     top.removeFromRight (4);
     mainButton.setBounds (top.removeFromRight (50).withSizeKeepingCentre (50, 22));
     top.removeFromRight (8);
-    typeBox.setBounds (top.removeFromRight (120).withSizeKeepingCentre (120, 22));
+    // Each menu sits between its back / forward arrows.
+    typeNext.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
+    typeBox.setBounds (top.removeFromRight (112).withSizeKeepingCentre (112, 22));
+    typePrev.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
     top.removeFromRight (8);
-    genreBox.setBounds (top.removeFromRight (140).withSizeKeepingCentre (140, 22));
+    genreNext.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
+    genreBox.setBounds (top.removeFromRight (130).withSizeKeepingCentre (130, 22));
+    genrePrev.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
 
     area.removeFromTop (10);
     keyboard.setBounds (area.removeFromBottom (72));
