@@ -45,7 +45,8 @@ namespace ParamIDs
     inline constexpr auto stereoWidth = "stereoWidth";
 }
 
-inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech House", "Trap", "Synthwave" };
+inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech House", "Trap", "Synthwave",
+                                                "Drum & Bass", "Pop", "House", "Trance", "Future Bass", "Hardstyle" };
 inline const juce::StringArray typeNames     { "Bass", "Lead", "Chord", "Pad", "Pluck", "FX" };
 inline const juce::StringArray lfoShapeNames { "Sine", "Triangle", "Saw", "Square", "Sample & Hold" };
 
