@@ -17,7 +17,8 @@ namespace
     }
 }
 
-ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state)
+ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map)
+    : macroMap (map)
 {
     auto get = [&] (const char* id) { return state.getRawParameterValue (id); };
 
@@ -48,8 +49,9 @@ void ZeroVoice::updateEnvelopes()
 {
     // Punch shortens the amp attack, up to 95%.
     const auto attackScale = 1.0f - 0.95f * p.punch->load();
+    const auto decayScale = std::exp2 (macroMap.offset (MacroTarget::ampDecay));
 
-    ampEnv.setParameters ({ juce::jmax (0.001f, p.ampAttack->load() * attackScale), juce::jmax (0.001f, p.ampDecay->load()),
+    ampEnv.setParameters ({ juce::jmax (0.001f, p.ampAttack->load() * attackScale), juce::jmax (0.001f, p.ampDecay->load() * decayScale),
                             p.ampSustain->load(), juce::jmax (0.005f, p.ampRelease->load()) });
     modEnv.setParameters ({ juce::jmax (0.001f, p.modAttack->load()), juce::jmax (0.001f, p.modDecay->load()),
                             p.modSustain->load(), juce::jmax (0.005f, p.modRelease->load()) });
@@ -118,17 +120,18 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     updateEnvelopes();
 
     const auto voices = juce::jlimit (1, maxUnison, (int) p.unison->load());
-    const auto detune = p.detune->load();
+    const auto detune = juce::jlimit (0.0f, 1.0f, p.detune->load() + macroMap.offset (MacroTarget::detune));
     const auto maxCents = 50.0f * detune * detune + 5.0f * detune;
     const auto spread = p.width->load();
     const auto blend = p.blend->load();
     const auto basePos = p.wavePos->load();
-    const auto modToPos = p.modToPos->load();
+    const auto modToPos = juce::jlimit (-1.0f, 1.0f, p.modToPos->load() + macroMap.offset (MacroTarget::modToPos));
     const auto motion = p.motion->load();
-    const auto lfoToPos = juce::jmin (1.0f, p.lfoToPos->load() + motion * 0.5f);
+    const auto lfoToPos = juce::jlimit (0.0f, 1.0f, p.lfoToPos->load() + motion * 0.5f + macroMap.offset (MacroTarget::lfoToPos));
     const auto lfoToPitch = p.lfoToPitch->load() * 2.0f; // semitones
-    const auto lfoInc = (float) (p.lfoRate->load() / sampleRate);
-    const auto modToPitch = p.modToPitch->load(); // semitones at full mod envelope
+    const auto lfoRate = juce::jlimit (0.05f, 40.0f, p.lfoRate->load() * std::exp2 (macroMap.offset (MacroTarget::lfoRate)));
+    const auto lfoInc = (float) (lfoRate / sampleRate);
+    const auto modToPitch = juce::jlimit (-36.0f, 36.0f, p.modToPitch->load() + macroMap.offset (MacroTarget::modToPitch)); // semitones at full mod envelope
     const auto subLevel = p.weight->load() * 0.8f;
     const auto subRatio = p.subOctave->load() < -0.5f ? 0.5 : 1.0;
 

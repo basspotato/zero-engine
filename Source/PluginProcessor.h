@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "FinishingChain.h"
+#include "MacroMap.h"
 
 class ZeroEngineProcessor : public juce::AudioProcessor,
                             private juce::Timer
@@ -40,6 +41,7 @@ private:
     // Watches Genre/Type on the message thread and loads the matching profile.
     void timerCallback() override;
 
+    MacroMap macroMap;
     juce::Synthesiser synth;
     std::atomic<int> appliedGenre { -1 }, appliedType { -1 };
     FinishingChain finishing;

@@ -154,6 +154,65 @@ namespace
             p.lfoRate = 6.0f; p.lfoToPitch = 0.1f; // screech
         }
     }
+
+    MacroDirections macroDirections (int genre, int type)
+    {
+        namespace M = MacroIndex;
+        namespace T = MacroTarget;
+
+        MacroDirections d;
+        auto& a = d.amount;
+
+        // Shared defaults.
+        a[M::weight][T::tilt]     = -2.0f;  // heavier is darker
+        a[M::grit][T::ottDepth]   = 0.15f;
+        a[M::punch][T::ottDepth]  = 0.3f;
+        a[M::punch][T::ampDecay]  = -0.5f;  // tighter
+        a[M::width][T::detune]    = 0.2f;
+        a[M::motion][T::lfoRate]  = 1.0f;
+        a[M::air][T::tilt]        = 1.0f;
+
+        switch (type)
+        {
+            case bass:  a[M::punch][T::modToPos] = -0.2f; break; // stronger wave pluck
+            case pluck: a[M::punch][T::modToPos] = -0.3f; a[M::punch][T::ampDecay] = -1.0f; break;
+            case chord: a[M::width][T::detune] = 0.3f; break;
+            case pad:   a[M::motion][T::lfoToPos] = 0.3f; a[M::motion][T::detune] = 0.15f; a[M::punch][T::ottDepth] = 0.15f; break;
+            case fx:    a[M::motion][T::lfoRate] = 2.0f; a[M::motion][T::modToPitch] = 12.0f; break;
+            default:    break;
+        }
+
+        if (type == bass)
+        {
+            switch (genre)
+            {
+                case trap: // Punch deepens the 808 knock, Weight stays clean
+                    a[M::punch][T::modToPitch] = 12.0f; a[M::punch][T::modToPos] = 0.0f;
+                    a[M::punch][T::ampDecay] = 0.0f; a[M::weight][T::tilt] = -1.0f;
+                    break;
+
+                case dubstep: // Motion speeds and deepens the wobble
+                    a[M::motion][T::lfoRate] = 2.0f; a[M::motion][T::lfoToPos] = 0.3f;
+                    a[M::punch][T::ottDepth] = 0.5f;
+                    break;
+
+                case drumAndBass: // Motion opens the reese
+                    a[M::motion][T::lfoToPos] = 0.3f; a[M::motion][T::detune] = 0.2f;
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        if (genre == dubstep || genre == hardstyle || genre == drumAndBass)
+            a[M::grit][T::ottDepth] = 0.35f; // grit comes with squash
+
+        if (genre == pop || genre == trance || genre == futureBass)
+            a[M::air][T::tilt] = 2.0f;
+
+        return d;
+    }
 }
 
 Profile makeProfile (int genre, int type)
@@ -173,7 +232,14 @@ Profile makeProfile (int genre, int type)
     p.tilt = juce::jlimit (-6.0f, 6.0f, p.tilt + s.tilt);
 
     applySignature (p, genre, type);
+    p.directions = macroDirections (genre, type);
     return p;
+}
+
+void loadMacroMap (MacroMap& map, const Profile& p)
+{
+    const float centres[MacroIndex::count] { p.weight, p.grit, p.punch, p.width, p.motion, p.air };
+    map.set (centres, p.directions);
 }
 
 void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)

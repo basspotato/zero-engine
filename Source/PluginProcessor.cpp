@@ -13,6 +13,7 @@ namespace
 ZeroEngineProcessor::ZeroEngineProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       state (*this, nullptr, "ZeroEngine", createParameterLayout()),
+      macroMap (state),
       grit (*state.getRawParameterValue (ParamIDs::grit)),
       air (*state.getRawParameterValue (ParamIDs::air)),
       width (*state.getRawParameterValue (ParamIDs::width)),
@@ -25,7 +26,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     WavetableBank::get(); // build tables here, never on the audio thread
 
     for (int i = 0; i < numVoices; ++i)
-        synth.addVoice (new ZeroVoice (state));
+        synth.addVoice (new ZeroVoice (state, macroMap));
 
     synth.addSound (new ZeroSound());
 
@@ -43,7 +44,9 @@ void ZeroEngineProcessor::timerCallback()
 
     appliedGenre = genre;
     appliedType = type;
-    applyProfile (state, makeProfile (genre, type));
+    const auto profile = makeProfile (genre, type);
+    applyProfile (state, profile);
+    loadMacroMap (macroMap, profile);
 }
 
 void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -72,8 +75,8 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     FinishingSettings settings;
     settings.grit     = grit.load();
-    settings.ottDepth = ottDepth.load();
-    settings.tiltDb   = tilt.load();
+    settings.ottDepth = juce::jlimit (0.0f, 1.0f, ottDepth.load() + macroMap.offset (MacroTarget::ottDepth));
+    settings.tiltDb   = juce::jlimit (-6.0f, 6.0f, tilt.load() + macroMap.offset (MacroTarget::tilt));
     settings.air      = air.load();
     settings.monoFreq = monoFreq.load();
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
@@ -103,6 +106,7 @@ void ZeroEngineProcessor::setStateInformation (const void* data, int sizeInBytes
             // The saved values already include any tweaks; don't overwrite them with the profile.
             appliedGenre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
             appliedType = (int) state.getRawParameterValue (ParamIDs::type)->load();
+            loadMacroMap (macroMap, makeProfile (appliedGenre, appliedType));
         }
 }
 

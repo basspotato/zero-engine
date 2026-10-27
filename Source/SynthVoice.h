@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "MacroMap.h"
 
 struct ZeroSound : public juce::SynthesiserSound
 {
@@ -15,7 +16,7 @@ class ZeroVoice : public juce::SynthesiserVoice
 public:
     static constexpr int maxUnison = 7;
 
-    explicit ZeroVoice (juce::AudioProcessorValueTreeState& state);
+    ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& macroMap);
 
     bool canPlaySound (juce::SynthesiserSound* sound) override;
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel) override;
@@ -52,6 +53,8 @@ private:
         std::atomic<float>* modToPitch;
         std::atomic<float>* subOctave;
     } p;
+
+    const MacroMap& macroMap;
 
     void updateEnvelopes();
     float nextLfo (float increment);

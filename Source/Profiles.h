@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "MacroMap.h"
 
 // A starting point for one genre x type pair: every engine and finishing
 // parameter plus the six macro positions. Built from a per-type template and
@@ -25,9 +26,15 @@ struct Profile
 
     // Finishing chain.
     float ottDepth, tilt, monoFreq, stereoWidth;
+
+    // What each macro pushes besides its main job.
+    MacroDirections directions;
 };
 
 Profile makeProfile (int genre, int type);
 
 // Message thread only: writes every profile value through the host.
 void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& profile);
+
+// Any thread: points the macros at this profile's directions.
+void loadMacroMap (MacroMap& map, const Profile& profile);
