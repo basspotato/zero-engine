@@ -90,7 +90,7 @@ namespace
                 p.modAttack = 2.0f; p.modDecay = 2.0f; p.modSustain = 0.5f; p.modRelease = 2.0f; p.modToPos = 0.5f;
                 p.lfoRate = 4.0f; p.lfoShape = sampleHold; p.lfoToPos = 0.6f; p.lfoToPitch = 0.2f;
                 p.ottDepth = 0.5f; p.tilt = 1.0f; p.stereoWidth = 1.5f;
-                p.delayMix = 0.2f; p.reverbMix = 0.4f; p.reverbSize = 0.9f;
+                p.delayMix = 0.2f; p.reverbMix = 0.4f; p.reverbSize = 0.8f;
                 break;
         }
 

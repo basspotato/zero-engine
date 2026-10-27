@@ -60,6 +60,7 @@ target_sources(ZeroAnalyze
         tools/analyze/Main.cpp
         tools/analyze/Descriptors.cpp
         tools/analyze/Freesound.cpp
+        tools/analyze/Tests.cpp
         Source/PluginProcessor.cpp
         Source/FinishingChain.cpp
         Source/Profiles.cpp

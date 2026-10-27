@@ -11,8 +11,8 @@ namespace
     constexpr float upThreshDb   = -36.0f;
     constexpr float upSlope      = 0.6f;   // 2.5:1 upward
     constexpr float maxUpDb      = 15.0f;
-    constexpr float floorDb      = -78.0f; // no upward gain below here, so tails and silence stay quiet
-    constexpr float floorFadeDb  = 18.0f;
+    constexpr float floorDb      = -60.0f; // no upward gain below here, so reverb tails and silence still die away
+    constexpr float floorFadeDb  = 12.0f;  // full upward gain from -48 dB
 
     constexpr float clipKnee = 0.8f;
 

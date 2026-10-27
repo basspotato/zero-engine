@@ -4,6 +4,8 @@
 //   ZeroAnalyze analyze <folder> [out.csv]
 //   ZeroAnalyze render  [outDir]            all 72 profiles: engine.csv + WAVs
 //   ZeroAnalyze compare <refFolder> [outDir]
+//   ZeroAnalyze test                                     engine checks, all profiles
+//   ZeroAnalyze bench                                    CPU with 16 voices
 //   ZeroAnalyze screen  [shortlist.csv] [perPair]        Freesound CC0 search
 //   ZeroAnalyze fetch   [shortlist.csv] [outDir] [max]   Freesound downloads
 //
@@ -15,6 +17,7 @@
 #include <map>
 #include "Descriptors.h"
 #include "Freesound.h"
+#include "Tests.h"
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/Parameters.h"
 
@@ -364,6 +367,8 @@ namespace
                      "  ZeroAnalyze analyze <folder> [out.csv]\n"
                      "  ZeroAnalyze render  [outDir]\n"
                      "  ZeroAnalyze compare <refFolder> [outDir]\n"
+                     "  ZeroAnalyze test\n"
+                     "  ZeroAnalyze bench\n"
                      "  ZeroAnalyze screen  [shortlist.csv] [perPair]\n"
                      "  ZeroAnalyze fetch   [shortlist.csv] [outDir] [maxDownloads]\n");
         return 1;
@@ -406,6 +411,9 @@ int main (int argc, char* argv[])
         compare (analyseFolder (argFile (args, 1, {})), argFile (args, 2, "analysis"));
         return 0;
     }
+
+    if (command == "test")
+        return runTests();
 
     if (command == "bench")
     {
