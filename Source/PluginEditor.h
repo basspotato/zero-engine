@@ -198,7 +198,8 @@ private:
 
     // Every engine parameter, in tabs; ADVANCED opens it over the panels.
     AdvancedPanel advancedPanel;
-    juce::TextButton advancedButton { "ADVANCED" };
+    juce::TextButton mainButton { "MAIN" }, advancedButton { "ADVANCED" }; // lit = the view showing
+    void showAdvanced (bool show);
     juce::MidiKeyboardComponent keyboard;
 
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);

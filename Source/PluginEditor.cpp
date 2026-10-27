@@ -1169,14 +1169,13 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     refreshFavourites();
     addAndMakeVisible (keyboard);
 
-    advancedButton.setClickingTogglesState (true);
-    advancedButton.onClick = [this]
-    {
-        advancedPanel.setVisible (advancedButton.getToggleState());
-        advancedPanel.toFront (false);
-    };
+    // MAIN and ADVANCED switch views; ADVANCED clicked again also goes back to MAIN.
+    advancedButton.onClick = [this] { showAdvanced (! advancedPanel.isVisible()); };
+    mainButton.onClick = [this] { showAdvanced (false); };
+    addAndMakeVisible (mainButton);
     addAndMakeVisible (advancedButton);
     addChildComponent (advancedPanel); // last, so it sits over the panels
+    showAdvanced (false);
 
     keyboard.setColour (juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour (0xffd6daf2));
     keyboard.setColour (juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour (0xff0c0d22));
@@ -1197,6 +1196,14 @@ ZeroEngineEditor::~ZeroEngineEditor()
     if (renameDialog != nullptr)
         delete renameDialog.getComponent(); // never outlive the look-and-feel it uses
     setLookAndFeel (nullptr);
+}
+
+void ZeroEngineEditor::showAdvanced (bool show)
+{
+    advancedPanel.setVisible (show);
+    advancedPanel.toFront (false);
+    advancedButton.setToggleState (show, juce::dontSendNotification);
+    mainButton.setToggleState (! show, juce::dontSendNotification);
 }
 
 void ZeroEngineEditor::refreshHistoryButtons()
@@ -1323,6 +1330,8 @@ void ZeroEngineEditor::resized()
     outputKnob.knob.setBounds (outputArea);
     top.removeFromRight (12);
     advancedButton.setBounds (top.removeFromRight (74).withSizeKeepingCentre (74, 22));
+    top.removeFromRight (4);
+    mainButton.setBounds (top.removeFromRight (50).withSizeKeepingCentre (50, 22));
     top.removeFromRight (8);
     typeBox.setBounds (top.removeFromRight (120).withSizeKeepingCentre (120, 22));
     top.removeFromRight (8);
