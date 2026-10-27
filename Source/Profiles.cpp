@@ -347,12 +347,12 @@ namespace
             }
 
             // Where the mid layer starts (bass_clarity.md table): lighter genres keep
-            // more body in the mids; the 808 keeps its distorted harmonics over a
-            // clean sub; synthwave stays a single analog-style layer.
+            // more body in the mids; the 808, synthwave and techno basses are one
+            // saturated layer (no clean sub).
             switch (genre)
             {
                 case edm: case futureBass: case house: case pop: p.midHighPass = 90.0f; break;
-                case trap:                                      p.midHighPass = 80.0f; break;
+                case trap:                                      p.subSplit = 0.0f; break; // the 808 is saturated whole: its distorted fundamental is the sound
                 case synthwave:                                 p.subSplit = 0.0f; break;
                 case techno:                                    p.subSplit = 0.0f; break; // its loudness comes from the driven sub; references will decide
                 default:                                        break; // 120 Hz
