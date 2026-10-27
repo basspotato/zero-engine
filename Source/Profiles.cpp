@@ -191,6 +191,22 @@ namespace
         if ((genre == trance || genre == futureBass || genre == edm) && (type == lead || type == chord))
             p.unison = 7; // supersaw
 
+        // The owner's favourite, the trance lead ("big and deep, a bit bright"),
+        // lent to other genres' leads: its width, air, squash and space as a
+        // floor, with each genre's own grit and tilt kept on top.
+        const auto bigLead = genre == dubstep || genre == edm || genre == futureBass || genre == drumAndBass
+                          || genre == pop || genre == house || genre == synthwave;
+        if (type == lead && bigLead)
+        {
+            p.unison = 7;
+            p.detune = juce::jmax (p.detune, 0.5f);
+            p.width = juce::jmax (p.width, 0.75f);
+            p.air = juce::jmax (p.air, 0.45f);
+            p.ottDepth = juce::jmax (p.ottDepth, 0.5f);
+            p.delayMix = juce::jmax (p.delayMix, 0.2f);
+            p.reverbMix = juce::jmax (p.reverbMix, 0.25f);
+        }
+
         if (genre == hardstyle && type == lead)
         {
             p.waveTable = digitalTable; p.wavePos = 0.9f; // high sync peak: bright
