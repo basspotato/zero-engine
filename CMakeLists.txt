@@ -29,6 +29,7 @@ juce_add_plugin(ZeroEngine
 target_sources(ZeroEngine
     PRIVATE
         Source/PluginProcessor.cpp
+        Source/FinishingChain.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
         Source/Wavetable.cpp)

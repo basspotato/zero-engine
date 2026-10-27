@@ -13,7 +13,13 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       state (*this, nullptr, "ZeroEngine", createParameterLayout()),
       grit (*state.getRawParameterValue (ParamIDs::grit)),
-      output (*state.getRawParameterValue (ParamIDs::output))
+      air (*state.getRawParameterValue (ParamIDs::air)),
+      width (*state.getRawParameterValue (ParamIDs::width)),
+      output (*state.getRawParameterValue (ParamIDs::output)),
+      ottDepth (*state.getRawParameterValue (ParamIDs::ottDepth)),
+      tilt (*state.getRawParameterValue (ParamIDs::tilt)),
+      monoFreq (*state.getRawParameterValue (ParamIDs::monoFreq)),
+      stereoWidth (*state.getRawParameterValue (ParamIDs::stereoWidth))
 {
     WavetableBank::get(); // build tables here, never on the audio thread
 
@@ -23,9 +29,11 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     synth.addSound (new ZeroSound());
 }
 
-void ZeroEngineProcessor::prepareToPlay (double sampleRate, int)
+void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     synth.setCurrentPlaybackSampleRate (sampleRate);
+    finishing.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
+    setLatencySamples (finishing.getLatencySamples());
     keyboardState.reset();
 }
 
@@ -45,18 +53,16 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
     synth.renderNextBlock (buffer, midi, 0, numSamples);
 
-    // Stand-in for the finishing chain: normalised tanh drive, then output gain.
-    // Motion and Air are not wired to anything yet.
-    const auto drive = 1.0f + grit.load() * 9.0f;
-    const auto driveNorm = 1.0f / std::tanh (drive);
-    const auto gain = juce::Decibels::decibelsToGain (output.load());
+    FinishingSettings settings;
+    settings.grit     = grit.load();
+    settings.ottDepth = ottDepth.load();
+    settings.tiltDb   = tilt.load();
+    settings.air      = air.load();
+    settings.monoFreq = monoFreq.load();
+    settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
+    settings.outputDb = output.load();
 
-    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-    {
-        auto* data = buffer.getWritePointer (ch);
-        for (int i = 0; i < numSamples; ++i)
-            data[i] = std::tanh (data[i] * drive) * driveNorm * gain;
-    }
+    finishing.process (buffer, settings);
 }
 
 juce::AudioProcessorEditor* ZeroEngineProcessor::createEditor()

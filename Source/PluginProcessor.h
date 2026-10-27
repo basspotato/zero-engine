@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
+#include "FinishingChain.h"
 
 class ZeroEngineProcessor : public juce::AudioProcessor
 {
@@ -36,8 +37,16 @@ public:
 
 private:
     juce::Synthesiser synth;
+    FinishingChain finishing;
+
     std::atomic<float>& grit;
+    std::atomic<float>& air;
+    std::atomic<float>& width;
     std::atomic<float>& output;
+    std::atomic<float>& ottDepth;
+    std::atomic<float>& tilt;
+    std::atomic<float>& monoFreq;
+    std::atomic<float>& stereoWidth;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ZeroEngineProcessor)
 };

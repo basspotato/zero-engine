@@ -37,6 +37,12 @@ namespace ParamIDs
     inline constexpr auto lfoShape   = "lfoShape";
     inline constexpr auto lfoToPos   = "lfoToPos";
     inline constexpr auto lfoToPitch = "lfoToPitch";
+
+    // Finishing chain.
+    inline constexpr auto ottDepth    = "ottDepth";
+    inline constexpr auto tilt        = "tilt";
+    inline constexpr auto monoFreq    = "monoFreq";
+    inline constexpr auto stereoWidth = "stereoWidth";
 }
 
 inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech House", "Trap", "Synthwave" };
@@ -96,6 +102,16 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::lfoShape, 1 }, "LFO Shape", lfoShapeNames, 0));
     unit (ParamIDs::lfoToPos,   "LFO > Position", 0.0f);
     unit (ParamIDs::lfoToPitch, "LFO > Pitch",    0.0f);
+
+    unit (ParamIDs::ottDepth, "OTT Depth", 0.35f);
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::tilt, 1 }, "Tilt",
+                                                       NormalisableRange<float> (-6.0f, 6.0f), 0.0f,
+                                                       AudioParameterFloatAttributes().withLabel ("dB")));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::monoFreq, 1 }, "Mono Below",
+                                                       NormalisableRange<float> (40.0f, 300.0f, 0.0f, 0.5f), 120.0f,
+                                                       AudioParameterFloatAttributes().withLabel ("Hz")));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::stereoWidth, 1 }, "Stereo Width",
+                                                       NormalisableRange<float> (0.0f, 2.0f), 1.0f));
 
     return layout;
 }
