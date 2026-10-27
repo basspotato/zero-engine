@@ -4,12 +4,13 @@
 //   ZeroAnalyze analyze <folder> [out.csv]
 //   ZeroAnalyze render  [outDir]            all 72 profiles: engine.csv + WAVs
 //   ZeroAnalyze compare <refFolder> [outDir]
-//   ZeroAnalyze tune    <refFolder> [--write]            match profiles to references
+//   ZeroAnalyze tune    <refFolder> [--write] [--tone]   match profiles to references (--tone: brightness only)
 //   ZeroAnalyze tunetest                                 tuner self-check, no refs needed
 //   ZeroAnalyze test                                     engine checks, all profiles
 //   ZeroAnalyze bench                                    CPU with 16 voices
 //   ZeroAnalyze screen  [shortlist.csv] [perPair]        Freesound CC0 search
 //   ZeroAnalyze fetch   [shortlist.csv] [outDir] [max]   Freesound downloads
+//   ZeroAnalyze harmonics <out.h> <5 wavs>              wavetable frames from recordings
 //
 // Reference layout: <refFolder>/<Genre>/<Type>/*.wav (any depth; the first
 // folder names that match a genre and a type are used, e.g. "Dubstep/Bass").
@@ -22,6 +23,7 @@
 #include "Tests.h"
 #include "Library.h"
 #include "Tuner.h"
+#include "Harmonics.h"
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/Parameters.h"
 
@@ -220,12 +222,13 @@ namespace
                      "  ZeroAnalyze analyze <folder> [out.csv]\n"
                      "  ZeroAnalyze render  [outDir]\n"
                      "  ZeroAnalyze compare <refFolder> [outDir]\n"
-                     "  ZeroAnalyze tune    <refFolder> [--write]\n"
+                     "  ZeroAnalyze tune    <refFolder> [--write] [--tone]\n"
                      "  ZeroAnalyze tunetest\n"
                      "  ZeroAnalyze test\n"
                      "  ZeroAnalyze bench\n"
                      "  ZeroAnalyze screen  [shortlist.csv] [perPair]\n"
-                     "  ZeroAnalyze fetch   [shortlist.csv] [outDir] [maxDownloads]\n");
+                     "  ZeroAnalyze fetch   [shortlist.csv] [outDir] [maxDownloads]\n"
+                     "  ZeroAnalyze harmonics <out.h> <wav1> ... <wav5>\n");
         return 1;
     }
 }
@@ -275,7 +278,8 @@ int main (int argc, char* argv[])
 
     if (command == "tune" && args.size() >= 2)
         return tuneProfiles (argFile (args, 1, {}),
-                             args.contains ("--write") ? argFile (args, 99, "Source/ProfileTuning.h") : juce::File());
+                             args.contains ("--write") ? argFile (args, 99, "Source/ProfileTuning.h") : juce::File(),
+                             args.contains ("--tone"));
 
     if (command == "bench")
     {
@@ -294,6 +298,14 @@ int main (int argc, char* argv[])
         return fetchFreesound (argFile (args, 1, "analysis/freesound/shortlist.csv"),
                                argFile (args, 2, "analysis/freesound/refs"),
                                args.size() > 3 ? args[3].getIntValue() : 450);
+
+    if (command == "harmonics" && args.size() >= 3)
+    {
+        juce::StringArray files;
+        for (int i = 2; i < args.size(); ++i)
+            files.add (args[i]);
+        return extractHarmonics (argFile (args, 1, {}), files);
+    }
 
     return usage();
 }

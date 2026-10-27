@@ -1,4 +1,5 @@
 #include "Wavetable.h"
+#include "JupiterHarmonics.h"
 
 #include <juce_dsp/juce_dsp.h>
 
@@ -7,7 +8,7 @@ namespace
     constexpr int fftOrder = 11;
     static_assert ((1 << fftOrder) == WavetableBank::tableSize);
 
-    enum Bank { basic, growl, digital, organ, fm, wavefold, pwm, neuro, bell, choir, harsh, analog };
+    enum Bank { basic, growl, digital, organ, fm, wavefold, pwm, neuro, bell, choir, harsh, analog, jupiter };
 
     // These are easier to describe as a waveform than as harmonics; the
     // constructor analyses them with a forward FFT before band-limiting.
@@ -139,6 +140,9 @@ namespace
                 constexpr float rolloff[5] { 8.0f, 15.0f, 30.0f, 60.0f, 200.0f };
                 return (2.0f / (pi * (float) n)) * std::exp (-(float) n / rolloff[frame]) * sawSign (n);
             }
+
+            case jupiter: // measured from the owner's Jupiter-8 recordings, dark to bright
+                return n <= jupiterHarmonicCount ? jupiterHarmonics[frame][n - 1] * sawSign (n) : 0.0f;
 
             default: // organ drawbars on harmonics 1, 2, 3, 4, 6, 8
             {

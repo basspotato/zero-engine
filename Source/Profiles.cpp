@@ -11,7 +11,8 @@ namespace
     constexpr float sineWave = 0.0f, sawWave = 0.5f, squareWave = 0.75f;
     // waveTableNames indices.
     constexpr float growlTable = 1.0f, digitalTable = 2.0f, organTable = 3.0f, fmTable = 4.0f,
-                    bellTable = 8.0f, choirTable = 9.0f, harshTable = 10.0f, analogTable = 11.0f;
+                    pwmTable = 6.0f, bellTable = 8.0f, choirTable = 9.0f, harshTable = 10.0f, analogTable = 11.0f,
+                    jupiterTable = 12.0f;
 
     Profile typeTemplate (int type)
     {
@@ -220,9 +221,10 @@ namespace
 
         // The owner's favourite, the trance lead ("big and deep, a bit bright"),
         // lent to other genres' leads: its width, air, squash and space as a
-        // floor, with each genre's own grit and tilt kept on top.
-        const auto bigLead = genre == dubstep || genre == edm || genre == futureBass || genre == drumAndBass
-                          || genre == pop || genre == house || genre == synthwave;
+        // floor, with each genre's own grit and tilt kept on top. Genres with a
+        // lead of their own (below) stay out of it so they don't all sound alike.
+        const auto bigLead = genre == edm || genre == futureBass || genre == drumAndBass
+                          || genre == pop || genre == house;
         if (type == lead && bigLead)
         {
             p.unison = 7;
@@ -232,6 +234,73 @@ namespace
             p.ottDepth = juce::jmax (p.ottDepth, 0.5f);
             p.delayMix = juce::jmax (p.delayMix, 0.2f);
             p.reverbMix = juce::jmax (p.reverbMix, 0.25f);
+        }
+
+        // Each genre's own lead (reports/Artist sound design targets.md).
+        if (type == lead)
+        {
+            switch (genre)
+            {
+                case dubstep: // screech: harsh table moved at 1/16 (140 BPM), driven and squashed, mono
+                    p.waveTable = harshTable; p.wavePos = 0.8f; p.unison = 3; p.detune = 0.25f;
+                    p.modToPos = 0.2f;
+                    p.lfoRate = 9.33f; p.lfoShape = square; p.lfoToPos = 0.2f; p.lfoToPitch = 0.0f;
+                    p.grit = 0.75f; p.motion = 0.5f; p.air = 0.5f; p.width = 0.5f;
+                    p.ottDepth = 0.8f; p.tilt = 2.5f; p.stereoWidth = 1.0f;
+                    p.delayMix = 0.1f; p.reverbMix = 0.1f;
+                    p.playMode = 1.0f; p.glide = 0.03f;
+                    break;
+
+                case techno: // hoover / dark poly: slow PWM, pitch dip into the note, darker and drier
+                    p.waveTable = pwmTable; p.wavePos = 0.4f; p.unison = 3; p.detune = 0.35f;
+                    p.modAttack = 0.0f; p.modDecay = 0.15f; p.modSustain = 0.0f; p.modToPos = 0.0f; p.modToPitch = -2.0f;
+                    p.lfoRate = 0.4f; p.lfoShape = triangle; p.lfoToPos = 0.3f; p.lfoToPitch = 0.0f;
+                    p.filterCutoff = 5000.0f; p.filterRes = 0.2f; p.filterKeytrack = 0.5f;
+                    p.grit = 0.45f; p.air = 0.2f; p.width = 0.35f;
+                    p.ottDepth = 0.45f; p.tilt = -0.5f; p.stereoWidth = 0.8f;
+                    p.delayMix = 0.15f; p.reverbMix = 0.12f;
+                    p.playMode = 2.0f; p.glide = 0.04f;
+                    break;
+
+                case techHouse: // short, dry, near-mono sine/organ hook (Mau P style)
+                    p.waveTable = organTable; p.wavePos = 0.55f; p.unison = 1; p.detune = 0.0f;
+                    p.ampAttack = 0.002f; p.ampDecay = 0.25f; p.ampSustain = 0.45f; p.ampRelease = 0.12f;
+                    p.modToPos = 0.0f;
+                    p.filterCutoff = 6000.0f; p.filterEnv = 1.5f; p.velToCutoff = 1.0f;
+                    p.lfoToPitch = 0.0f;
+                    p.grit = 0.4f; p.punch = 0.7f; p.air = 0.3f; p.width = 0.2f;
+                    p.ottDepth = 0.5f; p.tilt = 1.0f; p.stereoWidth = 0.6f; p.levelTrim = 5.0f;
+                    p.delayMix = 0.12f; p.delayTime = 1.0f; p.reverbMix = 0.08f; // 1/8 echoes
+                    p.playMode = 1.0f;
+                    break;
+
+                case trap: // brass horn stab (RL Grime style): saw with a filter swell, distorted
+                    p.unison = 3; p.detune = 0.2f;
+                    p.ampAttack = 0.015f; p.ampDecay = 0.5f; p.ampSustain = 0.6f; p.ampRelease = 0.15f;
+                    p.modAttack = 0.03f; p.modDecay = 0.35f; p.modSustain = 0.4f; p.modToPos = 0.0f;
+                    p.filterMode = 0.0f; p.filterCutoff = 1000.0f; p.filterEnv = 4.0f; p.filterKeytrack = 0.5f;
+                    p.lfoRate = 5.0f; p.lfoToPitch = 0.03f;
+                    p.grit = 0.6f; p.air = 0.35f; p.width = 0.45f;
+                    p.ottDepth = 0.6f; p.tilt = 1.0f;
+                    p.reverbMix = 0.15f; p.delayMix = 0.1f;
+                    break;
+
+                case synthwave: // big Jupiter lead: the owner's Jupiter-8 (measured) layered with a bright
+                                // analog saw, 7 voices wide, vibrato and glide
+                    p.waveTable = jupiterTable; p.wavePos = 0.85f; p.waveTableB = analogTable; p.tableMix = 0.5f;
+                    p.unison = 7; p.detune = 0.5f;
+                    p.ampAttack = 0.01f; p.ampSustain = 0.9f; p.ampRelease = 0.35f;
+                    p.modToPos = 0.0f;
+                    p.lfoRate = 5.2f; p.lfoShape = triangle; p.lfoToPitch = 0.05f; p.lfoToPos = 0.05f;
+                    p.grit = 0.2f; p.air = 0.5f; p.width = 0.8f;
+                    p.ottDepth = 0.55f; p.tilt = 0.75f; p.stereoWidth = 0.8f;
+                    p.delayMix = 0.25f; p.reverbMix = 0.3f; p.reverbSize = 0.8f; // dotted 1/8 from the template
+                    p.playMode = 2.0f; p.glide = 0.06f;
+                    break;
+
+                default:
+                    break;
+            }
         }
 
         if (genre == hardstyle && type == lead)

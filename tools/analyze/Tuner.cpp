@@ -70,12 +70,19 @@ namespace
         return analyse (renderProfile (genre, type, &profile, note), renderRate);
     }
 
+    // Tone-only mode, for dry or unprocessed references (e.g. the owner's analog
+    // recordings): only tilt moves, by at most this much, toward their brightness.
+    // Loudness, dynamics, bass and width come from processing they don't have.
+    constexpr float toneTiltRange = 2.0f;
+
     // Squared errors in units of compare's verdict thresholds: 1.0 per
     // dimension means "just at the edge of a match".
-    double loss (const Descriptors& d, const Target& t, bool withLoudness)
+    double loss (const Descriptors& d, const Target& t, bool withLoudness, bool toneOnly = false)
     {
         auto sq = [] (double x) { return x * x; };
         const auto brightness = std::log2 (juce::jmax (20.0, d.centroidHz) / juce::jmax (20.0, t.centroidHz)) / 0.15;
+        if (toneOnly)
+            return sq (brightness);
 
         auto total = sq ((d.plr - t.plr) / 1.5) + sq (brightness) + sq ((d.bassPct - t.bassPct) / 5.0) + sq ((d.sidePct - t.sidePct) / 4.0);
         if (withLoudness)
@@ -99,15 +106,16 @@ namespace
 
     // Coordinate search: try each knob a step up and down, keep any move that
     // lowers the loss, halve the steps when nothing helps.
-    Result tunePair (int genre, int type, const Target& target)
+    Result tunePair (int genre, int type, const Target& target, bool toneOnly = false)
     {
         Result r;
         r.trim = trimOf (makeProfile (genre, type));
         r.before = measure (genre, type, r.trim, target.note);
         ++r.renders;
 
+        const auto ownTilt = r.trim.tilt;
         auto best = r.before;
-        auto bestLoss = loss (best, target, false);
+        auto bestLoss = loss (best, target, false, toneOnly);
         float steps[std::size (knobs)];
         for (size_t k = 0; k < std::size (knobs); ++k)
             steps[k] = knobs[k].step;
@@ -118,18 +126,25 @@ namespace
 
             for (size_t k = 0; k < std::size (knobs) && ! improved; ++k)
             {
+                const bool isTilt = knobs[k].member == &ProfileTrim::tilt;
+                if (toneOnly && ! isTilt)
+                    continue;
+
+                const auto lo = toneOnly ? juce::jmax (knobs[k].min, ownTilt - toneTiltRange) : knobs[k].min;
+                const auto hi = toneOnly ? juce::jmin (knobs[k].max, ownTilt + toneTiltRange) : knobs[k].max;
+
                 for (const auto direction : { 1.0f, -1.0f })
                 {
                     auto candidate = r.trim;
                     auto& value = candidate.*knobs[k].member;
-                    const auto moved = juce::jlimit (knobs[k].min, knobs[k].max, value + direction * steps[k]);
+                    const auto moved = juce::jlimit (lo, hi, value + direction * steps[k]);
                     if (moved == value)
                         continue;
                     value = moved;
 
                     const auto d = measure (genre, type, candidate, target.note);
                     ++r.renders;
-                    if (const auto l = loss (d, target, false); l < bestLoss)
+                    if (const auto l = loss (d, target, false, toneOnly); l < bestLoss)
                     {
                         r.trim = candidate;
                         best = d;
@@ -153,7 +168,8 @@ namespace
             }
         }
 
-        r.trim.levelDb = juce::jlimit (-18.0f, 12.0f, r.trim.levelDb + (float) (target.lufs - best.lufs));
+        if (! toneOnly)
+            r.trim.levelDb = juce::jlimit (-18.0f, 12.0f, r.trim.levelDb + (float) (target.lufs - best.lufs));
         r.after = measure (genre, type, r.trim, target.note);
         ++r.renders;
         return r;
@@ -206,8 +222,11 @@ namespace
     }
 }
 
-int tuneProfiles (const juce::File& refFolder, const juce::File& headerToWrite)
+int tuneProfiles (const juce::File& refFolder, const juce::File& headerToWrite, bool toneOnly)
 {
+    if (toneOnly)
+        std::printf ("Tone only: tilt moves at most %.0f dB; level, OTT, Weight and width stay as designed.\n", toneTiltRange);
+
     const auto refs = analyseFolder (refFolder);
 
     std::map<std::pair<int, int>, std::vector<const Item*>> groups;
@@ -251,7 +270,7 @@ int tuneProfiles (const juce::File& refFolder, const juce::File& headerToWrite)
             if (far.size() >= 2)
                 std::printf ("    suspect: %s (%s)\n", m->name.toRawUTF8(), far.joinIntoString (", ").toRawUTF8());
         }
-        const auto result = tunePair (genre, type, target);
+        const auto result = tunePair (genre, type, target, toneOnly);
         report (target, result);
         trims[genre][type] = result.trim;
         ++tuned;

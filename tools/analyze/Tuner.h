@@ -5,8 +5,9 @@
 // Matches each profile to the mean of its references on loudness, dynamics,
 // brightness, bass and width by adjusting five values (level trim, OTT depth,
 // tilt, Weight, stereo width). With a header file given, writes the results
-// into it (Source/ProfileTuning.h); otherwise only reports.
-int tuneProfiles (const juce::File& refFolder, const juce::File& headerToWrite);
+// into it (Source/ProfileTuning.h); otherwise only reports. toneOnly is for dry
+// references: it moves tilt alone, within ±2 dB, toward their brightness.
+int tuneProfiles (const juce::File& refFolder, const juce::File& headerToWrite, bool toneOnly = false);
 
 // Self-check without references: hides known changes in a few profiles,
 // uses their renders as targets, and checks the tuner finds its way back.

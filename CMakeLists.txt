@@ -63,6 +63,7 @@ target_sources(ZeroAnalyze
         tools/analyze/Tests.cpp
         tools/analyze/Library.cpp
         tools/analyze/Tuner.cpp
+        tools/analyze/Harmonics.cpp
         Source/PluginProcessor.cpp
         Source/FinishingChain.cpp
         Source/Profiles.cpp
