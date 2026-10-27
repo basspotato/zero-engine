@@ -1,0 +1,43 @@
+# Build notes: finished-sound VST engine
+
+Points pulled from the research report ([AI finished sound VST engine](reports/AI%20finished%20sound%20VST%20engine.md)) to carry into the build.
+
+## Product principles
+- **No cloud, no subscription, all in the plugin, no bullshit.** Everything runs locally; no logins, no credits, no online caps.
+- **Workflow inspired by Unisynth:** pick a genre, then a sound type (chord, lead, bass, etc.), then generate. Keep that simplicity.
+- **Generation mode is open:** generate-then-play, real-time note-on synthesis, or a hybrid of both.
+- **Focus:** big, fun electronic sounds (EDM, dubstep, techno, tech-house, trap, synthwave). Mixing/mastering research should still cover all genres, pop included, to understand "finished" broadly.
+- **Training data:** my own original, high-quality, fully processed audio samples, combined with the research methods and other learning approaches.
+- **Starting point:** the recommended architecture and roadmap from the report. Start on the engine.
+
+## Core research to build on
+1. **Generative synth inversion:** flow-matching models that propose editable patches from a target sound.
+   - Key paper: Hayes, Saitis and Fazekas, permutation-equivariant flow matching (ISMIR 2025 best student paper).
+2. **Audio-effects style transfer:** models that predict or search the settings of a mastering-style DSP chain from a style reference (DeepAFx-ST, ST-ITO, ITO-Master, Diff-MST).
+3. **Style is genre/role, not individual engineer:** Wilson and Fazenda (Salford) analyzed 1,501 mixes.
+   - Mix variation reduces to four dimensions: **loudness/dynamics, brightness, bass, width**.
+   - The engineer explained very little of listener preference (eta² = 0.021).
+   - So: model style profiles by genre and sound role on these dimensions.
+
+## Unproductized methods worth using
+- **Modulation discovery:** recovers the envelope and LFO curves behind a sound, tested on Vital preset modulation (arXiv 2510.06204). Covers the "motion" that makes EDM basses feel alive.
+- **Differentiable wavetable synthesis:** learns compact dictionaries of 10–20 wavetables that export straight into a normal wavetable oscillator (arXiv 2111.10003).
+- **Neural proxies:** map black-box VST presets into a pretrained audio-embedding space, making them differentiable for matching (arXiv 2509.07635; GitHub).
+- **FM-SynAPSE:** joint audio/preset embeddings for retrieval (arXiv 2608.18226).
+- **CTAG:** optimizes an inspectable synth patch toward a CLAP text target with evolutionary search (arXiv 2406.00294).
+- **PyTorch to FAUST compiler (DAFx 2026):** turns differentiable graphs into FAUST DSP and hot-reloads into a plugin while training runs (arXiv 2606.21277).
+- **Effects-side toolkits:**
+  - dasp-pytorch (Apache-2.0): differentiable EQ, compression, distortion, reverb, stereo.
+  - NablAFx: gray-box effect chains (arXiv 2502.11668).
+  - GRAFX: batched processing graphs (arXiv 2408.03204).
+
+## Engine decisions
+- **Real DSP engine for tone.** For clean, phase-coherent, alias-free bass and lead tones, only a real DSP engine reaches commercial quality.
+- **Neural generation in a supporting role:** transients, noise layers and textures, rendered into buffers off the audio thread.
+- **Novel R&D the product will own:** nobody has validated differentiable models of these against EDM presets yet:
+  - supersaw unison stacks
+  - OTT-style multiband upward/downward compression
+
+## Open items
+- Generation mode decision (generate vs. note-on vs. hybrid).
+- Still to verify from the report: Unisynth's current features, licenses for Diff-MST / ST-ITO / synth-proxy / CTAG / model weights.
