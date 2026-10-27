@@ -4,6 +4,8 @@
 //   ZeroAnalyze analyze <folder> [out.csv]
 //   ZeroAnalyze render  [outDir]            all 72 profiles: engine.csv + WAVs
 //   ZeroAnalyze compare <refFolder> [outDir]
+//   ZeroAnalyze screen  [shortlist.csv] [perPair]        Freesound CC0 search
+//   ZeroAnalyze fetch   [shortlist.csv] [outDir] [max]   Freesound downloads
 //
 // Reference layout: <refFolder>/<Genre>/<Type>/*.wav (any depth; the first
 // folder names that match a genre and a type are used, e.g. "Dubstep/Bass").
@@ -12,6 +14,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <map>
 #include "Descriptors.h"
+#include "Freesound.h"
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/Parameters.h"
 
@@ -315,7 +318,9 @@ namespace
         std::printf ("Usage:\n"
                      "  ZeroAnalyze analyze <folder> [out.csv]\n"
                      "  ZeroAnalyze render  [outDir]\n"
-                     "  ZeroAnalyze compare <refFolder> [outDir]\n");
+                     "  ZeroAnalyze compare <refFolder> [outDir]\n"
+                     "  ZeroAnalyze screen  [shortlist.csv] [perPair]\n"
+                     "  ZeroAnalyze fetch   [shortlist.csv] [outDir] [maxDownloads]\n");
         return 1;
     }
 }
@@ -356,6 +361,15 @@ int main (int argc, char* argv[])
         compare (analyseFolder (argFile (args, 1, {})), argFile (args, 2, "analysis"));
         return 0;
     }
+
+    if (command == "screen")
+        return screenFreesound (argFile (args, 1, "analysis/freesound/shortlist.csv"),
+                                args.size() > 2 ? args[2].getIntValue() : 20);
+
+    if (command == "fetch")
+        return fetchFreesound (argFile (args, 1, "analysis/freesound/shortlist.csv"),
+                               argFile (args, 2, "analysis/freesound/refs"),
+                               args.size() > 3 ? args[3].getIntValue() : 450);
 
     return usage();
 }

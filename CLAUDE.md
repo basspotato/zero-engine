@@ -21,6 +21,9 @@ JUCE 8 is fetched by CMake. Outputs land in `build/ZeroEngine_artefacts/Release/
 - `ZeroAnalyze render [outDir]`: render all 72 profiles to WAV and measure them.
 - `ZeroAnalyze compare <refFolder> [outDir]`: measure references laid out as `<Genre>/<Type>/*.wav`, render the matching profiles, print ref vs engine.
 
+- `ZeroAnalyze screen [shortlist.csv] [perPair]`: search Freesound for CC0 sounds per genre/type (needs `FREESOUND_CLIENT_SECRET`).
+- `ZeroAnalyze fetch [shortlist.csv] [outDir] [max]`: download the shortlist at full quality after browser approval (needs `FREESOUND_CLIENT_ID` too), with `credits.csv`. CC0 only. The owner runs these with their own credentials.
+
 Output goes to `analysis/` by default (git-ignored).
 
 ## Layout
