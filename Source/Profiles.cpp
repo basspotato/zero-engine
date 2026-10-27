@@ -163,8 +163,7 @@ namespace
                     p.glide = 0.08f; // overlapping notes slide
                     break;
 
-                case dubstep: // hybrid wobble: the classic Basic sweep blended with the talking vowel sweep
-                    p.waveTable = 0.0f; p.waveTableB = growlTable; p.tableMix = 0.5f; p.wavePos = 0.5f;
+                case dubstep: // classic wobble: the LFO sweeps the Basic shapes
                     p.lfoRate = 3.0f; p.lfoShape = sine; p.lfoToPos = 0.7f;
                     break;
 
@@ -286,10 +285,9 @@ namespace
                     a[M::punch][T::ampDecay] = 0.0f; a[M::weight][T::tilt] = -1.0f;
                     break;
 
-                case dubstep: // Motion speeds and deepens the wobble; Grit leans from classic wobble into growl
+                case dubstep: // Motion speeds and deepens the wobble
                     a[M::motion][T::lfoRate] = 2.0f; a[M::motion][T::lfoToPos] = 0.3f;
                     a[M::punch][T::ottDepth] = 0.5f;
-                    a[M::grit][T::tableMix] = 0.7f;
                     break;
 
                 case drumAndBass: // Motion opens the reese
