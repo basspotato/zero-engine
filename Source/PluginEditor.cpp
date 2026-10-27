@@ -302,11 +302,11 @@ void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
     g.drawLine ({ from, to }, thickness);
 
     // Value readout in the gap at the bottom of the travel, brighter while dragging.
-    if (big)
+    if (size >= 56.0f) // the small Output knob in the top bar goes without
     {
         const auto dragging = slider.isMouseButtonDown();
         g.setColour (dragging ? ramp (n).brighter (0.4f) : Palette::text.withAlpha (0.55f));
-        g.setFont (Fonts::mono (size * 0.1f));
+        g.setFont (Fonts::mono (juce::jmax (8.5f, size * 0.1f)));
         // 0..1 amounts read on the 0-10 scale printed round the knob; anything with a
         // unit (s, Hz, dB, st, oct) in that unit, with sensible decimals.
         const auto value = slider.getValue();
@@ -827,76 +827,98 @@ juce::Component* AdvancedPanel::Control::widget() const
 AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
 {
     using namespace ParamIDs;
-    const std::vector<std::pair<const char*, std::vector<const char*>>> layout {
-        { "OSC",       { waveTable, waveTableB, tableMix, wavePos, unison, detune, blend } },
-        { "ENVELOPES", { ampAttack, ampDecay, ampSustain, ampRelease, modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch } },
-        { "FILTER",    { filterMode, filterCutoff, filterRes, filterEnv, filterKeytrack, velToCutoff } },
-        { "LFO",       { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } },
-        { "SUB & PLAY",{ subOn, subOctave, subSplit, midHighPass, playMode, glide, bendRange, velSens } },
-        { "SPACE",     { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
-        { "FINISH",    { ottDepth, tilt, monoFreq, stereoWidth, levelTrim } },
+    using Ids = std::vector<const char*>;
+    struct SectionSpec { const char* name; Ids ids; };
+    struct PageSpec { const char* name; std::vector<std::vector<SectionSpec>> rows; };
+
+    const std::vector<PageSpec> layout {
+        { "SOUND",  { { { "OSCILLATOR", { waveTable, waveTableB, tableMix, wavePos, unison, detune, blend } } },
+                      { { "FILTER",     { filterMode, filterCutoff, filterRes, filterEnv, filterKeytrack, velToCutoff } } } } },
+        { "MOTION", { { { "AMP ENVELOPE", { ampAttack, ampDecay, ampSustain, ampRelease } },
+                        { "MOD ENVELOPE", { modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch } } },
+                      { { "LFO",          { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } } } } },
+        { "MIX",    { { { "SUB",          { subOn, subOctave, subSplit, midHighPass } },
+                        { "PLAY",         { playMode, glide, bendRange, velSens } } },
+                      { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
+                        { "FINISH",       { ottDepth, tilt, monoFreq, stereoWidth, levelTrim } } } } },
     };
 
-    for (const auto& [tabName, ids] : layout)
+    auto makeControl = [&] (const char* id) -> std::unique_ptr<Control>
     {
-        Tab tab;
-        tab.name = tabName;
+        auto* param = state.getParameter (id);
+        if (param == nullptr)
+            return {};
 
-        for (const auto* id : ids)
+        auto control = std::make_unique<Control>();
+        control->name = param->getName (24).toUpperCase();
+
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (param))
         {
-            auto* param = state.getParameter (id);
-            if (param == nullptr)
-                continue;
-
-            auto control = std::make_unique<Control>();
-            control->name = param->getName (24).toUpperCase();
-
-            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (param))
-            {
-                control->menu = std::make_unique<juce::ComboBox>();
-                control->menu->addItemList (choice->choices, 1);
-                control->menuAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, id, *control->menu);
-            }
-            else if (dynamic_cast<juce::AudioParameterBool*> (param) != nullptr)
-            {
-                control->toggle = std::make_unique<juce::ToggleButton> ("ON");
-                control->toggleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, id, *control->toggle);
-            }
-            else
-            {
-                control->knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
-                control->knob->setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
-                control->knob->setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
-                if (const auto unit = param->getLabel(); unit.isNotEmpty())
-                    control->knob->setTextValueSuffix (" " + unit); // the knob readout shows it
-                control->knobAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, id, *control->knob);
-                control->knob->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
-            }
-
-            addChildComponent (control->widget());
-            tab.controls.push_back (std::move (control));
+            control->menu = std::make_unique<juce::ComboBox>();
+            control->menu->addItemList (choice->choices, 1);
+            control->menuAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, id, *control->menu);
+        }
+        else if (dynamic_cast<juce::AudioParameterBool*> (param) != nullptr)
+        {
+            control->toggle = std::make_unique<juce::ToggleButton> ("ON");
+            control->toggleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, id, *control->toggle);
+        }
+        else
+        {
+            control->knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
+            control->knob->setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
+            control->knob->setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+            if (const auto unit = param->getLabel(); unit.isNotEmpty())
+                control->knob->setTextValueSuffix (" " + unit); // the knob readout shows it
+            control->knobAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, id, *control->knob);
+            control->knob->setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
         }
 
-        tab.button = std::make_unique<juce::TextButton> (tab.name);
-        tab.button->setClickingTogglesState (true);
-        tab.button->setRadioGroupId (0x7ab5);
-        const auto index = tabs.size();
-        tab.button->onClick = [this, index] { show (index); };
-        addAndMakeVisible (tab.button.get());
-        tabs.push_back (std::move (tab));
+        addChildComponent (control->widget());
+        return control;
+    };
+
+    for (const auto& pageSpec : layout)
+    {
+        Page page;
+        page.name = pageSpec.name;
+        for (const auto& rowSpec : pageSpec.rows)
+        {
+            std::vector<Section> row;
+            for (const auto& sectionSpec : rowSpec)
+            {
+                Section section;
+                section.name = sectionSpec.name;
+                for (const auto* id : sectionSpec.ids)
+                    if (auto control = makeControl (id))
+                        section.controls.push_back (std::move (control));
+                row.push_back (std::move (section));
+            }
+            page.rows.push_back (std::move (row));
+        }
+
+        page.button = std::make_unique<juce::TextButton> (page.name);
+        page.button->setClickingTogglesState (true);
+        page.button->setRadioGroupId (0x7ab5);
+        const auto index = pages.size();
+        page.button->onClick = [this, index] { show (index); };
+        addAndMakeVisible (page.button.get());
+        pages.push_back (std::move (page));
     }
 
     show (0);
 }
 
-void AdvancedPanel::show (size_t tab)
+void AdvancedPanel::show (size_t page)
 {
-    current = juce::jmin (tab, tabs.size() - 1);
-    for (size_t t = 0; t < tabs.size(); ++t)
+    current = juce::jmin (page, pages.size() - 1);
+    for (size_t p = 0; p < pages.size(); ++p)
     {
-        tabs[t].button->setToggleState (t == current, juce::dontSendNotification);
-        for (auto& control : tabs[t].controls)
-            control->widget()->setVisible (t == current);
+        pages[p].button->setToggleState (p == current, juce::dontSendNotification);
+        for (auto& row : pages[p].rows)
+            for (auto& section : row)
+                for (auto& control : section.controls)
+                    control->widget()->setVisible (p == current);
     }
     resized();
     repaint();
@@ -920,54 +942,93 @@ void AdvancedPanel::paint (juce::Graphics& g)
     g.setFont (Fonts::ui (11.0f, true));
     g.drawText ("ADVANCED", strip.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
 
-    // Parameter names above each control.
-    g.setFont (Fonts::ui (10.0f, true, 0.06f));
-    g.setColour (Palette::accent.withAlpha (0.85f));
-    for (auto& control : tabs[current].controls)
-    {
-        const auto r = control->widget()->getBounds();
-        g.drawFittedText (control->name, juce::Rectangle<int> (r.getX() - 10, r.getY() - 18, r.getWidth() + 20, 16),
-                          juce::Justification::centredBottom, 1);
-    }
+    for (auto& row : pages[current].rows)
+        for (auto& section : row)
+        {
+            // Bordered section: recessed plate, title and LED on its top edge.
+            const auto box = section.bounds.toFloat();
+            g.setColour (Palette::screen.withAlpha (0.35f));
+            g.fillRoundedRectangle (box, 5.0f);
+            g.setColour (Palette::panelEdge);
+            g.drawRoundedRectangle (box.reduced (0.5f), 5.0f, 1.0f);
+
+            const auto led = juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ box.getX() + 12.0f, box.getY() + 11.0f });
+            g.setColour (Palette::accent.withAlpha (0.25f));
+            g.fillEllipse (led.expanded (2.5f));
+            g.setColour (Palette::accent);
+            g.fillEllipse (led);
+            g.setFont (Fonts::ui (10.5f, true, 0.08f));
+            g.setColour (Palette::orange);
+            g.drawText (section.name, box.withHeight (22.0f).withTrimmedLeft (22.0f), juce::Justification::centredLeft);
+
+            // Parameter names above each control.
+            g.setFont (Fonts::ui (9.5f, true, 0.05f));
+            g.setColour (Palette::accent.withAlpha (0.85f));
+            for (auto& control : section.controls)
+            {
+                const auto r = control->widget()->getBounds();
+                g.drawFittedText (control->name, juce::Rectangle<int> (r.getX() - 8, r.getY() - 16, r.getWidth() + 16, 14),
+                                  juce::Justification::centredBottom, 1);
+            }
+        }
 }
 
 void AdvancedPanel::resized()
 {
-    if (tabs.empty())
+    if (pages.empty())
         return;
 
-    // Tabs across the header strip, right of the title.
+    // Page tabs across the header strip, right of the title.
     auto strip = getLocalBounds().removeFromTop (22).reduced (6, 3);
     strip.removeFromLeft (80);
-    const auto tabWidth = juce::jmin (96, strip.getWidth() / (int) tabs.size());
-    for (auto& tab : tabs)
-        tab.button->setBounds (strip.removeFromLeft (tabWidth).reduced (2, 0));
+    for (auto& page : pages)
+        page.button->setBounds (strip.removeFromLeft (110).reduced (2, 0));
 
-    // Controls in one row, or two when there are many; a name above each.
-    auto area = getLocalBounds().withTrimmedTop (22).reduced (20, 14);
-    const auto& controls = tabs[current].controls;
-    const auto count = (int) controls.size();
-    const auto rows = count > 7 ? 2 : 1;
-    const auto perRow = (count + rows - 1) / rows;
-    const auto rowHeight = juce::jmin (area.getHeight() / rows, 190);
-    area = area.withSizeKeepingCentre (area.getWidth(), rowHeight * rows); // centred, not stuck to the top
-    const auto cellWidth = area.getWidth() / juce::jmax (1, perRow);
+    // Rows share the height; sections in a row share the width by control count.
+    auto area = getLocalBounds().withTrimmedTop (22).reduced (12, 10);
+    auto& rows = pages[current].rows;
+    const auto rowGap = 10, sectionGap = 10;
+    const auto rowHeight = (area.getHeight() - rowGap * ((int) rows.size() - 1)) / juce::jmax (1, (int) rows.size());
 
-    for (int i = 0; i < count; ++i)
+    for (auto& row : rows)
     {
-        auto cell = juce::Rectangle<int> (area.getX() + (i % perRow) * cellWidth, area.getY() + (i / perRow) * rowHeight,
-                                          cellWidth, rowHeight).reduced (8, 4);
-        cell.removeFromTop (20); // the name
-        auto* widget = controls[(size_t) i]->widget();
+        auto rowArea = area.removeFromTop (rowHeight);
+        area.removeFromTop (rowGap);
 
-        if (controls[(size_t) i]->knob != nullptr)
+        int total = 0;
+        for (auto& section : row)
+            total += juce::jmax (1, (int) section.controls.size());
+        const auto usable = rowArea.getWidth() - sectionGap * ((int) row.size() - 1);
+
+        for (size_t s = 0; s < row.size(); ++s)
         {
-            const auto size = juce::jmin (cell.getWidth(), cell.getHeight(), 110);
-            widget->setBounds (cell.withSizeKeepingCentre (juce::jmin (cell.getWidth(), size + 10), size).withY (cell.getY()));
-        }
-        else
-        {
-            widget->setBounds (cell.withSizeKeepingCentre (juce::jmin (cell.getWidth(), 120), 22).withY (cell.getY() + 24));
+            auto& section = row[s];
+            const auto width = s + 1 == row.size() ? rowArea.getWidth()
+                                                   : usable * juce::jmax (1, (int) section.controls.size()) / total;
+            section.bounds = rowArea.removeFromLeft (width);
+            rowArea.removeFromLeft (sectionGap);
+
+            // Controls in one line under the section title, a name above each.
+            auto inner = section.bounds.withTrimmedTop (22).reduced (6, 4);
+            const auto count = juce::jmax (1, (int) section.controls.size());
+            const auto cellWidth = inner.getWidth() / count;
+            for (int i = 0; i < (int) section.controls.size(); ++i)
+            {
+                auto cell = juce::Rectangle<int> (inner.getX() + i * cellWidth, inner.getY(), cellWidth, inner.getHeight()).reduced (3, 0);
+                cell.removeFromTop (16); // the name
+                auto& control = section.controls[(size_t) i];
+
+                if (control->knob != nullptr)
+                {
+                    const auto size = juce::jmin (cell.getWidth(), cell.getHeight(), 104);
+                    control->knob->setBounds (cell.withSizeKeepingCentre (cell.getWidth(), size)); // centred in the section
+                }
+                else
+                {
+                    control->widget()->setBounds (cell.withSizeKeepingCentre (juce::jmin (cell.getWidth(), 110), 22)
+                                                      .withY (cell.getY() + juce::jmax (0, (cell.getHeight() - 22) / 2 - 6)));
+                }
+            }
         }
     }
 }

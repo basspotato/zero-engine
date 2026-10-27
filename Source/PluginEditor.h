@@ -76,9 +76,10 @@ private:
     std::vector<float> spectrumDb = std::vector<float> ((size_t) fftSize / 2, -100.0f);
 };
 
-// Every engine parameter, grouped into tabs, in the console style: knobs for
-// numbers, slim menus for choices, toggles for switches. Covers the panels
-// between the top bar and the keyboard while open.
+// Every engine parameter in the console style: knobs for numbers, slim menus
+// for choices, toggles for switches. Three pages, each with bordered sections
+// arranged in rows (small sections share a row). Covers the panels between the
+// top bar and the keyboard while open.
 class AdvancedPanel : public juce::Component
 {
 public:
@@ -99,16 +100,23 @@ private:
         juce::Component* widget() const;
     };
 
-    struct Tab
+    struct Section
     {
         juce::String name;
         std::vector<std::unique_ptr<Control>> controls;
+        juce::Rectangle<int> bounds; // set in resized()
+    };
+
+    struct Page
+    {
+        juce::String name;
+        std::vector<std::vector<Section>> rows; // sections side by side within a row
         std::unique_ptr<juce::TextButton> button;
     };
 
-    void show (size_t tab);
+    void show (size_t page);
 
-    std::vector<Tab> tabs;
+    std::vector<Page> pages;
     size_t current = 0;
 };
 
