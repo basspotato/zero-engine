@@ -38,6 +38,15 @@ public:
 
     const FinishingChain::Meters& getMeters() const noexcept { return finishing.getMeters(); }
 
+    // Where a playing voice is in its wavetable (envelopes and LFOs included), or -1 when silent.
+    float getLivePosition() const noexcept { return livePosition.load (std::memory_order_relaxed); }
+
+    // The newest output samples, (L + R) / 2, for the display's waveform and
+    // spectrum. The audio thread writes a ring buffer; a read may tear across a
+    // block boundary, which is harmless for drawing.
+    static constexpr int scopeSize = 8192;
+    void copyScope (float* dest, int numSamples) const noexcept;
+
     // Message thread: loads the profile for the current Genre/Type if it changed.
     // Runs on a timer; offline tools call it directly after setting Genre/Type.
     void syncProfile();
@@ -45,6 +54,10 @@ public:
     // Message thread: loads a given profile as if Genre/Type had been chosen
     // (the offline tuner passes candidate profiles through this).
     void loadProfile (int genre, int type, const Profile& profile);
+
+    // Message thread: the Generate button. Loads a random variation on the
+    // current Genre/Type's profile. Switching Genre or Type loads a designed profile as usual.
+    void generate (juce::int64 seed = juce::Time::currentTimeMillis());
 
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboardState;
@@ -54,6 +67,9 @@ private:
 
     MacroMap macroMap;
     std::atomic<float> hostBpm { 120.0f }; // for tempo-synced LFOs; 120 when the host gives none
+    std::atomic<float> livePosition { -1.0f }; // a playing voice's wavetable position, -1 when silent (display only)
+    std::array<float, scopeSize> scope {};
+    std::atomic<int> scopeWrite { 0 };
     ZeroSynth synth;
     std::atomic<int> appliedGenre { -1 }, appliedType { -1 };
     FinishingChain finishing;

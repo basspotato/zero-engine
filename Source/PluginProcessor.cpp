@@ -36,7 +36,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     WavetableBank::get(); // build tables here, never on the audio thread
 
     for (int i = 0; i < numVoices; ++i)
-        synth.addVoice (new ZeroVoice (state, macroMap, hostBpm, i));
+        synth.addVoice (new ZeroVoice (state, macroMap, hostBpm, livePosition, i));
 
     synth.addSound (new ZeroSound());
 
@@ -76,6 +76,13 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
     loadMacroMap (macroMap, profile);
 }
 
+void ZeroEngineProcessor::generate (juce::int64 seed)
+{
+    syncProfile(); // a Genre/Type change not yet picked up by the timer
+    juce::Random random (seed);
+    loadProfile (appliedGenre, appliedType, generateProfile (appliedGenre, appliedType, random));
+}
+
 void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     synth.setCurrentPlaybackSampleRate (sampleRate);
@@ -107,6 +114,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             if (const auto hostTempo = position->getBpm())
                 bpm = juce::jlimit (40.0, 300.0, *hostTempo);
     hostBpm.store ((float) bpm);
+    livePosition.store (-1.0f, std::memory_order_relaxed); // voices that play this block overwrite it
 
     // Sub Split: voices write their sub to a third channel that skips the
     // chain. A block bigger than prepared falls back to the mixed path rather
@@ -167,6 +175,25 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.reverbSize    = reverbSize.load();
 
     finishing.process (buffer, settings, sub);
+
+    // Display tap.
+    auto write = scopeWrite.load (std::memory_order_relaxed);
+    const auto* left = buffer.getReadPointer (0);
+    const auto* right = buffer.getReadPointer (buffer.getNumChannels() > 1 ? 1 : 0);
+    for (int i = 0; i < numSamples; ++i)
+    {
+        scope[(size_t) write] = 0.5f * (left[i] + right[i]);
+        write = (write + 1) % scopeSize;
+    }
+    scopeWrite.store (write, std::memory_order_release);
+}
+
+void ZeroEngineProcessor::copyScope (float* dest, int numSamples) const noexcept
+{
+    numSamples = juce::jmin (numSamples, scopeSize);
+    const auto end = scopeWrite.load (std::memory_order_acquire);
+    for (int i = 0; i < numSamples; ++i)
+        dest[i] = scope[(size_t) ((end - numSamples + i + scopeSize) % scopeSize)];
 }
 
 juce::AudioProcessorEditor* ZeroEngineProcessor::createEditor()

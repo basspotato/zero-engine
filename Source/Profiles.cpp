@@ -621,6 +621,79 @@ Profile makeProfile (int genre, int type)
     return p;
 }
 
+Profile generateProfile (int genre, int type, juce::Random& random)
+{
+    // A variation on the genre/type's own profile, so it still sounds finished:
+    // the sound source, envelopes, filter, movement, macros and space change;
+    // the finishing chain, clean-sub split, high-pass and play mode stay.
+    auto p = makeProfile (genre, type);
+
+    auto between = [&] (float lo, float hi) { return lo + random.nextFloat() * (hi - lo); };
+    auto nudge = [&] (float& v, float amount, float lo = 0.0f, float hi = 1.0f) { v = juce::jlimit (lo, hi, v + between (-amount, amount)); };
+    auto scale = [&] (float& v, float octaves, float lo, float hi) { v = juce::jlimit (lo, hi, v * std::exp2 (between (-octaves, octaves))); };
+    auto chance = [&] (float probability) { return random.nextFloat() < probability; };
+
+    // Source: sometimes a different table that suits the type, always a new position.
+    if (chance (0.4f))
+    {
+        static constexpr float bassTables[] { 0.0f, growlTable, fmTable, 5.0f /* Wavefold */, 7.0f /* Neuro */, harshTable, digitalTable };
+        static constexpr float toneTables[] { 0.0f, analogTable, digitalTable, organTable, fmTable, pwmTable, choirTable, jupiterTable };
+        p.waveTable = type == bass ? bassTables[random.nextInt ((int) std::size (bassTables))]
+                                   : toneTables[random.nextInt ((int) std::size (toneTables))];
+    }
+    nudge (p.wavePos, 0.25f);
+    if (chance (0.4f))
+    {
+        static constexpr float layers[] { 0.0f, analogTable, choirTable, jupiterTable, pwmTable };
+        p.waveTableB = layers[random.nextInt ((int) std::size (layers))];
+        p.tableMix = between (0.2f, 0.6f);
+    }
+
+    p.unison = (float) juce::jlimit (1, type == bass ? 5 : 7, (int) p.unison + random.nextInt (5) - 2);
+    scale (p.detune, 0.6f, 0.0f, 0.8f);
+
+    // Envelopes: same shape, different timing.
+    scale (p.ampAttack, 0.8f, 0.001f, 2.0f);
+    scale (p.ampDecay, 0.7f, 0.05f, 4.0f);
+    // Tails must still die away; FX tails are already long, so they get shorter.
+    scale (p.ampRelease, 0.7f, 0.02f, type == fx ? p.ampRelease * 0.8f : juce::jmin (3.0f, p.ampRelease * 1.25f));
+    nudge (p.ampSustain, 0.15f);
+    scale (p.modDecay, 0.8f, 0.03f, 4.0f);
+    nudge (p.modToPos, 0.25f, -1.0f, 1.0f);
+
+    // Filter, where one is in use.
+    if (p.filterCutoff < 19000.0f)
+    {
+        scale (p.filterCutoff, 0.8f, 80.0f, 16000.0f);
+        nudge (p.filterRes, 0.15f, 0.0f, 0.6f);
+    }
+
+    // Movement: often a tempo-synced sweep through the table.
+    if (chance (type == bass || type == lead || type == fx ? 0.5f : 0.3f))
+    {
+        p.lfoSync = (float) (3 + random.nextInt (6)); // 1/4 to 1/16T
+        p.lfoShape = (float) random.nextInt (5);
+        p.lfoToPos = between (0.1f, type == bass ? 0.6f : 0.35f);
+    }
+
+    // Macros and space.
+    for (auto* macro : { &p.weight, &p.grit, &p.punch, &p.width, &p.motion, &p.air })
+        nudge (*macro, 0.15f);
+    nudge (p.delayMix, 0.1f, 0.0f, 0.5f);
+    nudge (p.reverbMix, 0.1f, 0.0f, type == fx ? p.reverbMix : 0.6f);
+    nudge (p.tilt, 1.0f, -6.0f, 6.0f);
+
+    if (type == bass)
+        p.delayMix = p.reverbMix = 0.0f; // basses stay dry
+    p.delayFeedback = juce::jmin (p.delayFeedback, 0.35f);
+
+    // Level trim is gain after the clipper: a brighter or denser variation plus
+    // a positive trim would go over the ceiling.
+    p.levelTrim = juce::jmin (p.levelTrim, 0.0f);
+
+    return p;
+}
+
 void applyTrim (Profile& p, const ProfileTrim& trim)
 {
     p.levelTrim = trim.levelDb;

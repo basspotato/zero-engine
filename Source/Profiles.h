@@ -50,6 +50,11 @@ struct Profile
 // The hand-designed profile with any tuned trim from ProfileTuning.h applied.
 Profile makeProfile (int genre, int type);
 
+// A random variation on the genre/type's profile (the Generate button): new
+// source, envelopes, filter, movement, macros and space; the finishing chain
+// and the clean-sub rules stay, so it still sounds finished.
+Profile generateProfile (int genre, int type, juce::Random& random);
+
 // Overwrites the five tuner-controlled values (level, OTT, tilt, Weight, width).
 void applyTrim (Profile& profile, const ProfileTrim& trim);
 

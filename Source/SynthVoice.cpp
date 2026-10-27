@@ -17,8 +17,9 @@ namespace
     }
 }
 
-ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map, const std::atomic<float>& bpm, int index)
-    : macroMap (map), hostBpm (bpm), random (0x5eed + index)
+ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map, const std::atomic<float>& bpm,
+                      std::atomic<float>& position, int index)
+    : macroMap (map), hostBpm (bpm), livePosition (position), random (0x5eed + index)
 {
     auto get = [&] (const char* id) { return state.getRawParameterValue (id); };
 
@@ -241,6 +242,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         const auto lfo = nextLfo (lfoInc);
         const auto mod = modEnv.getNextSample();
         const auto pos = juce::jlimit (0.0f, 1.0f, basePos + mod * modToPos + lfo * lfoToPos * 0.5f);
+        if (i == numSamples - 1)
+            livePosition.store (pos, std::memory_order_relaxed); // for the display
         pitch += glideCoeff * (targetPitch - pitch);
         const auto inc = std::exp2 (pitch + (lfo * lfoToPitch + mod * modToPitch + bendSemis) / 12.0) / sampleRate;
 

@@ -45,6 +45,8 @@ public:
         std::atomic<float> clipDb { 0 };       // peak reduction this block
         std::atomic<float> rmsDb { -100 }, peakDb { -100 };
         std::atomic<float> momentaryLufs { -100 }, shortTermLufs { -100 }; // BS.1770: 0.4 s and 3 s windows
+        std::atomic<float> channelPeakDb[2] { -100, -100 }, channelRmsDb[2] { -100, -100 }; // L, R (mono: both)
+        std::atomic<float> correlation { 1 }; // L/R, -1..1, this block
     };
 
     const Meters& getMeters() const noexcept { return meters; }
@@ -97,6 +99,7 @@ private:
 
     Meters meters;
     float bandGainSum[3] {};
+    float channelPeak[2] {}, channelMeanSquare[2] {}, sumLR = 0.0f, sumLL = 0.0f, sumRR = 0.0f;
     float meanSquare = 0.0f, rmsCoeff = 0.0f;
     float midEnergy = 0.0f, sideEnergy = 0.0f, clipPeakDb = 0.0f, outPeak = 0.0f;
 

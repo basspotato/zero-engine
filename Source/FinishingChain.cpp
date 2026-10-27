@@ -156,6 +156,7 @@ void FinishingChain::reset()
     std::fill (std::begin (dcState), std::end (dcState), 0.0f);
     std::fill (std::begin (dcPrev), std::end (dcPrev), 0.0f);
     meanSquare = 0.0f;
+    channelMeanSquare[0] = channelMeanSquare[1] = 0.0f;
     delayLines.clear();
     delayWrite = 0;
     reverb.reset();
@@ -207,6 +208,7 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
 
     std::fill (std::begin (bandGainSum), std::end (bandGainSum), 0.0f);
     midEnergy = sideEnergy = clipPeakDb = outPeak = 0.0f;
+    channelPeak[0] = channelPeak[1] = sumLR = sumLL = sumRR = 0.0f;
 
     // Hosts may send blocks bigger than promised; the oversampler can't take them.
     for (int start = 0; start < buffer.getNumSamples(); start += maxBlock)
@@ -250,6 +252,14 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
     meters.clipDb = clipPeakDb;
     meters.rmsDb = juce::Decibels::gainToDecibels (std::sqrt (meanSquare), -100.0f);
     meters.peakDb = juce::Decibels::gainToDecibels (outPeak, -100.0f);
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const auto c = juce::jmin (ch, channels - 1);
+        meters.channelPeakDb[ch] = juce::Decibels::gainToDecibels (channelPeak[c], -100.0f);
+        meters.channelRmsDb[ch] = juce::Decibels::gainToDecibels (std::sqrt (channelMeanSquare[c]), -100.0f);
+    }
+    if (sumLL > 1.0e-9f && sumRR > 1.0e-9f)
+        meters.correlation = sumLR / std::sqrt (sumLL * sumRR);
 
     auto lufs = [this] (int slots)
     {
@@ -517,9 +527,14 @@ void FinishingChain::clipAndGain (juce::AudioBuffer<float>& buffer, int numSampl
             buffer.setSample (ch, i, y);
             square += y * y;
             outPeak = juce::jmax (outPeak, std::abs (y));
+            channelPeak[ch] = juce::jmax (channelPeak[ch], std::abs (y));
+            channelMeanSquare[ch] += rmsCoeff * (y * y - channelMeanSquare[ch]);
         }
 
         meanSquare += rmsCoeff * (square / (float) numCh - meanSquare);
+
+        const auto l = buffer.getSample (0, i), r = buffer.getSample (numCh > 1 ? 1 : 0, i);
+        sumLR += l * r; sumLL += l * l; sumRR += r * r;
 
         // K-weighted energy, summed over L and R (a mono output counts for both).
         auto weighted = 0.0f;

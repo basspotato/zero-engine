@@ -60,10 +60,12 @@ namespace
 
     // Plays a chord of three notes for a second, then 8 s of silence.
     // Returns problems found; empty means it passed.
-    juce::StringArray checkRender (int genre, int type, double rate, int blockSize)
+    juce::StringArray checkRender (int genre, int type, double rate, int blockSize, juce::int64 generateSeed = 0)
     {
         ZeroEngineProcessor engine;
         loadProfile (engine, genre, type);
+        if (generateSeed != 0)
+            engine.generate (generateSeed); // a Generate-button variation instead of the designed profile
         engine.setPlayConfigDetails (0, 2, rate, blockSize);
         engine.prepareToPlay (rate, blockSize);
 
@@ -189,6 +191,32 @@ int runTests()
             for (int t = 0; t < typeNames.size(); ++t)
                 for (const auto& problem : checkRender (g, t, rate, blockSize))
                     report.add (genreNames[g] + " / " + typeNames[t] + ": " + problem);
+
+        if (report.isEmpty())
+            std::printf ("ok\n");
+        else
+        {
+            std::printf ("%d problems\n", report.size());
+            for (const auto& line : report)
+                std::printf ("    %s\n", line.toRawUTF8());
+            failures += report.size();
+        }
+    }
+
+    // Generate: random variations must meet the same bar as the designed profiles.
+    {
+        constexpr int seedsPerProfile = 4;
+        std::printf ("Generated sounds, %d per profile... ", seedsPerProfile);
+        juce::StringArray report;
+
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+                for (int s = 1; s <= seedsPerProfile; ++s)
+                {
+                    const auto seed = (juce::int64) (1000 * g + 100 * t + s);
+                    for (const auto& problem : checkRender (g, t, 48000.0, 512, seed))
+                        report.add (genreNames[g] + " / " + typeNames[t] + " seed " + juce::String (seed) + ": " + problem);
+                }
 
         if (report.isEmpty())
             std::printf ("ok\n");
