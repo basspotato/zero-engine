@@ -22,6 +22,7 @@ void DisplayPanel::paint (juce::Graphics& g)
 ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     : AudioProcessorEditor (p),
       processor (p),
+      devPanel (p),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
 {
     const std::array<std::pair<const char*, const char*>, 6> macroParams { {
@@ -41,7 +42,17 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     typeAttachment  = std::make_unique<ComboAttachment> (processor.state, ParamIDs::type, typeBox);
 
     addAndMakeVisible (display);
+    addChildComponent (devPanel);
     addAndMakeVisible (keyboard);
+
+    devButton.setClickingTogglesState (true);
+    devButton.onClick = [this]
+    {
+        const auto showDev = devButton.getToggleState();
+        devPanel.setVisible (showDev);
+        display.setVisible (! showDev);
+    };
+    addAndMakeVisible (devButton);
 
     setSize (760, 520);
 }
@@ -75,6 +86,8 @@ void ZeroEngineEditor::resized()
     outputKnob.label.setBounds (outputArea.removeFromLeft (50));
     outputKnob.knob.setBounds (outputArea);
     top.removeFromRight (12);
+    devButton.setBounds (top.removeFromRight (50).reduced (0, 4));
+    top.removeFromRight (8);
     typeBox.setBounds (top.removeFromRight (130).reduced (0, 4));
     top.removeFromRight (8);
     genreBox.setBounds (top.removeFromRight (150).reduced (0, 4));
@@ -94,4 +107,5 @@ void ZeroEngineEditor::resized()
 
     area.removeFromBottom (12);
     display.setBounds (area);
+    devPanel.setBounds (area);
 }

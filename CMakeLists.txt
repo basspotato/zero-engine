@@ -30,7 +30,8 @@ target_sources(ZeroEngine
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
-        Source/SynthVoice.cpp)
+        Source/SynthVoice.cpp
+        Source/Wavetable.cpp)
 
 target_compile_definitions(ZeroEngine
     PUBLIC

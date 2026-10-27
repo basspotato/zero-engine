@@ -2,6 +2,7 @@
 #include "PluginEditor.h"
 #include "Parameters.h"
 #include "SynthVoice.h"
+#include "Wavetable.h"
 
 namespace
 {
@@ -14,6 +15,8 @@ ZeroEngineProcessor::ZeroEngineProcessor()
       grit (*state.getRawParameterValue (ParamIDs::grit)),
       output (*state.getRawParameterValue (ParamIDs::output))
 {
+    WavetableBank::get(); // build tables here, never on the audio thread
+
     for (int i = 0; i < numVoices; ++i)
         synth.addVoice (new ZeroVoice (state));
 

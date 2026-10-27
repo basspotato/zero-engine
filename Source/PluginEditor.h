@@ -36,6 +36,10 @@ private:
     juce::ComboBox genreBox, typeBox;
     std::unique_ptr<ComboAttachment> genreAttachment, typeAttachment;
     DisplayPanel display;
+
+    // Temporary: all engine parameters as plain sliders, shown in place of the display.
+    juce::GenericAudioProcessorEditor devPanel;
+    juce::TextButton devButton { "Dev" };
     juce::MidiKeyboardComponent keyboard;
 
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);
