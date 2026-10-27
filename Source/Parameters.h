@@ -37,6 +37,8 @@ namespace ParamIDs
     inline constexpr auto modToPos   = "modToPos";
     inline constexpr auto modToPitch = "modToPitch";
     inline constexpr auto subOctave  = "subOctave";
+    inline constexpr auto subSplit   = "subSplit";    // clean sub skips the finishing chain until the clipper
+    inline constexpr auto midHighPass = "midHighPass"; // high-pass on everything but the sub, when split
 
     inline constexpr auto lfoRate    = "lfoRate";
     inline constexpr auto lfoShape   = "lfoShape";
@@ -138,6 +140,10 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
                                                        NormalisableRange<float> (-24.0f, 24.0f), 0.0f,
                                                        AudioParameterFloatAttributes().withLabel ("st")));
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::subOctave, 1 }, "Sub Octave", -1, 0, -1));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::subSplit, 1 }, "Sub Split", false));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::midHighPass, 1 }, "Mid High-Pass",
+                                                       NormalisableRange<float> (40.0f, 400.0f, 0.0f, 0.5f), 120.0f,
+                                                       AudioParameterFloatAttributes().withLabel ("Hz")));
 
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::lfoRate, 1 }, "LFO Rate",
                                                        NormalisableRange<float> (0.05f, 20.0f, 0.0f, 0.3f), 2.0f,

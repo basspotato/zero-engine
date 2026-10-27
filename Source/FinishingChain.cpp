@@ -37,6 +37,21 @@ void FinishingChain::Shelf::set (double fs, double freq, double q, double gainDb
     a2 = (float) (((A + 1) - (A - 1) * cosw - sqrtA2alpha) / a0);
 }
 
+void FinishingChain::Shelf::setHighPass (double fs, double freq, double q)
+{
+    freq = juce::jmin (freq, fs * 0.45);
+    const auto w0 = juce::MathConstants<double>::twoPi * freq / fs;
+    const auto cosw = std::cos (w0);
+    const auto alpha = std::sin (w0) / (2.0 * q);
+    const auto a0 = 1.0 + alpha;
+
+    b0 = (float) ((1.0 + cosw) * 0.5 / a0);
+    b1 = (float) (-(1.0 + cosw) / a0);
+    b2 = b0;
+    a1 = (float) (-2.0 * cosw / a0);
+    a2 = (float) ((1.0 - alpha) / a0);
+}
+
 float FinishingChain::Shelf::process (int ch, float x) noexcept
 {
     const auto y = b0 * x + z1[ch];
@@ -119,7 +134,7 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
     }
 
     lastTiltDb = -100.0f;
-    lastAir = lastMonoFreq = -1.0f;
+    lastAir = lastMonoFreq = lastMidHighPass = -1.0f;
     reset();
 }
 
@@ -136,6 +151,7 @@ void FinishingChain::reset()
 
     tilt.reset();
     airShelf.reset();
+    midHighPass.reset();
     std::fill (std::begin (dcState), std::end (dcState), 0.0f);
     std::fill (std::begin (dcPrev), std::end (dcPrev), 0.0f);
     meanSquare = 0.0f;
@@ -156,8 +172,14 @@ int FinishingChain::getLatencySamples() const
     return oversampling != nullptr ? juce::roundToInt (oversampling->getLatencyInSamples()) : 0;
 }
 
-void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingSettings& s)
+void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingSettings& s, const float* sub)
 {
+    if (sub != nullptr && s.midHighPassHz != lastMidHighPass)
+    {
+        midHighPass.setHighPass (sampleRate, s.midHighPassHz, 0.7071);
+        lastMidHighPass = s.midHighPassHz;
+    }
+
     jassert (oversampling != nullptr);
 
     drive.setTargetValue (1.0f + s.grit * 11.0f);
@@ -191,11 +213,25 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
         const auto n = juce::jmin (maxBlock, buffer.getNumSamples() - start);
         juce::AudioBuffer<float> chunk (buffer.getArrayOfWritePointers(), juce::jmin (channels, buffer.getNumChannels()), start, n);
 
+        // Clean sub, dirty mids: only the high-passed layer goes through the chain.
+        if (sub != nullptr)
+            for (int ch = 0; ch < chunk.getNumChannels(); ++ch)
+            {
+                auto* data = chunk.getWritePointer (ch);
+                for (int i = 0; i < n; ++i)
+                    data[i] = midHighPass.process (ch, data[i]);
+            }
+
         saturate (chunk, n);
         space (chunk, n, s);
         compress (chunk, n, s.ottDepth);
         equalise (chunk, n, s);
         widen (chunk, n);
+
+        if (sub != nullptr)
+            for (int ch = 0; ch < chunk.getNumChannels(); ++ch)
+                juce::FloatVectorOperations::add (chunk.getWritePointer (ch), sub + start, n);
+
         clipAndGain (chunk, n);
     }
 

@@ -19,6 +19,7 @@ struct FinishingSettings
     float monoFreq  = 120.0f;
     float sideGain  = 1.0f; // side level above monoFreq
     float outputDb  = 0.0f;
+    float midHighPassHz = 120.0f; // used when a separate sub is passed to process()
 };
 
 class FinishingChain
@@ -26,7 +27,10 @@ class FinishingChain
 public:
     void prepare (double sampleRate, int maxBlockSize, int numChannels);
     void reset();
-    void process (juce::AudioBuffer<float>& buffer, const FinishingSettings& settings);
+    // With `sub` (a mono clean sub, one sample per buffer sample), the buffer is
+    // high-passed before saturation and the sub skips the chain, joining just
+    // before the soft clipper: clean sub, dirty mids.
+    void process (juce::AudioBuffer<float>& buffer, const FinishingSettings& settings, const float* sub = nullptr);
 
     int getLatencySamples() const;
 
@@ -46,11 +50,13 @@ public:
     const Meters& getMeters() const noexcept { return meters; }
 
 private:
-    // RBJ high shelf, transposed direct form II. Coefficients are plain floats,
-    // so updating them on the audio thread is allocation-free.
+    // RBJ biquad (high shelf or high-pass), transposed direct form II.
+    // Coefficients are plain floats, so updating them on the audio thread is
+    // allocation-free.
     struct Shelf
     {
         void set (double fs, double freq, double q, double gainDb);
+        void setHighPass (double fs, double freq, double q);
         float process (int ch, float x) noexcept;
         void reset() noexcept;
 
@@ -94,7 +100,8 @@ private:
     float meanSquare = 0.0f, rmsCoeff = 0.0f;
     float midEnergy = 0.0f, sideEnergy = 0.0f, clipPeakDb = 0.0f, outPeak = 0.0f;
 
-    Shelf tilt, airShelf;
+    Shelf tilt, airShelf, midHighPass;
+    float lastMidHighPass = -1.0f;
 
     // Loudness meter only: K-weighting, then 100 ms energy slots covering 3 s.
     Shelf kPre, kHighPass;

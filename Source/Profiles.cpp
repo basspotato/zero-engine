@@ -21,6 +21,7 @@ namespace
         p.monoFreq = 120.0f;
         p.stereoWidth = 1.0f;
         p.subOctave = -1.0f;
+        p.midHighPass = 120.0f;     // only used when subSplit is on
         p.filterMode = 1.0f;        // Low 24, fully open: bypassed
         p.filterCutoff = 20000.0f;
         p.velSens = 1.0f;
@@ -165,6 +166,7 @@ namespace
 
                 case dubstep: // classic wobble: the LFO sweeps the Basic shapes
                     p.lfoRate = 3.0f; p.lfoShape = sine; p.lfoToPos = 0.7f;
+                    p.subSplit = 1.0f; // clean sub, dirty mids (research_notes/bass_clarity.md)
                     break;
 
                 case drumAndBass: // deep rolling reese: darker detuned wave over a heavy sub
@@ -388,6 +390,8 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::modToPos,   p.modToPos);
     set (ParamIDs::modToPitch, p.modToPitch);
     set (ParamIDs::subOctave,  p.subOctave);
+    set (ParamIDs::subSplit,   p.subSplit);
+    set (ParamIDs::midHighPass, p.midHighPass);
 
     set (ParamIDs::filterMode,     p.filterMode);
     set (ParamIDs::filterCutoff,   p.filterCutoff);

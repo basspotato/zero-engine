@@ -20,6 +20,8 @@ ZeroEngineProcessor::ZeroEngineProcessor()
       width (*state.getRawParameterValue (ParamIDs::width)),
       output (*state.getRawParameterValue (ParamIDs::output)),
       levelTrim (*state.getRawParameterValue (ParamIDs::levelTrim)),
+      subSplit (*state.getRawParameterValue (ParamIDs::subSplit)),
+      midHighPass (*state.getRawParameterValue (ParamIDs::midHighPass)),
       ottDepth (*state.getRawParameterValue (ParamIDs::ottDepth)),
       tilt (*state.getRawParameterValue (ParamIDs::tilt)),
       monoFreq (*state.getRawParameterValue (ParamIDs::monoFreq)),
@@ -76,6 +78,7 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
 void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     synth.setCurrentPlaybackSampleRate (sampleRate);
+    synthBuffer.setSize (3, juce::jmax (samplesPerBlock, 4096)); // L, R, clean sub
     finishing.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     setLatencySamples (finishing.getLatencySamples());
     keyboardState.reset();
@@ -95,7 +98,25 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     buffer.clear();
 
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
-    synth.renderNextBlock (buffer, midi, 0, numSamples);
+
+    // Sub Split: voices write their sub to a third channel that skips the
+    // chain. A block bigger than prepared falls back to the mixed path rather
+    // than allocating here.
+    const float* sub = nullptr;
+    if (subSplit.load() > 0.5f && numSamples <= synthBuffer.getNumSamples())
+    {
+        juce::AudioBuffer<float> view (synthBuffer.getArrayOfWritePointers(), 3, numSamples);
+        view.clear();
+        synth.renderNextBlock (view, midi, 0, numSamples);
+
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            buffer.copyFrom (ch, 0, view, juce::jmin (ch, 1), 0, numSamples);
+        sub = view.getReadPointer (2);
+    }
+    else
+    {
+        synth.renderNextBlock (buffer, midi, 0, numSamples);
+    }
 
     FinishingSettings settings;
     settings.grit     = grit.load();
@@ -103,6 +124,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.tiltDb   = juce::jlimit (-6.0f, 6.0f, tilt.load() + macroMap.offset (MacroTarget::tilt));
     settings.air      = air.load();
     settings.monoFreq = monoFreq.load();
+    settings.midHighPassHz = midHighPass.load();
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
     settings.outputDb = output.load() + levelTrim.load();
 
@@ -120,7 +142,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.reverbMix     = juce::jlimit (0.0f, 1.0f, reverbMix.load() + macroMap.offset (MacroTarget::reverbMix));
     settings.reverbSize    = reverbSize.load();
 
-    finishing.process (buffer, settings);
+    finishing.process (buffer, settings, sub);
 }
 
 juce::AudioProcessorEditor* ZeroEngineProcessor::createEditor()

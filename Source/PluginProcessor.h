@@ -56,12 +56,15 @@ private:
     ZeroSynth synth;
     std::atomic<int> appliedGenre { -1 }, appliedType { -1 };
     FinishingChain finishing;
+    juce::AudioBuffer<float> synthBuffer; // L, R and the clean sub, sized in prepareToPlay
 
     std::atomic<float>& grit;
     std::atomic<float>& air;
     std::atomic<float>& width;
     std::atomic<float>& output;
     std::atomic<float>& levelTrim;
+    std::atomic<float>& subSplit;
+    std::atomic<float>& midHighPass;
     std::atomic<float>& ottDepth;
     std::atomic<float>& tilt;
     std::atomic<float>& monoFreq;

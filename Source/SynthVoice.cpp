@@ -99,6 +99,9 @@ void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*
     // Random start phases keep unison voices from starting phase-locked (a flat, phasey attack).
     for (auto& phase : phases)
         phase = random.nextDouble();
+    phases[0] = 0.0; // the centre voice stays in phase with the sub, or a sine
+                     // oscillator and the sub at the same pitch would randomly
+                     // reinforce or cancel (808 level jumping note to note)
     subPhase = 0.0;
     lfoPhase = 0.0f;
     lfoHeld = random.nextFloat() * 2.0f - 1.0f;
@@ -270,10 +273,21 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         if (subPhase >= 1.0)
             subPhase -= 1.0;
 
+        // With a third channel the processor keeps the sub separate (Sub Split);
+        // otherwise it is mixed into both sides as before.
         const auto gain = ampEnv.getNextSample() * level;
-        output.addSample (0, startSample + i, (l + (float) sub) * gain);
-        if (output.getNumChannels() > 1)
-            output.addSample (1, startSample + i, (r + (float) sub) * gain);
+        if (output.getNumChannels() > 2)
+        {
+            output.addSample (0, startSample + i, l * gain);
+            output.addSample (1, startSample + i, r * gain);
+            output.addSample (2, startSample + i, (float) sub * gain);
+        }
+        else
+        {
+            output.addSample (0, startSample + i, (l + (float) sub) * gain);
+            if (output.getNumChannels() > 1)
+                output.addSample (1, startSample + i, (r + (float) sub) * gain);
+        }
     }
 
     if (! ampEnv.isActive())
