@@ -36,7 +36,8 @@ SoundPrint ReferenceMatch::render (const Profile& profile, int note)
 {
     // 1.05 s of the note (a triad for chords and pads), measured like the reference.
     constexpr double rate = 48000.0;
-    constexpr int block = 512, length = 50176;
+    constexpr int block = 512;
+    const auto length = 50176;
     engine.setPlayConfigDetails (0, 2, rate, block);
     engine.prepareToPlay (rate, block);
     engine.resetForRender(); // nothing of the last candidate may ring into this one
@@ -157,6 +158,27 @@ void ReferenceMatch::run()
             progress = 0.4f * (float) ++renders / (float) (WavetableBank::numBanks * 2);
         }
 
+    // 1a. Brightness, coarsely: the filter and tilt together, since either
+    //     alone can stall halfway (a darker filter with a brighter tilt).
+    {
+        const auto base = best;
+        for (const auto cutoff : { 250.0f, 600.0f, 1500.0f, 4000.0f, 20000.0f })
+            for (const auto tilt : { -4.0f, 0.0f, 3.0f })
+            {
+                auto candidate = base;
+                candidate.filterCutoff = cutoff;
+                candidate.filterEnv = juce::jmin (base.filterEnv, 2.0f); // an envelope sweep would hide the cutoff
+                candidate.tilt = tilt;
+                const auto print = render (candidate, note);
+                if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
+                {
+                    best = candidate;
+                    bestDistance = d;
+                    bestPrint = print;
+                }
+            }
+    }
+
     // 1b. A wobble in the reference: a free-running LFO at its rate, on the
     //     filter or the wavetable position.
     if (target.moveRateHz > 0.0f)
@@ -188,7 +210,7 @@ void ReferenceMatch::run()
         { &Profile::ampSustain, 0.0f, 1.0f, 0.2f },          { &Profile::filterCutoff, 60.0f, 20000.0f, 1.0f, true },
         { &Profile::reverbMix, 0.0f, 1.0f, 0.15f },          { &Profile::delayMix, 0.0f, 1.0f, 0.15f },
         { &Profile::lfoRate, 0.1f, 20.0f, 0.5f, true },     { &Profile::lfoToCutoff, 0.0f, 6.0f, 1.0f },
-        { &Profile::lfoToPos, 0.0f, 1.0f, 0.2f },
+        { &Profile::lfoToPos, 0.0f, 1.0f, 0.2f },          { &Profile::filterEnv, -2.0f, 6.0f, 1.0f },
     };
     float steps[std::size (knobs)];
     for (size_t k = 0; k < std::size (knobs); ++k)
@@ -249,6 +271,12 @@ void ReferenceMatch::run()
     result.type = type;
     result.summary = "MATCHED " + file.getFileNameWithoutExtension().toUpperCase()
                    + "  -  " + juce::String (juce::roundToInt (100.0f * std::exp (-bestDistance))) + "% CLOSE";
+    // A reference far outside the type's range was played where the type lives, so
+    // say so: a pluck matched as a Bass comes out as a bass.
+    if (type == 0 && target.pitchHz > 260.0f)
+        result.summary << "  -  HIGH FOR A BASS, TRY LEAD OR PLUCK";
+    else if (type != 0 && target.pitchHz > 0.0f && target.pitchHz < 60.0f)
+        result.summary << "  -  LOW, TRY BASS";
     progress = 1.0f;
     state = State::done;
 }

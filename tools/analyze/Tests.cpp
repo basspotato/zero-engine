@@ -574,11 +574,12 @@ namespace
     // Reference Match: a sound the engine made itself (a profile reshaped by
     // `change`, saved as a WAV) must be matched much closer than the starting
     // sound is, and a wobble in it must come back at the same rate.
-    juce::StringArray checkReferenceMatch (int genre, int type, int note, std::function<void (Profile&)> change)
+    juce::StringArray checkReferenceMatch (int genre, int type, int note, std::function<void (Profile&)> change, bool loop = false)
     {
         juce::StringArray problems;
 
-        auto renderTo = [&] (const Profile& profile)
+        // loop: four notes a quarter second apart (up a minor third, a fifth, a fourth), as a pluck loop.
+        auto renderTo = [&] (const Profile& profile, bool asLoop = false)
         {
             ZeroEngineProcessor engine;
             engine.stopProfileSync();
@@ -593,8 +594,17 @@ namespace
             for (int pos = 0; pos + 512 <= out.getNumSamples(); pos += 512)
             {
                 midi.clear();
-                if (pos == 0)
+                if (pos == 0 && ! asLoop)
                     midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), 0);
+                constexpr int steps[] { 0, 3, 7, 5 };
+                for (int n = 0; asLoop && n < 4; ++n)
+                {
+                    const auto at = n * 12000, off = at + 9600;
+                    if (at >= pos && at < pos + 512)
+                        midi.addEvent (juce::MidiMessage::noteOn (1, note + steps[n], (juce::uint8) 110), at - pos);
+                    if (off >= pos && off < pos + 512)
+                        midi.addEvent (juce::MidiMessage::noteOff (1, note + steps[n]), off - pos);
+                }
                 chunk.clear();
                 engine.processBlock (chunk, midi);
                 for (int ch = 0; ch < 2; ++ch)
@@ -607,7 +617,7 @@ namespace
         auto changed = start;
         change (changed);
 
-        const auto reference = renderTo (changed);
+        const auto reference = renderTo (changed, loop);
         const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_match_test.wav");
         file.deleteFile();
         {
@@ -639,7 +649,9 @@ namespace
             return { "match failed: " + result.summary };
         const auto matched = SoundPrint::of (renderTo (result.profile), 48000.0, false);
         const auto after = SoundPrint::distance (matched, target);
-        if (target.moveRateHz > 0.0f && std::abs (matched.moveRateHz / target.moveRateHz - 1.0f) > 0.2f) // the rate heard, after Motion
+        if (std::abs (std::log2 (matched.centroidHz / juce::jmax (1.0f, target.centroidHz))) > 0.35f)
+            problems.add ("brightness " + juce::String (juce::roundToInt (matched.centroidHz)) + " Hz, the reference " + juce::String (juce::roundToInt (target.centroidHz)) + " Hz");
+        if (target.moveRateHz > 0.0f && target.moveDepthDb > 1.5f && std::abs (matched.moveRateHz / target.moveRateHz - 1.0f) > 0.2f) // the rate heard, after Motion
             problems.add ("wobble at " + juce::String (matched.moveRateHz, 2) + " Hz, the reference at " + juce::String (target.moveRateHz, 2));
         std::printf ("(%s; distance %.2f -> %.2f in %.1f s) ", result.summary.toRawUTF8(), before, after, (juce::Time::getMillisecondCounter() - began) / 1000.0);
         if (after > 0.5f * before)
@@ -918,9 +930,44 @@ int runTests()
             p.lfoRate = 5.0f;
             p.lfoShape = 0.0f;
             p.lfoToCutoff = 3.0f;
+            p.lfoToPitch = 0.0f; // a filter wobble only: the lead's vibrato would bend the pitch at 5 Hz
+            p.modToPitch = 0.0f;
             p.filterCutoff = 600.0f;
             p.ampSustain = 1.0f;
         }); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Reference Match, a dark filtered pad... ");
+    if (const auto problems = checkReferenceMatch (genreNames.indexOf ("Synthwave"), typeNames.indexOf ("Pad"), 57, [] (Profile& p)
+        {
+            p.filterCutoff = 450.0f;
+            p.air = 0.0f;
+            p.tilt = -4.0f;
+        }); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Reference Match, a pluck loop (first note heard)... ");
+    if (const auto problems = checkReferenceMatch (genreNames.indexOf ("Techno"), typeNames.indexOf ("Pluck"), 60, [] (Profile& p)
+        {
+            p.ampDecay = 0.12f;
+            p.ampSustain = 0.0f;
+            p.tilt -= 2.0f;
+            p.waveTable = p.waveTable < 1.0f ? 2.0f : 0.0f;
+        }, true); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

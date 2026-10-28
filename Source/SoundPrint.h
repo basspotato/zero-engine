@@ -13,10 +13,12 @@ struct SoundPrint
 {
     static constexpr int numBands = 10, numEnvelopePoints = 4;
     static constexpr double span = 1.2; // seconds after the onset that are measured
+    static constexpr float unknown = -1000.0f; // an envelope point after the next note in a loop
 
     std::array<float, numBands> bandsDb {};
     std::array<float, numEnvelopePoints> envelopeDb {}; // 100, 250, 500, 900 ms after the onset, dB below the loudest
     float sidePct = 0.0f, crestDb = 0.0f, levelDb = -100.0f, pitchHz = 0.0f, attackMs = 0.0f;
+    float centroidHz = 0.0f; // brightness
     float moveRateHz = 0.0f, moveDepthDb = 0.0f; // a wobble (LFO on level or brightness): rate, 0 if none, and depth
 
     // findPitch is for references; engine renders already know their note.
