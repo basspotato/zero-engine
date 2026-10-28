@@ -571,12 +571,12 @@ namespace
         return problems;
     }
 
-    // Reference Match: a sound the engine made itself (a reshaped Synthwave Lead,
-    // saved as a WAV) must be matched much closer than the starting sound is.
-    juce::StringArray checkReferenceMatch()
+    // Reference Match: a sound the engine made itself (a profile reshaped by
+    // `change`, saved as a WAV) must be matched much closer than the starting
+    // sound is, and a wobble in it must come back at the same rate.
+    juce::StringArray checkReferenceMatch (int genre, int type, int note, std::function<void (Profile&)> change)
     {
         juce::StringArray problems;
-        constexpr int genre = 5, type = 1, note = 64;
 
         auto renderTo = [&] (const Profile& profile)
         {
@@ -605,12 +605,7 @@ namespace
 
         const auto start = makeProfile (genre, type);
         auto changed = start;
-        changed.waveTable = start.waveTable < 1.0f ? 3.0f : 0.0f;
-        changed.tilt = start.tilt - 4.0f;
-        changed.stereoWidth = 0.2f;
-        changed.ottDepth = juce::jmin (1.0f, start.ottDepth + 0.4f);
-        changed.ampDecay = 0.15f; // plucked: short decay, low sustain
-        changed.ampSustain = 0.15f;
+        change (changed);
 
         const auto reference = renderTo (changed);
         const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_match_test.wav");
@@ -624,8 +619,9 @@ namespace
         }
 
         const auto target = SoundPrint::of (reference, 48000.0);
-        if (std::abs (target.pitchHz - 329.6f) > 10.0f)
-            problems.add ("pitch read as " + juce::String (target.pitchHz, 1) + " Hz, wanted 330");
+        const auto wanted = (float) juce::MidiMessage::getMidiNoteInHertz (note);
+        if (std::abs (target.pitchHz / wanted - 1.0f) > 0.03f)
+            problems.add ("pitch read as " + juce::String (target.pitchHz, 1) + " Hz, wanted " + juce::String (wanted, 1));
         const auto before = SoundPrint::distance (SoundPrint::of (renderTo (start), 48000.0, false), target);
 
         ZeroEngineProcessor renderEngine;
@@ -641,7 +637,10 @@ namespace
 
         if (! result.ok)
             return { "match failed: " + result.summary };
-        const auto after = SoundPrint::distance (SoundPrint::of (renderTo (result.profile), 48000.0, false), target);
+        const auto matched = SoundPrint::of (renderTo (result.profile), 48000.0, false);
+        const auto after = SoundPrint::distance (matched, target);
+        if (target.moveRateHz > 0.0f && std::abs (matched.moveRateHz / target.moveRateHz - 1.0f) > 0.2f) // the rate heard, after Motion
+            problems.add ("wobble at " + juce::String (matched.moveRateHz, 2) + " Hz, the reference at " + juce::String (target.moveRateHz, 2));
         std::printf ("(%s; distance %.2f -> %.2f in %.1f s) ", result.summary.toRawUTF8(), before, after, (juce::Time::getMillisecondCounter() - began) / 1000.0);
         if (after > 0.5f * before)
             problems.add ("match only got from " + juce::String (before, 2) + " to " + juce::String (after, 2));
@@ -893,8 +892,35 @@ int runTests()
         ++failures;
     }
 
-    std::printf ("Reference Match (an engine sound found again)... ");
-    if (const auto problems = checkReferenceMatch(); problems.isEmpty())
+    std::printf ("Reference Match, a plucked lead... ");
+    if (const auto problems = checkReferenceMatch (genreNames.indexOf ("Synthwave"), typeNames.indexOf ("Lead"), 64, [] (Profile& p)
+        {
+            p.waveTable = p.waveTable < 1.0f ? 3.0f : 0.0f;
+            p.tilt -= 4.0f;
+            p.stereoWidth = 0.2f;
+            p.ottDepth = juce::jmin (1.0f, p.ottDepth + 0.4f);
+            p.ampDecay = 0.15f; // plucked: short decay, low sustain
+            p.ampSustain = 0.15f;
+        }); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Reference Match, a 5 Hz filter wobble... ");
+    if (const auto problems = checkReferenceMatch (genreNames.indexOf ("Techno"), typeNames.indexOf ("Lead"), 57, [] (Profile& p)
+        {
+            p.lfoSync = 0.0f;
+            p.lfoRate = 5.0f;
+            p.lfoShape = 0.0f;
+            p.lfoToCutoff = 3.0f;
+            p.filterCutoff = 600.0f;
+            p.ampSustain = 1.0f;
+        }); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

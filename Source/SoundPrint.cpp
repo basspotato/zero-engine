@@ -59,6 +59,52 @@ namespace
         const auto shift = std::abs (a - 2.0 * b + c) > 1.0e-12 ? 0.5 * (a - c) / (a - 2.0 * b + c) : 0.0;
         return (float) (sampleRate / (found + juce::jlimit (-0.5, 0.5, shift)));
     }
+
+    // A repeating wobble in a series of 10 ms dB values: the series minus its
+    // straight-line trend (the decay), its depth (RMS, dB) and its rate (Hz) by
+    // autocorrelation over 2 to 12 Hz, or 0 when nothing repeats clearly.
+    struct Wobble { float rateHz = 0.0f, depthDb = 0.0f; };
+    Wobble wobbleOf (std::vector<double> series)
+    {
+        Wobble w;
+        const auto n = (int) series.size();
+        if (n < 40)
+            return w;
+
+        double meanX = 0.5 * (n - 1), meanY = 0.0, sxy = 0.0, sxx = 0.0;
+        for (auto v : series) meanY += v;
+        meanY /= n;
+        for (int i = 0; i < n; ++i)
+        {
+            sxy += (i - meanX) * (series[(size_t) i] - meanY);
+            sxx += (i - meanX) * (i - meanX);
+        }
+        const auto trend = sxy / sxx;
+        double power = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            series[(size_t) i] -= meanY + trend * (i - meanX);
+            power += series[(size_t) i] * series[(size_t) i];
+        }
+        w.depthDb = (float) std::sqrt (power / n);
+        if (power < 1.0e-6)
+            return w;
+
+        std::vector<double> r (51, 0.0);
+        for (int lag = 1; lag <= 50 && lag < n / 2; ++lag)
+        {
+            for (int i = 0; i + lag < n; ++i)
+                r[(size_t) lag] += series[(size_t) i] * series[(size_t) (i + lag)];
+            r[(size_t) lag] /= power * (n - lag) / n;
+        }
+        for (int lag = 8; lag < 50 && lag + 1 < n / 2; ++lag)
+            if (r[(size_t) lag] > 0.3 && r[(size_t) lag] >= r[(size_t) lag - 1] && r[(size_t) lag] >= r[(size_t) lag + 1])
+            {
+                w.rateHz = 100.0f / (float) lag;
+                break;
+            }
+        return w;
+    }
 }
 
 SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleRate, bool findPitch)
@@ -84,12 +130,21 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     // and only the 1.2 s after it are measured.
     const auto block = juce::jmax (1, (int) (0.01 * sampleRate));
     std::vector<double> energy;
+    std::vector<double> slope; // energy of the sample-to-sample change: rises with brightness
     for (int start = 0; start + block <= total; start += block)
     {
-        double e = 0.0;
+        double e = 0.0, s = 0.0;
         for (int i = start; i < start + block; ++i)
+        {
             e += sample (0, i) * sample (0, i) + sample (1, i) * sample (1, i);
+            if (i > 0)
+            {
+                const auto d = sample (0, i) + sample (1, i) - sample (0, i - 1) - sample (1, i - 1);
+                s += d * d;
+            }
+        }
         energy.push_back (e);
+        slope.push_back (s);
     }
     if (energy.empty())
         return print;
@@ -111,9 +166,29 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     for (int p = 0; p < numEnvelopePoints; ++p)
     {
         const auto b = onset + pointBlocks[p];
-        print.envelopeDb[(size_t) p] = b + 1 < last
-            ? (float) (10.0 * std::log10 (0.5 * (energy[(size_t) b] + energy[(size_t) b + 1]) / peakEnergy + 1.0e-9))
-            : -60.0f;
+        double sum = 0.0; // 50 ms around the point, so a wobble doesn't make it jumpy
+        for (int i = b - 2; i <= b + 2; ++i)
+            sum += i < last ? energy[(size_t) i] : 0.0;
+        print.envelopeDb[(size_t) p] = b + 2 < last ? (float) (10.0 * std::log10 (sum / 5.0 / peakEnergy + 1.0e-9)) : -60.0f;
+    }
+
+    // Movement after the attack settles (from 100 ms past the loudest moment,
+    // while within 30 dB of it):
+    // level and brightness wobbles; whichever is deeper speaks for the sound.
+    {
+        std::vector<double> level, bright;
+        for (int b = peakBlock + 10; b < last; ++b)
+        {
+            const auto e = energy[(size_t) b];
+            if (e < peakEnergy * 1.0e-3)
+                break; // a decay into the noise floor is not a wobble
+            level.push_back (10.0 * std::log10 (e));
+            bright.push_back (10.0 * std::log10 (juce::jmax (1.0e-12, slope[(size_t) b]) / e));
+        }
+        const auto a = wobbleOf (level), b = wobbleOf (bright);
+        const auto& w = (b.rateHz > 0.0f && (a.rateHz <= 0.0f || b.depthDb > a.depthDb)) ? b : a;
+        print.moveRateHz = w.rateHz;
+        print.moveDepthDb = juce::jmax (a.depthDb, b.depthDb);
     }
 
     // Spectrum window: from 20 ms after the loudest 10 ms, 0.4 s long (shorter if the sound is).
@@ -199,7 +274,14 @@ float SoundPrint::distance (const SoundPrint& a, const SoundPrint& b)
     envelope /= numEnvelopePoints;
     const auto attack = std::log2 ((a.attackMs + 10.0f) / (b.attackMs + 10.0f));
 
+    // Wobble: its depth (2 dB apart counts like a band), and when both wobble,
+    // its rate (a wobble 40% too fast counts about like a band 6 dB off).
+    const auto depth = (a.moveDepthDb - b.moveDepthDb) / 2.0f;
+    auto movement = 0.5 * depth * depth;
+    if (a.moveRateHz > 0.0f && b.moveRateHz > 0.0f)
+        movement += 4.0f * std::pow (std::log2 (a.moveRateHz / b.moveRateHz), 2.0f);
+
     const auto width = (a.sidePct - b.sidePct) / 15.0f;
     const auto density = (a.crestDb - b.crestDb) / 4.0f;
-    return (float) (shape + 0.5 * envelope + 0.3 * attack * attack + 0.5 * width * width + 0.5 * density * density);
+    return (float) (shape + 0.5 * envelope + 0.3 * attack * attack + movement + 0.5 * width * width + 0.5 * density * density);
 }

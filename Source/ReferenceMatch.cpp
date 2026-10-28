@@ -123,6 +123,23 @@ void ReferenceMatch::run()
         }
     }
 
+    // 0b. The envelope, roughly, so the wavetable stage compares tones on a sound
+    //     that already moves like the reference.
+    for (const auto sustain : { 0.0f, 0.5f, 1.0f })
+        for (const auto decay : { 0.15f, 0.6f, 2.0f })
+        {
+            auto candidate = best;
+            candidate.ampSustain = sustain;
+            candidate.ampDecay = decay;
+            const auto print = render (candidate, note);
+            if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
+            {
+                best = candidate;
+                bestDistance = d;
+                bestPrint = print;
+            }
+        }
+
     // 1. The source: every wavetable at two positions.
     for (int table = 0; table < WavetableBank::numBanks && ! threadShouldExit(); ++table)
         for (const auto position : { 0.3f, 0.7f })
@@ -140,7 +157,26 @@ void ReferenceMatch::run()
             progress = 0.4f * (float) ++renders / (float) (WavetableBank::numBanks * 2);
         }
 
-    // 2. Coordinate search on what shapes tone, width, density and movement.
+    // 1b. A wobble in the reference: a free-running LFO at its rate, on the
+    //     filter or the wavetable position.
+    if (target.moveRateHz > 0.0f)
+        for (const auto [toCutoff, toPos] : { std::pair { 1.5f, 0.0f }, { 3.0f, 0.0f }, { 0.0f, 0.5f } })
+        {
+            auto candidate = best;
+            candidate.lfoSync = 0.0f;
+            candidate.lfoRate = target.moveRateHz;
+            candidate.lfoToCutoff = toCutoff;
+            candidate.lfoToPos = toPos;
+            const auto print = render (candidate, note);
+            if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
+            {
+                best = candidate;
+                bestDistance = d;
+                bestPrint = print;
+            }
+        }
+
+    // 2. Coordinate search on what shapes tone, width, density, envelope and wobble.
     //    Attack and decay move by doublings (a step of 1 = twice as long).
     struct Knob { float Profile::* member; float min, max, step; bool doubling = false; };
     const Knob knobs[] {
@@ -151,6 +187,8 @@ void ReferenceMatch::run()
         { &Profile::ampAttack, 0.001f, 2.0f, 1.0f, true }, { &Profile::ampDecay, 0.02f, 4.0f, 1.0f, true },
         { &Profile::ampSustain, 0.0f, 1.0f, 0.2f },          { &Profile::filterCutoff, 60.0f, 20000.0f, 1.0f, true },
         { &Profile::reverbMix, 0.0f, 1.0f, 0.15f },          { &Profile::delayMix, 0.0f, 1.0f, 0.15f },
+        { &Profile::lfoRate, 0.1f, 20.0f, 0.5f, true },     { &Profile::lfoToCutoff, 0.0f, 6.0f, 1.0f },
+        { &Profile::lfoToPos, 0.0f, 1.0f, 0.2f },
     };
     float steps[std::size (knobs)];
     for (size_t k = 0; k < std::size (knobs); ++k)
@@ -164,6 +202,8 @@ void ReferenceMatch::run()
             for (const auto direction : { 1.0f, -1.0f })
             {
                 auto candidate = best;
+                if (knobs[k].member == &Profile::lfoRate && candidate.lfoSync > 0.5f)
+                    continue; // tempo-synced: the rate knob does nothing
                 auto& value = candidate.*knobs[k].member;
                 const auto moved = juce::jlimit (knobs[k].min, knobs[k].max, knobs[k].doubling
                                                      ? juce::jmax (value, knobs[k].min) * std::exp2 (direction * steps[k])
