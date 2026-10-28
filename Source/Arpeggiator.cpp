@@ -9,7 +9,8 @@ void Arpeggiator::prepare (double newSampleRate, int maxBlockSize)
 
 void Arpeggiator::reset() noexcept
 {
-    numHeld = 0;
+    numHeld = numDown = 0;
+    keyDown.fill (false);
     sequenceLength = 0;
     step = seqStep = -1;
     direction = 1;
@@ -103,6 +104,14 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
     const auto length = juce::jlimit (1, maxSteps, s.length);
     const auto isSequence = s.mode == sequence;
 
+    // Latch switched off: drop the notes whose keys are no longer held.
+    if (wasLatched && ! s.latch)
+        for (int note = 0; note < 128; ++note)
+            if (! keyDown[(size_t) note])
+                keyOff (note);
+    const auto latchReleased = wasLatched && ! s.latch;
+    wasLatched = s.latch;
+
     auto rebuild = [&]
     {
         // Sorted (or as played) notes, repeated up the octaves.
@@ -136,14 +145,25 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
     auto events = midi.begin();
     for (int pos = 0; pos <= numSamples; ++pos)
     {
-        bool changed = false;
+        bool changed = pos == 0 && latchReleased; // rebuild the pattern without the dropped notes
         while (events != midi.end() && (*events).samplePosition <= pos)
         {
             const auto message = (*events).getMessage();
             if (message.isNoteOn())
             {
+                const auto note = message.getNoteNumber();
+
+                // Latched: the first key of a fresh chord (all keys were up) replaces the old one.
+                if (s.latch && numDown == 0)
+                    numHeld = 0;
+
                 const auto wasEmpty = numHeld == 0;
-                keyOn (message.getNoteNumber(), message.getVelocity());
+                keyOn (note, message.getVelocity());
+                if (! keyDown[(size_t) note])
+                {
+                    keyDown[(size_t) note] = true;
+                    ++numDown;
+                }
                 changed = true;
                 if (wasEmpty)
                 {
@@ -153,8 +173,17 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
             }
             else if (message.isNoteOff())
             {
-                keyOff (message.getNoteNumber());
-                changed = true;
+                const auto note = message.getNoteNumber();
+                if (keyDown[(size_t) note])
+                {
+                    keyDown[(size_t) note] = false;
+                    --numDown;
+                }
+                if (! s.latch) // latched notes stay in the pattern after the key lifts
+                {
+                    keyOff (note);
+                    changed = true;
+                }
             }
             else
                 out.addEvent (message, juce::jmin (pos, numSamples - 1)); // bend, CCs, pedal

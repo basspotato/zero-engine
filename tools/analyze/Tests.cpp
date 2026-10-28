@@ -308,6 +308,50 @@ namespace
         return problems;
     }
 
+    // Latch: the pattern keeps playing after the keys lift; a fresh key replaces it.
+    juce::StringArray checkLatch()
+    {
+        Arpeggiator arp;
+        arp.prepare (48000.0, 512);
+        Arpeggiator::Settings s;
+        s.on = true;
+        s.latch = true;
+        s.beatsPerStep = 0.25;
+        s.bpm = 120.0;
+
+        std::vector<std::pair<int, int>> ons;
+        juce::MidiBuffer keys;
+        for (int block = 0; block < 48000 * 2 / 512; ++block) // 2 s
+        {
+            const auto start = block * 512;
+            keys.clear();
+            if (block == 0)
+                for (auto note : { 60, 64, 67 })
+                    keys.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+            if (start <= 24000 && 24000 < start + 512) // let go at 0.5 s
+                for (auto note : { 60, 64, 67 })
+                    keys.addEvent (juce::MidiMessage::noteOff (1, note), 24000 - start);
+            if (start <= 60000 && 60000 < start + 512) // a fresh key at 1.25 s
+                keys.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100), 60000 - start);
+            for (const auto m : arp.process (keys, 512, s))
+                if (m.getMessage().isNoteOn())
+                    ons.push_back ({ start + m.samplePosition, m.getMessage().getNoteNumber() });
+        }
+
+        juce::StringArray problems;
+        bool afterRelease = false, chordAfterNewKey = false, newKeyPlays = false;
+        for (const auto& [at, note] : ons)
+        {
+            afterRelease |= at > 30000 && at < 60000;
+            chordAfterNewKey |= at > 60000 && note != 62;
+            newKeyPlays |= at >= 60000 && note == 62;
+        }
+        if (! afterRelease)       problems.add ("latched pattern stopped when the keys lifted");
+        if (! newKeyPlays)        problems.add ("the fresh key didn't play");
+        if (chordAfterNewKey)     problems.add ("the old chord kept playing after a fresh key");
+        return problems;
+    }
+
     // Sequence mode: steps on/off, pitch offsets, accents, length, and chords.
     juce::StringArray checkSequencer()
     {
@@ -405,6 +449,55 @@ namespace
         if (const auto chord = run ({ 60, 64 }); chord.size() != 12)
             problems.add ("chord: " + juce::String ((int) chord.size()) + " notes, expected 12");
 
+        return problems;
+    }
+
+    // Sweeping a knob while a note holds must not click: the sharpest sample-to-
+    // sample jump (second difference) stays close to the still render's.
+    juce::StringArray checkKnobSweeps()
+    {
+        auto sharpest = [] (const char* id, bool sweep)
+        {
+            ZeroEngineProcessor engine;
+            loadProfile (engine, genreNames.indexOf ("EDM"), typeNames.indexOf ("Pad"));
+            engine.setPlayConfigDetails (0, 2, 48000.0, 256);
+            engine.prepareToPlay (48000.0, 256);
+            auto* param = engine.state.getParameter (id);
+
+            juce::AudioBuffer<float> block (2, 256);
+            juce::MidiBuffer midi;
+            float worst = 0.0f, prev1 = 0.0f, prev2 = 0.0f;
+            const auto blocks = 48000 * 2 / 256;
+            for (int b = 0; b < blocks; ++b)
+            {
+                midi.clear();
+                if (b == 0)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+                if (sweep && b > blocks / 4) // up and down twice, jumping each block like a fast hand
+                    param->setValueNotifyingHost (0.5f + 0.5f * std::sin ((float) b * 0.08f));
+                engine.processBlock (block, midi);
+                if (b < blocks / 4)
+                    continue; // skip the attack
+                for (int i = 0; i < 256; ++i)
+                {
+                    const auto x = block.getSample (0, i);
+                    worst = juce::jmax (worst, std::abs (x - 2.0f * prev1 + prev2));
+                    prev2 = prev1;
+                    prev1 = x;
+                }
+            }
+            return worst;
+        };
+
+        juce::StringArray problems;
+        // Not Grit: its drive already glides per sample, and more drive makes the
+        // waveform itself sharper, which this measure can't tell from a click.
+        for (const auto* id : { ParamIDs::air, ParamIDs::weight, ParamIDs::ottDepth, ParamIDs::punch, ParamIDs::width, ParamIDs::motion, ParamIDs::spectral })
+        {
+            const auto still = sharpest (id, false), swept = sharpest (id, true);
+            if (swept > still * 2.0f + 1.0e-3f)
+                problems.add (juce::String (id) + " sweep clicks: sharpest jump " + juce::String (swept, 4) + " vs " + juce::String (still, 4) + " still");
+        }
         return problems;
     }
 
@@ -672,8 +765,30 @@ int runTests()
         ++failures;
     }
 
+    std::printf ("Arp latch... ");
+    if (const auto problems = checkLatch(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
     std::printf ("Step sequencer (steps, pitch, accent, chords)... ");
     if (const auto problems = checkSequencer(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Knob sweeps don't click (macros, OTT, Spectral)... ");
+    if (const auto problems = checkKnobSweeps(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

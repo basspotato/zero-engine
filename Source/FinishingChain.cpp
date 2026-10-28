@@ -81,6 +81,8 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
 
     drive.reset (fs * 2.0, 0.02);
     ottDepth.reset (fs, 0.03);
+    tiltSmooth.reset (fs, 0.03);
+    airSmooth.reset (fs, 0.03);
     bias.reset (fs * 2.0, 0.02);
     sideGain.reset (fs, 0.02);
     outputGain.reset (fs, 0.02);
@@ -448,26 +450,37 @@ void FinishingChain::compress (juce::AudioBuffer<float>& buffer, int numSamples,
 
 void FinishingChain::equalise (juce::AudioBuffer<float>& buffer, int numSamples, const FinishingSettings& s)
 {
-    if (s.tiltDb != lastTiltDb)
-    {
-        // Shelf of twice the tilt, with the opposite half applied as broadband gain, pivots at 1 kHz.
-        tilt.set (sampleRate, 1000.0, 0.5, s.tiltDb * 2.0f);
-        lastTiltDb = s.tiltDb;
-    }
+    // Tilt and Air glide (Weight and Air move them): the shelves are updated every
+    // 16 samples from smoothed values, so turning a knob doesn't step or crackle.
+    tiltSmooth.setTargetValue (s.tiltDb);
+    airSmooth.setTargetValue (s.air * 9.0f);
+    constexpr int sub = 16;
 
-    if (s.air != lastAir)
+    for (int start = 0; start < numSamples; start += sub)
     {
-        airShelf.set (sampleRate, 8000.0, 0.7, s.air * 9.0f);
-        lastAir = s.air;
-    }
+        const auto n = juce::jmin (sub, numSamples - start);
+        const auto tiltDb = tiltSmooth.skip (n);
+        const auto airDb = airSmooth.skip (n);
 
-    const auto pivotGain = juce::Decibels::decibelsToGain (-s.tiltDb);
+        if (std::abs (tiltDb - lastTiltDb) > 0.005f)
+        {
+            // Shelf of twice the tilt, with the opposite half applied as broadband gain, pivots at 1 kHz.
+            tilt.set (sampleRate, 1000.0, 0.5, tiltDb * 2.0f);
+            lastTiltDb = tiltDb;
+        }
+        if (std::abs (airDb - lastAir) > 0.005f)
+        {
+            airShelf.set (sampleRate, 8000.0, 0.7, airDb);
+            lastAir = airDb;
+        }
 
-    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-    {
-        auto* data = buffer.getWritePointer (ch);
-        for (int i = 0; i < numSamples; ++i)
-            data[i] = airShelf.process (ch, tilt.process (ch, data[i] * pivotGain));
+        const auto pivotGain = juce::Decibels::decibelsToGain (-lastTiltDb);
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        {
+            auto* data = buffer.getWritePointer (ch, start);
+            for (int i = 0; i < n; ++i)
+                data[i] = airShelf.process (ch, tilt.process (ch, data[i] * pivotGain));
+        }
     }
 }
 

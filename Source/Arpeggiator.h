@@ -22,6 +22,7 @@ public:
     struct Settings
     {
         bool on = false;
+        bool latch = false;         // keep playing after the keys lift; a fresh chord replaces it
         int mode = up;
         double beatsPerStep = 0.25; // 1/16
         int octaves = 1;
@@ -56,6 +57,9 @@ private:
     std::array<int, maxHeld> played {};        // in the order pressed
     std::array<juce::uint8, maxHeld> velocities {};
     int numHeld = 0;
+    std::array<bool, 128> keyDown {};          // keys physically held (latch keeps others in the pattern)
+    int numDown = 0;
+    bool wasLatched = false;
 
     std::array<int, maxHeld * 4> pattern {}; // the arp pattern, octaves included
     int sequenceLength = 0, step = -1, direction = 1, seqStep = -1;

@@ -1026,7 +1026,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
                         { "PLAY",         { playMode, glide, bendRange, velSens } } },
                       { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
                         { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
-        { "ARP",    { { { "ARPEGGIATOR",  { arpOn, arpMode, arpRate, arpOctaves, arpGate, seqLength } } },
+        { "ARP",    { { { "ARPEGGIATOR",  { arpOn, arpLatch, arpMode, arpRate, arpOctaves, arpGate, seqLength } } },
                       { { "STEP SEQUENCER  (rests, pitch and accents for every arp mode)", {} } } } },
     };
 

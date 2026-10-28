@@ -74,6 +74,7 @@ namespace ParamIDs
     inline constexpr auto ottDepth    = "ottDepth";
     inline constexpr auto spectral    = "spectral";    // many-band compression before the clipper
     inline constexpr auto arpOn       = "arpOn";       // arpeggiator: a playing setting, not part of a profile
+    inline constexpr auto arpLatch    = "arpLatch";
     inline constexpr auto arpMode     = "arpMode";
     inline constexpr auto arpRate     = "arpRate";
     inline constexpr auto arpOctaves  = "arpOctaves";
@@ -212,6 +213,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     unit (ParamIDs::spectral, "Spectral", 0.0f);
 
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::arpOn, 1 }, "Arp", false));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::arpLatch, 1 }, "Arp Latch", false));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::arpMode, 1 }, "Arp Mode", arpModeNames, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::arpRate, 1 }, "Arp Rate", arpRateNames, 3));
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::arpOctaves, 1 }, "Arp Octaves", 1, 4, 1));

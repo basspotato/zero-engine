@@ -44,6 +44,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     for (auto [slot, id] : { std::pair { 0, ParamIDs::arpOn }, { 1, ParamIDs::arpMode }, { 2, ParamIDs::arpRate }, { 3, ParamIDs::arpOctaves }, { 4, ParamIDs::arpGate } })
         arpParams[slot] = state.getRawParameterValue (id);
     seqLengthParam = state.getRawParameterValue (ParamIDs::seqLength);
+    arpLatchParam = state.getRawParameterValue (ParamIDs::arpLatch);
     for (auto [m, id] : { std::pair { 0, ParamIDs::weight }, { 1, ParamIDs::grit }, { 2, ParamIDs::punch }, { 3, ParamIDs::width }, { 4, ParamIDs::motion }, { 5, ParamIDs::air } })
         macroParams[m] = state.getParameter (id);
     for (int step = 0; step < Arpeggiator::maxSteps; ++step)
@@ -304,6 +305,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     // Arpeggiator: the keys in, the pattern out (the input itself when it's off).
     Arpeggiator::Settings arpSettings;
     arpSettings.on = arpParams[0]->load() > 0.5f;
+    arpSettings.latch = arpLatchParam->load() > 0.5f;
     arpSettings.mode = (int) arpParams[1]->load();
     arpSettings.beatsPerStep = arpRateBeats[juce::jlimit (0, (int) std::size (arpRateBeats) - 1, (int) arpParams[2]->load())];
     arpSettings.octaves = (int) arpParams[3]->load();

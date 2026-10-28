@@ -131,6 +131,7 @@ private:
     Arpeggiator arp;
     std::atomic<float>* arpParams[5] {}; // on, mode, rate, octaves, gate
     std::atomic<float>* seqLengthParam = nullptr;
+    std::atomic<float>* arpLatchParam = nullptr;
     std::array<std::atomic<int>, 6> macroCC { -1, -1, -1, -1, -1, -1 }; // learned CC per macro, -1 none
     std::atomic<int> learningMacro { -1 };
     juce::RangedAudioParameter* macroParams[6] {};
