@@ -572,8 +572,9 @@ namespace
     }
 
     // Reference Match: a sound the engine made itself (a profile reshaped by
-    // `change`, saved as a WAV) must be matched much closer than the starting
-    // sound is, and a wobble in it must come back at the same rate.
+    // `change`, saved as a WAV) must be matched at least halfway closer than its
+    // designed preset, or about as close as the true settings themselves score,
+    // scored exactly as a match scores.
     juce::StringArray checkReferenceMatch (int genre, int type, int note, std::function<void (Profile&)> change, bool loop = false)
     {
         juce::StringArray problems;
@@ -960,7 +961,7 @@ int runTests()
         ++failures;
     }
 
-    std::printf ("Reference Match, a pluck loop (first note heard)... ");
+    std::printf ("Reference Match, a pluck loop... ");
     if (const auto problems = checkReferenceMatch (genreNames.indexOf ("Techno"), typeNames.indexOf ("Pluck"), 60, [] (Profile& p)
         {
             p.ampDecay = 0.12f;

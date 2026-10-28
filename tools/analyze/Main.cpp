@@ -361,14 +361,14 @@ int main (int argc, char* argv[])
                 variant ("+ grit off", [] (Profile& q) { q.ottDepth = 0.0f; q.reverbMix = 0.0f; q.delayMix = 0.0f; q.spectral = 0.0f; q.grit = 0.0f; });
             }
             if (verbose && result.ok)
-                for (const auto* s : { &result.target, &result.matched })
-                {
-                    std::printf ("    %s pitch %4.0f att %4.0f env", s == &result.target ? "ref" : "got", s->pitchHz, s->attackMs);
-                    for (auto e : s->envelopeDb) std::printf (" %5.1f", e);
-                    std::printf ("  bands");
-                    for (auto b : s->bandsDb) std::printf (" %3.0f", b);
-                    std::printf ("  side %4.1f crest %4.1f\n", s->sidePct, s->crestDb);
-                }
+            {
+                const auto& t = result.target;
+                std::printf ("    reference: pitch %.0f Hz, %d notes over %.2f s%s, side %.1f %%, wobble %.2f Hz (%.1f dB)\n", t.pitchHz,
+                             (int) t.notes.size(), t.noteSeconds, t.cut ? " (goes on)" : "", t.sidePct, t.moveRateHz, t.moveDepthDb);
+                juce::String terms;
+                SoundPrint::distance (result.matched, t, &terms);
+                std::printf ("    match: distance %.2f = %s\n", result.distance, terms.toRawUTF8());
+            }
         }
         return 0;
     }

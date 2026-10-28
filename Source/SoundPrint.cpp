@@ -277,8 +277,7 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     }
     auto sample = [&] (int ch, int i) { ch = juce::jmin (ch, channels - 1); return audio.getSample (ch, i) - dc[ch]; };
 
-    // Energy per 10 ms; the onset is the first block within 30 dB of the loudest,
-    // and only the 1.2 s after it are measured.
+    // Energy per 10 ms; the onset is the first block within 30 dB of the loudest.
     const auto block = juce::jmax (1, (int) (0.01 * sampleRate));
     std::vector<double> energy;
     std::vector<double> slope; // energy of the sample-to-sample change: rises with brightness
@@ -318,7 +317,7 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     };
 
     auto last = juce::jmin ((int) energy.size(), onset + (int) (span * 100.0));
-    bool cut = false; // the first note ended by the next: what comes after is unknown, not silence
+    bool cut = false; // the first note ended by the next (local: bounds the wobble measurement)
     float notePitch = 0.0f;
     if (findPitch)
     {
@@ -508,13 +507,6 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     const auto peakBlock = (int) (std::max_element (energy.begin() + onset, energy.begin() + last) - energy.begin());
     const auto peakEnergy = juce::jmax (1.0e-12, energy[(size_t) peakBlock]);
 
-    // Attack: until the first block within 3 dB of the loudest (a sound that
-    // swells slowly after a quick start still counts as quick).
-    auto reached = onset;
-    while (reached < peakBlock && energy[(size_t) reached] < 0.5 * peakEnergy)
-        ++reached;
-    print.attackMs = 10.0f * (float) (reached - onset);
-
     // The sound over time: every note of a phrase and the release after, from
     // the onset to where it dies away (up to 2 s; a longer sound is cut there).
     // Candidates play the same notes, so the whole of it is compared.
@@ -534,20 +526,9 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
         print.melAttack = melFrames (note, sampleRate, 9, 128);
     }
 
-    constexpr int pointBlocks[] { 10, 25, 50, 90 };
-    for (int p = 0; p < numEnvelopePoints; ++p)
-    {
-        const auto b = onset + pointBlocks[p];
-        double sum = 0.0; // 50 ms around the point, so a wobble doesn't make it jumpy
-        for (int i = b - 2; i <= b + 2; ++i)
-            sum += i < last ? energy[(size_t) i] : 0.0;
-        print.envelopeDb[(size_t) p] = b + 2 < last ? (float) (10.0 * std::log10 (sum / 5.0 / peakEnergy + 1.0e-9))
-                                     : cut ? unknown : -60.0f;
-    }
-
-    // Movement after the attack settles (from 100 ms past the loudest moment,
-    // while within 30 dB of it):
-    // level and brightness wobbles; whichever is deeper speaks for the sound.
+    // Movement after the attack settles, over the first note (from 100 ms past
+    // its loudest moment, while within 30 dB of it): level and brightness
+    // wobbles; whichever is deeper speaks for the sound.
     {
         std::vector<double> level, bright;
         for (int b = peakBlock + 10; b < last; ++b)
@@ -577,29 +558,26 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     if (length < 1024)
         return print;
 
-    // Width, density and level.
+    // Width and level.
     std::vector<float> mono ((size_t) length);
     double mid2 = 0.0, side2 = 0.0;
-    float peak = 0.0f;
     for (int i = 0; i < length; ++i)
     {
         const auto l = sample (0, from + i), r = sample (1, from + i);
         mono[(size_t) i] = 0.5f * (l + r);
         mid2 += 0.25 * (l + r) * (l + r);
         side2 += 0.25 * (l - r) * (l - r);
-        peak = juce::jmax (peak, std::abs (l), std::abs (r));
     }
     const auto rms = std::sqrt ((mid2 + side2) / length);
     print.levelDb = (float) juce::Decibels::gainToDecibels (rms, -100.0);
     print.sidePct = (float) (100.0 * side2 / juce::jmax (1.0e-12, mid2 + side2));
-    print.crestDb = (float) juce::Decibels::gainToDecibels (peak / juce::jmax (1.0e-9, rms), 0.0);
     print.pitchHz = findPitch ? (notePitch > 0.0f ? notePitch : pitchOf (mono, sampleRate)) : 0.0f;
 
-    // Spectral shape: Hann-windowed frames, half overlapping, summed into octave bands.
+    // Octave bands (for checking the pitch against the spectrum): Hann-windowed
+    // frames, half overlapping.
     juce::dsp::FFT fft (fftOrder);
     std::vector<float> frame ((size_t) fftSize * 2);
     std::array<double, numBands> bandPower {};
-    double weightedHz = 0.0, centroidPower = 0.0;
     for (int start = 0; start + fftSize <= length || start == 0; start += fftSize / 2)
     {
         std::fill (frame.begin(), frame.end(), 0.0f);
@@ -611,14 +589,8 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
         {
             const auto hz = bin * sampleRate / fftSize;
             const auto band = (int) std::floor (std::log2 (hz / 31.25) + 0.5);
-            const auto power = (double) frame[(size_t) bin] * frame[(size_t) bin];
             if (band >= 0 && band < numBands)
-                bandPower[(size_t) band] += power;
-            if (hz >= 20.0 && hz <= 20000.0)
-            {
-                weightedHz += hz * power;
-                centroidPower += power;
-            }
+                bandPower[(size_t) band] += (double) frame[(size_t) bin] * frame[(size_t) bin];
         }
         if (start + fftSize >= length)
             break;
@@ -629,7 +601,6 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
         sum += p;
     for (int b = 0; b < numBands; ++b)
         print.bandsDb[(size_t) b] = sum > 0.0 ? (float) (10.0 * std::log10 (bandPower[(size_t) b] / sum + 1.0e-9)) : -90.0f;
-    print.centroidHz = centroidPower > 0.0 ? (float) (weightedHz / centroidPower) : 0.0f;
 
     // The pitch against the spectrum: a period shared by several partials (a
     // chord, a layered patch) can read far under the note you hear. When the
@@ -654,79 +625,26 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
 
 float SoundPrint::distance (const SoundPrint& a, const SoundPrint& b, juce::String* explain)
 {
-    // How the two evolve: the mean dB difference of their spectrograms over the
-    // first note, tone and attack resolution alike (4 dB off counts as 1), plus
-    // stereo width, which the mono spectrograms can't see.
     // Spectrograms are normalised to their own loudest cell, so a near-silent
     // sound (a high-pass at 20 kHz, say) would show its noise floor as a full
-    // spectrum: one 40 dB quieter than the other is simply not a match.
-    if (std::abs (a.levelDb - b.levelDb) > 40.0f)
+    // spectrum: one 40 dB quieter than the other is simply not a match. Nor is
+    // a sound too short or quiet to have been measured at all.
+    if (std::abs (a.levelDb - b.levelDb) > 40.0f || a.melTone.empty() || b.melTone.empty())
         return 100.0f;
 
-    if (! a.melTone.empty() && ! b.melTone.empty())
-    {
-        const auto overLonger = ! a.cut && ! b.cut; // whole sounds: a tail one has and the other lacks counts
-        const auto mel = 0.5f * (melDistance (overLonger, a.melTone, b.melTone) + melDistance (overLonger, a.melAttack, b.melAttack)) / 4.0f;
-        // Composite (the research's advice): timbre as MFCCs, brightness over
-        // time, and the loudness envelope, each scaled so about one unit means
-        // "clearly different".
-        const auto c = compositeDistance (overLonger, a.melTone, b.melTone);
-        const auto width = (a.sidePct - b.sidePct) / 15.0f;
-        if (explain != nullptr)
-            *explain = juce::String::formatted ("mel %.2f mfcc %.2f centroid %.2f loudness %.2f width %.2f", mel, c.mfcc / 4.0f, c.centroid / 2.0f,
-                                                c.loudness / 3.0f, 0.5f * width * width);
-        return weights.mel * mel + weights.mfcc * c.mfcc / 4.0f + weights.centroid * c.centroid / 2.0f
-             + weights.loudness * c.loudness / 3.0f + 0.5f * width * width;
-    }
-
-    // Without spectrograms (too short to measure): the single-window prints.
-    // Spectral shape matters most. Quiet top bands are where "air" lives, so
-    // from 2 kHz up they count down to -60 dB of the total; lower bands under
-    // -40 dB are rumble and count as -40. Below the floor in both: ignored.
-    double shape = 0.0;
-    int counted = 0;
-    for (int band = 0; band < numBands; ++band)
-    {
-        const auto x = a.bandsDb[(size_t) band], y = b.bandsDb[(size_t) band];
-        const auto floor = band >= 6 ? -60.0f : -40.0f; // 2 kHz and up: quiet is air; below, rumble
-        if (x < floor && y < floor)
-            continue;
-        const auto d = (juce::jmax (x, floor) - juce::jmax (y, floor)) / 6.0f;
-        shape += d * d;
-        ++counted;
-    }
-    shape = counted > 0 ? shape / counted : 0.0;
-
-    // Brightness: the spectral centroid (half an octave apart counts like two
-    // bands 6 dB off).
-    double brightness = 0.0;
-    if (a.centroidHz > 0.0f && b.centroidHz > 0.0f)
-        brightness = std::pow (std::log2 (a.centroidHz / b.centroidHz) / 0.5, 2.0);
-
-    // Movement: the level after the peak (6 dB apart counts like a band), and
-    // the attack on a log scale (twice as slow counts about as much). Points a
-    // loop's next note hid are skipped.
-    double envelope = 0.0;
-    int points = 0;
-    for (int p = 0; p < numEnvelopePoints; ++p)
-    {
-        if (a.envelopeDb[(size_t) p] <= unknown || b.envelopeDb[(size_t) p] <= unknown)
-            continue;
-        const auto d = (juce::jmax (a.envelopeDb[(size_t) p], -40.0f) - juce::jmax (b.envelopeDb[(size_t) p], -40.0f)) / 6.0f;
-        envelope += d * d;
-        ++points;
-    }
-    envelope = points > 0 ? envelope / points : 0.0;
-    const auto attack = std::log2 ((a.attackMs + 10.0f) / (b.attackMs + 10.0f));
-
-    // Wobble: its depth (2 dB apart counts like a band), and when both wobble,
-    // its rate (a wobble 40% too fast counts about like a band 6 dB off).
-    const auto depth = (a.moveDepthDb - b.moveDepthDb) / 2.0f;
-    auto movement = 0.5 * depth * depth;
-    if (a.moveRateHz > 0.0f && b.moveRateHz > 0.0f)
-        movement += 4.0f * std::pow (std::log2 (a.moveRateHz / b.moveRateHz), 2.0f);
-
+    // How the two evolve over the whole phrase: the mean dB difference of their
+    // spectrograms, tone and attack resolution alike (4 dB off counts as 1);
+    // then, as the composite loss research recommends, timbre (MFCCs),
+    // brightness over time and the loudness envelope, each scaled so about one
+    // unit means "clearly different"; and stereo width, which the mono
+    // spectrograms can't see.
+    const auto overLonger = ! a.cut && ! b.cut; // whole sounds: a tail one has and the other lacks counts
+    const auto mel = 0.5f * (melDistance (overLonger, a.melTone, b.melTone) + melDistance (overLonger, a.melAttack, b.melAttack)) / 4.0f;
+    const auto c = compositeDistance (overLonger, a.melTone, b.melTone);
     const auto width = (a.sidePct - b.sidePct) / 15.0f;
-    const auto density = (a.crestDb - b.crestDb) / 4.0f;
-    return (float) (shape + brightness + 0.5 * envelope + 0.3 * attack * attack + movement + 0.5 * width * width + 0.5 * density * density);
+    if (explain != nullptr)
+        *explain = juce::String::formatted ("mel %.2f mfcc %.2f centroid %.2f loudness %.2f width %.2f", mel, c.mfcc / 4.0f, c.centroid / 2.0f,
+                                            c.loudness / 3.0f, 0.5f * width * width);
+    return weights.mel * mel + weights.mfcc * c.mfcc / 4.0f + weights.centroid * c.centroid / 2.0f
+         + weights.loudness * c.loudness / 3.0f + 0.5f * width * width;
 }

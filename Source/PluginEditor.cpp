@@ -1349,7 +1349,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     startTimerHz (8);
 
     matchButton.setTooltip ("Reference Match: pick (or drop) a sound and Zero Engine finds its closest version of it, across every genre and type. "
-                            "A single held note matches best; a loop is matched on its first note.");
+                            "Single notes and one-instrument loops both work: a loop's notes are played back and compared whole. Takes about 20 seconds.");
     matchButton.onClick = [this]
     {
         matchChooser = std::make_unique<juce::FileChooser> ("Match a sound", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");

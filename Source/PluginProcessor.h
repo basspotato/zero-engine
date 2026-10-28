@@ -100,8 +100,9 @@ public:
     bool canUndo() const noexcept { return ! undoStack.empty(); }
     bool canRedo() const noexcept { return ! redoStack.empty(); }
 
-    // Reference Match (message thread): match the current genre/type's sound to a
-    // dropped audio file, in the background; the result loads as one undo step.
+    // Reference Match (message thread): find the engine's closest version of a
+    // dropped audio file, across every genre/type, in the background; the result
+    // loads (genre and type included) as one undo step.
     void startMatch (const juce::File& reference);
     bool isMatching() const noexcept { return matcher != nullptr && matcher->getState() == ReferenceMatch::State::running; }
     juce::String getMatchStatus() const; // for the display; empty when there is nothing to say

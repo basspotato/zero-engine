@@ -6,13 +6,16 @@
 
 class ZeroEngineProcessor;
 
-// Reference Match: on a background thread, fingerprints a dropped sound (its
-// first note's spectrogram over time), then finds the engine settings whose
-// render is closest. Every genre/type preset is tried at the reference's pitch;
-// the closest few are refined in parallel, one per render engine, each by a
-// wavetable pass and a pattern search over tone, filter, envelopes, space and
-// LFO. The best wins, genre and type included. Renders through its own engines,
-// so the plugin keeps playing. No machine learning.
+// Reference Match: on a background thread, fingerprints a dropped sound (how it
+// evolves over its whole phrase; a loop is transcribed into notes), then finds
+// the engine settings whose render of the same notes is closest. Every preset
+// is tried at the reference's pitch (FX only for sounds without a clear pitch);
+// the closest six are refined in parallel, one per render engine (octave,
+// wavetable, delay time, sub layer, wobble seed, then a pattern search over tone,
+// filter, envelopes, space, LFO and the note hold), and the two best get a second
+// round. Search renders are light; the finalists are re-scored at full quality.
+// The best wins, genre and type included. Renders through its own engines on
+// low-priority threads, so the plugin keeps playing. No machine learning.
 class ReferenceMatch : private juce::Thread
 {
 public:
@@ -21,7 +24,8 @@ public:
     ~ReferenceMatch() override;
 
     // Message thread. Cancels any match already running. genre/type: where the
-    // plugin is now, kept when nothing elsewhere is clearly closer.
+    // plugin is now; that preset is tried as startFrom (the sound as it is now)
+    // instead of its designed default, like any other start.
     void start (const juce::File& reference, int genre, int type, const Profile& startFrom);
 
     enum class State { idle, running, done, failed };
