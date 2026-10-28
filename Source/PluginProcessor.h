@@ -144,6 +144,7 @@ private:
     std::atomic<int> scopeWrite { 0 };
     ZeroSynth synth;
     Arpeggiator arp;
+    std::array<std::atomic<juce::uint32>, 4> soundingNotes {}; // one bit per MIDI note
     std::atomic<float>* arpParams[5] {}; // on, mode, rate, octaves, gate
     std::atomic<float>* seqLengthParam = nullptr;
     std::atomic<float>* arpLatchParam = nullptr;
@@ -154,6 +155,9 @@ private:
 
 public:
     int getSequenceStep() const noexcept { return arp.getCurrentStep(); } // for the step grid
+    // Notes the synth is being played (after the arp, so DAW MIDI and the
+    // sequencer alike), for lighting the on-screen keys. Any thread.
+    bool isNoteSounding (int note) const noexcept { return note >= 0 && note < 128 && (soundingNotes[(size_t) note >> 5].load (std::memory_order_relaxed) >> (note & 31) & 1u) != 0; }
 
 private:
     std::atomic<int> appliedGenre { -1 }, appliedType { -1 };

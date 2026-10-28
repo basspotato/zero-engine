@@ -533,6 +533,44 @@ namespace
         return problems;
     }
 
+    // Keyboard lights: holding C4 with the arp on (Up, 2 octaves) lights the arp's
+    // other notes too, and everything goes dark once the key is let go.
+    juce::StringArray checkKeyLights()
+    {
+        juce::StringArray problems;
+        ZeroEngineProcessor engine;
+        loadProfile (engine, genreNames.indexOf ("Trance"), typeNames.indexOf ("Lead"));
+        engine.state.getParameter (ParamIDs::arpOn)->setValueNotifyingHost (1.0f);
+        auto* octaves = engine.state.getParameter (ParamIDs::arpOctaves);
+        octaves->setValueNotifyingHost (octaves->convertTo0to1 (2.0f));
+        engine.setPlayConfigDetails (0, 2, 48000.0, 512);
+        engine.prepareToPlay (48000.0, 512);
+
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer midi;
+        bool heldLit = false, otherLit = false;
+        for (int i = 0; i < 400; ++i) // about 4.3 s: held for 2 s, then released
+        {
+            midi.clear();
+            if (i == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+            if (i == 188)
+                midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+            engine.processBlock (block, midi);
+            for (int note = 0; note < 128 && i < 188; ++note)
+                if (engine.isNoteSounding (note))
+                    (note == 60 ? heldLit : otherLit) = true;
+        }
+        if (! heldLit)
+            problems.add ("the held key never lit");
+        if (! otherLit)
+            problems.add ("no arp note besides the held key lit");
+        for (int note = 0; note < 128; ++note)
+            if (engine.isNoteSounding (note))
+                problems.add ("note " + juce::String (note) + " still lit after release");
+        return problems;
+    }
+
     // Reference Match: a sound the engine made itself (a reshaped Synthwave Lead,
     // saved as a WAV) must be matched much closer than the starting sound is.
     juce::StringArray checkReferenceMatch()
@@ -829,6 +867,17 @@ int runTests()
 
     std::printf ("Arpeggiator (order, timing, stop)... ");
     if (const auto problems = checkArpeggiator(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Keyboard lights follow the arp... ");
+    if (const auto problems = checkKeyLights(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

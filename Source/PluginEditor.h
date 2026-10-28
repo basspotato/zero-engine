@@ -86,6 +86,26 @@ private:
 // The 16-step sequencer: per step a lit on/off pad, a pitch you drag up or down
 // (double-click for 0) and an accent dot; steps past Seq Length are dimmed and
 // the playing step is lit.
+// The on-screen keyboard, lit by what the synth is actually playing: keys held
+// (mouse, computer keys, DAW MIDI) in orange, notes the arp or sequencer adds in
+// light blue.
+class PlayingKeyboard : public juce::MidiKeyboardComponent
+{
+public:
+    explicit PlayingKeyboard (ZeroEngineProcessor&);
+
+private:
+    void refreshLights();
+    void drawWhiteNote (int note, juce::Graphics&, juce::Rectangle<float> area, bool isDown, bool isOver,
+                        juce::Colour lineColour, juce::Colour textColour) override;
+    void drawBlackNote (int note, juce::Graphics&, juce::Rectangle<float> area, bool isDown, bool isOver,
+                        juce::Colour noteFillColour) override;
+
+    ZeroEngineProcessor& processor;
+    std::array<juce::uint32, 4> shown {}; // the sounding notes last painted
+    juce::TimedCallback lights { [this] { refreshLights(); } }; // the base class has its own Timer
+};
+
 class SequencerGrid : public juce::Component,
                       private juce::Timer
 {
@@ -249,7 +269,7 @@ private:
     juce::TextButton matchButton { "MATCH" };
     std::unique_ptr<juce::FileChooser> matchChooser;
     void showAdvanced (bool show);
-    juce::MidiKeyboardComponent keyboard;
+    PlayingKeyboard keyboard;
 
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);
     void refreshFavourites();

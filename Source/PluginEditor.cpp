@@ -868,6 +868,48 @@ void ScopeView::drawWavetable (juce::Graphics& g, juce::Rectangle<float> area)
 }
 
 //==============================================================================
+PlayingKeyboard::PlayingKeyboard (ZeroEngineProcessor& p)
+    : juce::MidiKeyboardComponent (p.keyboardState, horizontalKeyboard), processor (p)
+{
+    lights.startTimerHz (30);
+}
+
+void PlayingKeyboard::refreshLights()
+{
+    std::array<juce::uint32, 4> now {};
+    for (int note = 0; note < 128; ++note)
+        if (processor.isNoteSounding (note))
+            now[(size_t) note >> 5] |= 1u << (note & 31);
+    if (now != shown)
+    {
+        shown = now;
+        repaint();
+    }
+}
+
+void PlayingKeyboard::drawWhiteNote (int note, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver,
+                                     juce::Colour lineColour, juce::Colour textColour)
+{
+    juce::MidiKeyboardComponent::drawWhiteNote (note, g, area, isDown, isOver, lineColour, textColour);
+    if (! isDown && processor.isNoteSounding (note))
+    {
+        g.setColour (Palette::accent.withAlpha (0.85f));
+        g.fillRect (area.reduced (1.0f, 0.0f));
+    }
+}
+
+void PlayingKeyboard::drawBlackNote (int note, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver,
+                                     juce::Colour noteFillColour)
+{
+    juce::MidiKeyboardComponent::drawBlackNote (note, g, area, isDown, isOver, noteFillColour);
+    if (! isDown && processor.isNoteSounding (note))
+    {
+        g.setColour (Palette::accent.withAlpha (0.85f));
+        g.fillRect (area.reduced (area.getWidth() * 0.125f, 0.0f).withTrimmedBottom (area.getHeight() * 0.1f));
+    }
+}
+
+//==============================================================================
 SequencerGrid::SequencerGrid (juce::AudioProcessorValueTreeState& state, std::function<int()> step)
     : playingStep (std::move (step))
 {
@@ -1292,7 +1334,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
       display (p),
       levelMeter (p.getMeters()),
       advancedPanel (p.state, [&p] { return p.getSequenceStep(); }),
-      keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
+      keyboard (p)
 {
     setLookAndFeel (&lookAndFeel);
     const std::array<std::pair<const char*, const char*>, 6> macroParams { {

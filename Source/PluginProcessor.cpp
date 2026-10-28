@@ -266,6 +266,8 @@ void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     arp.prepare (sampleRate, samplesPerBlock);
     setLatencySamples (finishing.getLatencySamples());
     keyboardState.reset();
+    for (auto& word : soundingNotes)
+        word.store (0, std::memory_order_relaxed);
 }
 
 bool ZeroEngineProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -330,6 +332,19 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         arpSettings.stepAccent[(size_t) step] = seqParams[2][step]->load() > 0.5f;
     }
     const auto& notes = arp.process (midi, numSamples, arpSettings);
+    for (const auto metadata : notes)
+    {
+        const auto message = metadata.getMessage();
+        const auto bit = 1u << (message.getNoteNumber() & 31);
+        auto& word = soundingNotes[(size_t) (message.getNoteNumber() >> 5) & 3];
+        if (message.isNoteOn())
+            word.fetch_or (bit, std::memory_order_relaxed);
+        else if (message.isNoteOff())
+            word.fetch_and (~bit, std::memory_order_relaxed);
+        else if (message.isAllNotesOff() || message.isAllSoundOff())
+            for (auto& w : soundingNotes)
+                w.store (0, std::memory_order_relaxed);
+    }
 
     // Sub Split: voices write their sub to a third channel that skips the
     // chain. A block bigger than prepared falls back to the mixed path rather
