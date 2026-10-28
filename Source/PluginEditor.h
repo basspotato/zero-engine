@@ -104,6 +104,9 @@ private:
 
     std::function<int()> playingStep;
     std::unique_ptr<juce::ParameterAttachment> onAttachments[steps], pitchAttachments[steps], accentAttachments[steps], lengthAttachment;
+    std::unique_ptr<juce::ParameterAttachment> modeAttachment; // editing a step switches the arp to Sequence
+    int arpMode = 0;
+    void useSequenceMode();
     bool on[steps] {}, accent[steps] {};
     int pitch[steps] {}, length = steps, lit = -1;
     int dragStep = -1, dragStartPitch = 0;

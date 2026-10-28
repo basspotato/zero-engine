@@ -456,6 +456,33 @@ int main (int argc, char* argv[])
         // "size=WxH" resizes the window first (e.g. size=1350x900).
         for (int a = 2; a < args.size(); ++a)
         {
+            if (args[a].startsWith ("clickstep=")) // press a step pad, as a mouse would
+            {
+                std::function<SequencerGrid* (juce::Component&)> findGrid = [&] (juce::Component& c) -> SequencerGrid*
+                {
+                    if (auto* g = dynamic_cast<SequencerGrid*> (&c))
+                        return g;
+                    for (auto* child : c.getChildren())
+                        if (auto* found = findGrid (*child))
+                            return found;
+                    return nullptr;
+                };
+                if (auto* grid = findGrid (*editor))
+                {
+                    const auto step = args[a].fromFirstOccurrenceOf ("=", false, false).getIntValue();
+                    const juce::Point<float> at ((float) grid->getWidth() * ((float) step + 0.5f) / 16.0f, 12.0f);
+                    const auto now = juce::Time::getCurrentTime();
+                    const juce::MouseEvent e (juce::Desktop::getInstance().getMainMouseSource(), at, {}, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                              grid, grid, now, at, now, 1, false);
+                    grid->mouseDown (e);
+                    grid->mouseUp (e);
+                    juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+                    std::printf ("Step %d on: %.0f, arp mode: %s\n", step + 1,
+                                 engine.state.getRawParameterValue (SeqIDs::on (step))->load(),
+                                 arpModeNames[(int) engine.state.getRawParameterValue (ParamIDs::arpMode)->load()].toRawUTF8());
+                }
+                continue;
+            }
             if (args[a] == "dialog") // the rename dialog, written next to the snapshot
             {
                 juce::AlertWindow dialog ("Rename favourite", {}, juce::MessageBoxIconType::NoIcon, editor.get());

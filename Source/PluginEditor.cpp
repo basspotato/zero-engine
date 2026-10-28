@@ -862,6 +862,7 @@ SequencerGrid::SequencerGrid (juce::AudioProcessorValueTreeState& state, std::fu
         accentAttachments[s] = attach (SeqIDs::accent (s), [this, s] (float v) { accent[s] = v > 0.5f; repaint(); });
     }
     lengthAttachment = attach (ParamIDs::seqLength, [this] (float v) { length = juce::roundToInt (v); repaint(); });
+    modeAttachment = attach (ParamIDs::arpMode, [this] (float v) { arpMode = juce::roundToInt (v); });
 
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     startTimerHz (30);
@@ -956,12 +957,21 @@ void SequencerGrid::paint (juce::Graphics& g)
     g.drawText ("PAD: ON / OFF    PITCH: DRAG, DOUBLE-CLICK = 0    DOT: ACCENT", legend, juce::Justification::centredLeft);
 }
 
+void SequencerGrid::useSequenceMode()
+{
+    // The steps only play in Sequence mode; editing one means you want to hear it.
+    if (arpMode != Arpeggiator::sequence)
+        modeAttachment->setValueAsCompleteGesture ((float) Arpeggiator::sequence);
+}
+
 void SequencerGrid::mouseDown (const juce::MouseEvent& e)
 {
     const auto [s, row] = hit (e.position);
     dragStep = -1;
     if (s < 0)
         return;
+
+    useSequenceMode();
 
     if (row == padRow)
         onAttachments[s]->setValueAsCompleteGesture (on[s] ? 0.0f : 1.0f);
@@ -993,7 +1003,10 @@ void SequencerGrid::mouseUp (const juce::MouseEvent&)
 void SequencerGrid::mouseDoubleClick (const juce::MouseEvent& e)
 {
     if (const auto [s, row] = hit (e.position); s >= 0 && row == pitchRow)
+    {
+        useSequenceMode();
         pitchAttachments[s]->setValueAsCompleteGesture (0.0f);
+    }
 }
 
 //==============================================================================
@@ -1042,9 +1055,9 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
             control->menuAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, id, *control->menu);
         }
         else if (auto* steps = dynamic_cast<juce::AudioParameterInt*> (param);
-                 steps != nullptr && steps->getRange().getLength() <= 3)
+                 steps != nullptr && (steps->getRange().getLength() <= 3 || juce::String (id) == ParamIDs::seqLength))
         {
-            // A setting with up to four positions reads better as a menu than a knob.
+            // A setting with up to four positions (and the sequence length) reads better as a menu.
             const auto lowest = steps->getRange().getStart();
             auto stepName = [id] (int v)
             {
