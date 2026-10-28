@@ -61,6 +61,7 @@ public:
     explicit ScopeView (ZeroEngineProcessor&);
     void paint (juce::Graphics& g) override;
     void setMode (int newMode) { mode = newMode; repaint(); }
+    void setDropHint (bool show) { dropHint = show; repaint(); } // a file is being dragged over
 
 private:
     void timerCallback() override;
@@ -72,6 +73,8 @@ private:
     int mode = wavetable;
     float shownPosition = -1.0f; // eased toward the live position
     float level = 0.0f;          // eased output level, for the trace glow
+    bool dropHint = false;
+    void drawMatchOverlay (juce::Graphics&, juce::Rectangle<float>);
 
     static constexpr int fftOrder = 12, fftSize = 1 << fftOrder;
     juce::dsp::FFT fft { fftOrder };
@@ -192,6 +195,7 @@ private:
 };
 
 class ZeroEngineEditor : public juce::AudioProcessorEditor,
+                         public juce::FileDragAndDropTarget,
                          private juce::Timer
 {
 public:
@@ -236,6 +240,14 @@ private:
     juce::TextButton mainButton { "MAIN" }, advancedButton { "ADVANCED" }; // lit = the view showing
     juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
     bool keyPressed (const juce::KeyPress&) override; // Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z
+
+    // Reference Match: drop an audio file anywhere, or MATCH in the display header.
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void fileDragEnter (const juce::StringArray&, int, int) override;
+    void fileDragExit (const juce::StringArray&) override;
+    void filesDropped (const juce::StringArray& files, int, int) override;
+    juce::TextButton matchButton { "MATCH" };
+    std::unique_ptr<juce::FileChooser> matchChooser;
     void showAdvanced (bool show);
     juce::MidiKeyboardComponent keyboard;
 

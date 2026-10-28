@@ -533,6 +533,77 @@ namespace
         return problems;
     }
 
+    // Reference Match: a sound the engine made itself (a reshaped Synthwave Lead,
+    // saved as a WAV) must be matched much closer than the starting sound is.
+    juce::StringArray checkReferenceMatch()
+    {
+        juce::StringArray problems;
+        constexpr int genre = 5, type = 1, note = 64;
+
+        auto renderTo = [&] (const Profile& profile)
+        {
+            ZeroEngineProcessor engine;
+            engine.stopProfileSync();
+            engine.setPlayConfigDetails (0, 2, 48000.0, 512);
+            engine.prepareToPlay (48000.0, 512);
+            engine.loadProfile (genre, type, profile);
+            juce::AudioBuffer<float> out (2, 48000), chunk (2, 512);
+            juce::MidiBuffer midi;
+            for (int pos = 0; pos + 512 <= out.getNumSamples(); pos += 512)
+            {
+                midi.clear();
+                if (pos == 0)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), 0);
+                chunk.clear();
+                engine.processBlock (chunk, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    out.copyFrom (ch, pos, chunk, ch, 0, 512);
+            }
+            return out;
+        };
+
+        const auto start = makeProfile (genre, type);
+        auto changed = start;
+        changed.waveTable = start.waveTable < 1.0f ? 3.0f : 0.0f;
+        changed.tilt = start.tilt - 4.0f;
+        changed.stereoWidth = 0.2f;
+        changed.ottDepth = juce::jmin (1.0f, start.ottDepth + 0.4f);
+
+        const auto reference = renderTo (changed);
+        const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_match_test.wav");
+        file.deleteFile();
+        {
+            juce::WavAudioFormat wav;
+            std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (new juce::FileOutputStream (file), 48000.0, 2, 24, {}, 0));
+            if (writer == nullptr)
+                return { "could not write the test WAV" };
+            writer->writeFromAudioSampleBuffer (reference, 0, reference.getNumSamples());
+        }
+
+        const auto target = SoundPrint::of (reference, 48000.0);
+        if (std::abs (target.pitchHz - 329.6f) > 10.0f)
+            problems.add ("pitch read as " + juce::String (target.pitchHz, 1) + " Hz, wanted 330");
+        const auto before = SoundPrint::distance (SoundPrint::of (renderTo (start), 48000.0, false), target);
+
+        ZeroEngineProcessor renderEngine;
+        renderEngine.stopProfileSync();
+        ReferenceMatch match (renderEngine);
+        match.start (file, genre, type, start);
+        const auto timeout = juce::Time::getMillisecondCounter() + 60000;
+        while (match.getState() == ReferenceMatch::State::running && juce::Time::getMillisecondCounter() < timeout)
+            juce::Thread::sleep (20);
+        const auto result = match.take();
+        file.deleteFile();
+
+        if (! result.ok)
+            return { "match failed: " + result.summary };
+        const auto after = SoundPrint::distance (SoundPrint::of (renderTo (result.profile), 48000.0, false), target);
+        std::printf ("(%s; distance %.2f -> %.2f) ", result.summary.toRawUTF8(), before, after);
+        if (after > 0.5f * before)
+            problems.add ("match only got from " + juce::String (before, 2) + " to " + juce::String (after, 2));
+        return problems;
+    }
+
     // Undo / redo: a knob change, and a Genre change whose new sound comes back as
     // it was (not reloaded from the designed profile).
     juce::StringArray checkUndo()
@@ -758,6 +829,17 @@ int runTests()
 
     std::printf ("Arpeggiator (order, timing, stop)... ");
     if (const auto problems = checkArpeggiator(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Reference Match (an engine sound found again)... ");
+    if (const auto problems = checkReferenceMatch(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

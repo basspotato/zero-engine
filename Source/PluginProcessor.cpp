@@ -61,6 +61,17 @@ ZeroEngineProcessor::ZeroEngineProcessor()
 void ZeroEngineProcessor::timerCallback()
 {
     syncProfile();
+
+    // A finished Reference Match loads here, on the message thread.
+    if (matcher != nullptr && (matcher->getState() == ReferenceMatch::State::done || matcher->getState() == ReferenceMatch::State::failed))
+    {
+        const auto result = matcher->take();
+        if (result.ok)
+            loadProfile (result.genre, result.type, result.profile);
+        matchSummary = result.summary;
+        matchSummaryUntil = juce::Time::getMillisecondCounterHiRes() + 6000.0;
+    }
+
     if (! juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
         checkpoint(); // after syncProfile, so a Genre/Type change and its new sound are one step
 }
@@ -450,6 +461,29 @@ void ZeroEngineProcessor::generatePattern (juce::Random& random)
         set (SeqIDs::pitch (step), (float) pitches[random.nextInt ((int) std::size (pitches))]);
         set (SeqIDs::accent (step), random.nextFloat() < (onBeat ? 0.6f : 0.15f) ? 1.0f : 0.0f);
     }
+}
+
+void ZeroEngineProcessor::startMatch (const juce::File& reference)
+{
+    if (matcher == nullptr)
+    {
+        matchEngine = std::make_unique<ZeroEngineProcessor>();
+        matchEngine->stopProfileSync();
+        matcher = std::make_unique<ReferenceMatch> (*matchEngine);
+    }
+
+    // Starts from the current genre/type's designed sound and searches from there.
+    syncProfile();
+    const int genre = appliedGenre, type = appliedType;
+    matchSummary.clear();
+    matcher->start (reference, genre, type, makeProfile (genre, type));
+}
+
+juce::String ZeroEngineProcessor::getMatchStatus() const
+{
+    if (isMatching())
+        return "MATCHING  " + juce::String (juce::roundToInt (100.0f * matcher->getProgress())) + "%";
+    return juce::Time::getMillisecondCounterHiRes() < matchSummaryUntil ? matchSummary : juce::String();
 }
 
 void ZeroEngineProcessor::checkpoint()

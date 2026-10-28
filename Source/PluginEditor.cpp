@@ -714,6 +714,29 @@ void ScopeView::paint (juce::Graphics& g)
         case wavetable: drawWavetable (g, area); break;
         default:        drawWaveform (g, area); break;
     }
+
+    drawMatchOverlay (g, getLocalBounds().toFloat());
+}
+
+void ScopeView::drawMatchOverlay (juce::Graphics& g, juce::Rectangle<float> bounds)
+{
+    // A file held over the plugin, or a match running / just finished: one line
+    // along the bottom of the display.
+    const auto status = dropHint ? juce::String ("DROP TO MATCH THIS SOUND") : processor.getMatchStatus();
+    if (status.isEmpty())
+        return;
+
+    if (dropHint)
+    {
+        g.setColour (Palette::accent.withAlpha (0.8f));
+        g.drawRoundedRectangle (bounds.reduced (3.0f), 4.0f, 1.5f);
+    }
+    auto strip = bounds.removeFromBottom (22.0f).reduced (6.0f, 3.0f);
+    g.setColour (Palette::panel.withAlpha (0.85f));
+    g.fillRoundedRectangle (strip, 3.0f);
+    g.setColour (status.startsWith ("MATCHED") || dropHint ? Palette::accent : Palette::yellow);
+    g.setFont (Fonts::ui (10.0f));
+    g.drawText (status, strip, juce::Justification::centred);
 }
 
 void ScopeView::drawWaveform (juce::Graphics& g, juce::Rectangle<float> area)
@@ -1283,6 +1306,19 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     addMouseListener (this, true);
     startTimerHz (8);
 
+    matchButton.setTooltip ("Reference Match: pick (or drop) a sound and this genre/type is tuned to resemble it");
+    matchButton.onClick = [this]
+    {
+        matchChooser = std::make_unique<juce::FileChooser> ("Match a sound", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+        matchChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                   [this] (const juce::FileChooser& chooser)
+                                   {
+                                       if (const auto file = chooser.getResult(); file.existsAsFile())
+                                           processor.startMatch (file);
+                                   });
+    };
+    addAndMakeVisible (matchButton);
+
     undoButton.onClick = [this] { processor.undo(); };
     redoButton.onClick = [this] { processor.redo(); };
     addAndMakeVisible (undoButton);
@@ -1434,6 +1470,20 @@ void ZeroEngineEditor::mouseDown (const juce::MouseEvent& e)
                                 });
             return;
         }
+}
+
+bool ZeroEngineEditor::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    return files.size() == 1 && juce::File (files[0]).hasFileExtension ("wav;aif;aiff;flac;mp3;ogg");
+}
+
+void ZeroEngineEditor::fileDragEnter (const juce::StringArray&, int, int) { display.setDropHint (true); }
+void ZeroEngineEditor::fileDragExit (const juce::StringArray&) { display.setDropHint (false); }
+
+void ZeroEngineEditor::filesDropped (const juce::StringArray& files, int, int)
+{
+    display.setDropHint (false);
+    processor.startMatch (juce::File (files[0]));
 }
 
 bool ZeroEngineEditor::keyPressed (const juce::KeyPress& key)
@@ -1646,6 +1696,7 @@ void ZeroEngineEditor::resized()
     display.setBounds (content (displaySection));
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
+    matchButton.setBounds (displayMode.getX() - 56, displaySection.getY() + 3, 52, 16);
     advancedPanel.setBounds (displaySection.getUnion (macroSection).getUnion (generateSection));
 
     // Scale every child with the window: layout is done at the 900 x 600 design size.

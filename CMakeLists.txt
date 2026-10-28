@@ -32,6 +32,8 @@ target_sources(ZeroEngine
         Source/FinishingChain.cpp
         Source/SpectralCompressor.cpp
         Source/Arpeggiator.cpp
+        Source/SoundPrint.cpp
+        Source/ReferenceMatch.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
@@ -77,6 +79,8 @@ target_sources(ZeroAnalyze
         Source/FinishingChain.cpp
         Source/SpectralCompressor.cpp
         Source/Arpeggiator.cpp
+        Source/SoundPrint.cpp
+        Source/ReferenceMatch.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
