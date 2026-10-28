@@ -408,6 +408,36 @@ namespace
         return problems;
     }
 
+    // Generate writes a new step pattern only when the arp is on, and the same
+    // seed gives the same pattern.
+    juce::StringArray checkGeneratePattern()
+    {
+        auto pattern = [] (bool arpOn, juce::int64 seed)
+        {
+            ZeroEngineProcessor engine;
+            loadProfile (engine, genreNames.indexOf ("Techno"), typeNames.indexOf ("Pluck"));
+            engine.state.getParameter (ParamIDs::arpOn)->setValueNotifyingHost (arpOn ? 1.0f : 0.0f);
+            engine.generate (seed);
+            juce::String steps;
+            for (int s = 0; s < Arpeggiator::maxSteps; ++s)
+                steps << (engine.state.getRawParameterValue (SeqIDs::on (s))->load() > 0.5f ? "x" : ".")
+                      << (int) engine.state.getRawParameterValue (SeqIDs::pitch (s))->load() << " ";
+            return steps;
+        };
+
+        juce::StringArray problems;
+        juce::String defaults;
+        for (int s = 0; s < Arpeggiator::maxSteps; ++s)
+            defaults << "x0 ";
+        if (pattern (false, 11) != defaults)
+            problems.add ("Generate changed the pattern with the arp off");
+        if (pattern (true, 11) == defaults)
+            problems.add ("Generate left the pattern alone with the arp on");
+        if (pattern (true, 11) != pattern (true, 11))
+            problems.add ("same seed, different pattern");
+        return problems;
+    }
+
     // Undo / redo: a knob change, and a Genre change whose new sound comes back as
     // it was (not reloaded from the designed profile).
     juce::StringArray checkUndo()
@@ -644,6 +674,17 @@ int runTests()
 
     std::printf ("Step sequencer (steps, pitch, accent, chords)... ");
     if (const auto problems = checkSequencer(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Generate writes a pattern with the arp on... ");
+    if (const auto problems = checkGeneratePattern(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

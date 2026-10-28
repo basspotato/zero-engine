@@ -103,6 +103,7 @@ private:
     bool restoreState (const juce::XmlElement&);
     void adoptCurrentGenreAndType();
     void checkpoint(); // record an undo step if the sound changed since the last one
+    void generatePattern (juce::Random&);
     std::vector<juce::ValueTree> undoStack, redoStack;
     juce::ValueTree lastKnown;
     void restoreTree (const juce::ValueTree&);

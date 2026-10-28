@@ -719,6 +719,7 @@ Profile generateProfile (int genre, int type, juce::Random& random)
     nudge (p.delayMix, 0.1f, 0.0f, 0.5f);
     nudge (p.reverbMix, 0.1f, 0.0f, type == fx ? p.reverbMix : 0.6f);
     nudge (p.tilt, 1.0f, -6.0f, 6.0f);
+    nudge (p.spectral, 0.15f, 0.0f, 0.6f);
 
     if (type == bass)
         p.delayMix = p.reverbMix = 0.0f; // basses stay dry

@@ -105,6 +105,10 @@ void ZeroEngineProcessor::generate (juce::int64 seed)
 
     loadProfile (genre, type, pickGeneratedProfile (genre, type, random));
 
+    // With the arp on, Generate also writes a new step pattern: an instant groove.
+    if (arpParams[0]->load() > 0.5f)
+        generatePattern (random);
+
     history.push_back (state.copyState());
     constexpr size_t maxHistory = 50;
     if (history.size() > maxHistory)
@@ -422,6 +426,27 @@ void ZeroEngineProcessor::setStateInformation (const void* data, int sizeInBytes
         const auto ccs = juce::StringArray::fromTokens (xml->getStringAttribute ("macroCCs"), ",", {});
         for (size_t m = 0; m < macroCC.size(); ++m)
             macroCC[m] = m < (size_t) ccs.size() ? ccs[(int) m].getIntValue() : -1;
+    }
+}
+
+void ZeroEngineProcessor::generatePattern (juce::Random& random)
+{
+    // Musical, not noise: the downbeat always plays, about three in four steps
+    // play, pitches stay mostly on the root with octaves, fifths and fourths for
+    // movement, and accents lean towards the beats.
+    constexpr int pitches[] { 0, 0, 0, 0, 0, 12, -12, 7, 5, 12 };
+    auto set = [this] (const juce::String& id, float value)
+    {
+        auto* param = state.getParameter (id);
+        param->setValueNotifyingHost (param->convertTo0to1 (value));
+    };
+
+    for (int step = 0; step < Arpeggiator::maxSteps; ++step)
+    {
+        const auto onBeat = step % 4 == 0;
+        set (SeqIDs::on (step), step == 0 || random.nextFloat() < (onBeat ? 0.9f : 0.7f) ? 1.0f : 0.0f);
+        set (SeqIDs::pitch (step), (float) pitches[random.nextInt ((int) std::size (pitches))]);
+        set (SeqIDs::accent (step), random.nextFloat() < (onBeat ? 0.6f : 0.15f) ? 1.0f : 0.0f);
     }
 }
 
