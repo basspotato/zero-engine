@@ -44,9 +44,11 @@ public:
     // Tuning, for tooling: search renders light (FinishingChain::setLight), the
     // renders each worker's search gets, and CMA-ES instead of the pattern search.
     static inline bool lightSearch = true;
-    static inline int searchBudget = 160;
+    static inline int searchBudget = 80;  // the first round, per worker
+    static inline int secondBudget = 60;  // the second round (from the two best), per worker
     static inline bool useCmaes = false;
-    static inline float closeBelow = 1.0f; // a distance under this reads VERY CLOSE (x2 CLOSE, x3.5 ROUGH)
+    static inline float closeBelow = 2.0f; // a distance under this reads VERY CLOSE (x1.75 CLOSE, x2.5 ROUGH): on matchbench,
+                                           // matches within about 4 dB of their target scored 2.8 to 3.3
     static inline bool debugPrint = false;  // tooling: print the preset ranking and finalists
 
     // How far one candidate is from a reference, rendered and compared exactly as

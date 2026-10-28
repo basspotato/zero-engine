@@ -63,7 +63,7 @@ namespace
 
 
     // The reference's notes as candidates play them (one note, when no pitch
-    // can be followed), recorded half a second past its end so a tail that
+    // can be followed), recorded 0.3 s past its end so a tail that
     // rings on counts (or exactly as far as measured, when it goes on past that).
     Playing playingFor (const SoundPrint& target)
     {
@@ -92,7 +92,7 @@ namespace
                                                                     : lastSpan (n.start);
             playing.events.push_back ({ seconds (n.start), span, previous });
         }
-        playing.lengthSamples = juce::jmax (4 * block, seconds (target.cut ? target.noteSeconds : target.noteSeconds + 0.5));
+        playing.lengthSamples = juce::jmax (4 * block, seconds (target.cut ? target.noteSeconds : target.noteSeconds + 0.3));
         return playing;
     }
     // The settings the search moves, each mapped from 0..1 (log for times and frequency).
@@ -108,7 +108,7 @@ namespace
         { &Profile::filterEnv, -2.0f, 6.0f, false },     { &Profile::modDecay, 0.01f, 2.0f, true },
         { &Profile::reverbMix, 0.0f, 1.0f, false },      { &Profile::delayMix, 0.0f, 1.0f, false },
         { &Profile::lfoRate, 0.1f, 20.0f, true },        { &Profile::lfoToCutoff, 0.0f, 6.0f, false },
-        { &Profile::lfoToPos, 0.0f, 1.0f, false },
+        { &Profile::lfoToPos, 0.0f, 1.0f, false },       { &Profile::delayFeedback, 0.0f, 0.9f, false },
     };
 
     double toUnit (const Dimension& d, float value)
@@ -195,7 +195,7 @@ void ReferenceMatch::run()
     }
     const auto searchRenders = searchBudget; // per worker
     const auto numPresets = genreNames.size() * typeNames.size();
-    const auto expected = (float) (numPresets + workers * (WavetableBank::numBanks + 2 * searchRenders));
+    const auto expected = (float) (numPresets + workers * (WavetableBank::numBanks + searchRenders + secondBudget));
     std::atomic<int> renders { 0 };
     auto counted = [&] { progress = juce::jmin (0.99f, (float) ++renders / expected); };
 
@@ -213,6 +213,8 @@ void ReferenceMatch::run()
     };
 
     // 1. Every preset at the reference's pitch.
+    const auto fxType = typeNames.indexOf ("FX");
+    const auto pitched = ! target.notes.empty() && target.notes.front().pitchHz > 0.0f;
     std::vector<Candidate> presets ((size_t) numPresets);
     std::atomic<int> next { 0 };
     inParallel ([&] (int w)
@@ -223,6 +225,11 @@ void ReferenceMatch::run()
             c.genre = i / typeNames.size();
             c.type = i % typeNames.size();
             c.profile = c.genre == genre && c.type == type ? from : makeProfile (c.genre, c.type);
+            if (c.type == fxType && pitched) // FX patches (risers, impacts) only for sounds without a clear pitch:
+            {                                  // they otherwise pass for close-ish to anything
+                counted();
+                continue;
+            }
             c.print = render (*engines[(size_t) w], c.genre, c.type, c.profile, playing);
             c.distance = SoundPrint::distance (c.print, target);
             if (target.moveRateHz > 0.0f) // a wobbling reference: each preset with the wobble too
@@ -323,6 +330,29 @@ void ReferenceMatch::run()
                 consider (p);
             }
 
+            // The delay time, a note division the search cannot slide.
+            for (int division = 0; division < delayTimeNames.size(); ++division)
+            {
+                auto p = best.profile;
+                if ((int) p.delayTime == division || p.delayMix <= 0.0f)
+                    continue;
+                p.delayTime = (float) division;
+                if (! threadShouldExit())
+                    consider (p);
+            }
+
+            // The sub layer, which the preset decides: off, or on an octave down or at the note.
+            for (const auto [on, octave] : { std::pair { 0.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 0.0f } })
+            {
+                auto p = best.profile;
+                if (p.subOn == on && (on < 0.5f || p.subOctave == octave))
+                    continue;
+                p.subOn = on;
+                p.subOctave = octave;
+                if (! threadShouldExit())
+                    consider (p);
+            }
+
             // A wobble in the reference: a free-running LFO at its rate, on the
             // filter or the wavetable position, tried before the search refines it.
             if (target.moveRateHz > 0.0f)
@@ -349,6 +379,7 @@ void ReferenceMatch::run()
             units.push_back (toUnit (d, base.*d.member));
         units.push_back ((double) (best.playing.gate - 0.05f) / 0.95); // and how long each note is held
 
+        const auto budget = firstRound ? searchRenders : secondBudget;
         auto stepSize = 0.15;
         if (! firstRound)
         {
@@ -364,12 +395,12 @@ void ReferenceMatch::run()
             // CMA-ES with restarts: when a run stops gaining for five
             // generations, start again around the best with twice the population.
             auto lambda = 0;
-            for (int done = 0; done < searchRenders && ! threadShouldExit();)
+            for (int done = 0; done < budget && ! threadShouldExit();)
             {
                 Cmaes cmaes (units, stepSize, seed + (unsigned) done, lambda);
                 lambda = cmaes.populationSize() * 2;
                 auto stale = 0;
-                for (auto before = best.distance; done + cmaes.populationSize() <= searchRenders && stale < 5 && ! threadShouldExit();)
+                for (auto before = best.distance; done + cmaes.populationSize() <= budget && stale < 5 && ! threadShouldExit();)
                 {
                     const auto population = cmaes.ask();
                     std::vector<double> costs;
@@ -380,7 +411,7 @@ void ReferenceMatch::run()
                     stale = best.distance < before - 1.0e-4f ? 0 : stale + 1;
                     before = juce::jmin (before, best.distance);
                 }
-                if (done + cmaes.populationSize() > searchRenders)
+                if (done + cmaes.populationSize() > budget)
                     break;
             }
         }
@@ -390,10 +421,10 @@ void ReferenceMatch::run()
             // when a full pass gains nothing, the steps halve.
             auto cost = firstRound ? (double) best.distance : consider (withUnits (base, units), units.back());
             std::vector<double> steps (units.size(), stepSize);
-            for (int done = 0; done < searchRenders && ! threadShouldExit();)
+            for (int done = 0; done < budget && ! threadShouldExit();)
             {
                 bool improved = false;
-                for (size_t k = 0; k < units.size() && done < searchRenders && ! threadShouldExit(); ++k)
+                for (size_t k = 0; k < units.size() && done < budget && ! threadShouldExit(); ++k)
                     for (const auto direction : { 1.0, -1.0 })
                     {
                         auto candidate = units;
@@ -468,6 +499,21 @@ void ReferenceMatch::run()
         {
             c.print = render (*engines[(size_t) w], c.genre, c.type, c.profile, c.playing);
             c.distance = SoundPrint::distance (c.print, target);
+
+            // The spectral stage was off while searching, so its amount was never
+            // judged: try the finalist without it too, and keep whichever is closer.
+            if (c.profile.spectral > 0.0f)
+            {
+                auto dry = c.profile;
+                dry.spectral = 0.0f;
+                auto print = render (*engines[(size_t) w], c.genre, c.type, dry, c.playing);
+                if (const auto d = SoundPrint::distance (print, target); d < c.distance)
+                {
+                    c.profile = dry;
+                    c.print = std::move (print);
+                    c.distance = d;
+                }
+            }
         }
     });
     if (debugPrint) // tooling: the finalists at full quality, term by term
@@ -494,8 +540,8 @@ void ReferenceMatch::run()
     result.distance = winner.distance;
     // How close, in words: a percentage of a loss means little to a listener.
     // Calibrated on matchbench (distance against the judge's dB).
-    const auto closeness = winner.distance < closeBelow ? "VERY CLOSE" : winner.distance < closeBelow * 2.0f ? "CLOSE"
-                         : winner.distance < closeBelow * 3.5f ? "ROUGH" : "LOOSE";
+    const auto closeness = winner.distance < closeBelow ? "VERY CLOSE" : winner.distance < closeBelow * 1.75f ? "CLOSE"
+                         : winner.distance < closeBelow * 2.5f ? "ROUGH" : "LOOSE";
     result.summary = "MATCHED " + file.getFileNameWithoutExtension().toUpperCase() + "  -  " + closeness + "  -  "
                    + genreNames[winner.genre].toUpperCase() + " " + typeNames[winner.type].toUpperCase();
     progress = 1.0f;

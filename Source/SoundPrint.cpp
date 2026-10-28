@@ -211,7 +211,7 @@ namespace
 
     // A repeating wobble in a series of 10 ms dB values: the series minus its
     // straight-line trend (the decay), its depth (RMS, dB) and its rate (Hz) by
-    // autocorrelation over 2 to 12 Hz, or 0 when nothing repeats clearly.
+    // autocorrelation over 1 to 12 Hz, or 0 when nothing repeats clearly.
     struct Wobble { float rateHz = 0.0f, depthDb = 0.0f; };
     Wobble wobbleOf (std::vector<double> series)
     {
@@ -241,14 +241,14 @@ namespace
         if (power < 1.0e-6)
             return w;
 
-        std::vector<double> r (51, 0.0);
-        for (int lag = 1; lag <= 50 && lag < n / 2; ++lag)
+        std::vector<double> r (101, 0.0);
+        for (int lag = 1; lag <= 100 && lag < n / 2; ++lag)
         {
             for (int i = 0; i + lag < n; ++i)
                 r[(size_t) lag] += series[(size_t) i] * series[(size_t) (i + lag)];
             r[(size_t) lag] /= power * (n - lag) / n;
         }
-        for (int lag = 8; lag < 50 && lag + 1 < n / 2; ++lag)
+        for (int lag = 8; lag < 100 && lag + 1 < n / 2; ++lag)
             if (r[(size_t) lag] > 0.3 && r[(size_t) lag] >= r[(size_t) lag - 1] && r[(size_t) lag] >= r[(size_t) lag + 1])
             {
                 w.rateHz = 100.0f / (float) lag;
@@ -322,7 +322,7 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     float notePitch = 0.0f;
     if (findPitch)
     {
-        const auto limit = juce::jmin ((int) energy.size(), onset + 250);
+        const auto limit = juce::jmin ((int) energy.size(), onset + 200);
         std::vector<int> starts { onset };
 
         constexpr int order = 10, size = 1 << order, hop = 256;
@@ -516,9 +516,9 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     print.attackMs = 10.0f * (float) (reached - onset);
 
     // The sound over time: every note of a phrase and the release after, from
-    // the onset to where it dies away (up to 2.5 s; a longer sound is cut there).
+    // the onset to where it dies away (up to 2 s; a longer sound is cut there).
     // Candidates play the same notes, so the whole of it is compared.
-    auto end = juce::jmin ((int) energy.size(), onset + 250);
+    auto end = juce::jmin ((int) energy.size(), onset + 200);
     // Still sounding at the window's end: the reference goes on past what is
     // measured, so candidates are compared only that far (cut).
     print.cut = energy[(size_t) end - 1] >= overall * 1.0e-5; // or the file ends mid-tail

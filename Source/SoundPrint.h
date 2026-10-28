@@ -30,7 +30,7 @@ struct SoundPrint
     std::vector<std::array<float, melBands>> melTone, melAttack;
     float noteSeconds = 0.0f;
 
-    // A reference's notes in its first 2.5 s (seconds from its onset, pitch 0 when
+    // A reference's notes in its first 2 s (seconds from its onset, pitch 0 when
     // unclear): candidates play the same pattern and are compared over all of it.
     struct Note { float start = 0.0f, length = 0.0f, pitchHz = 0.0f; };
     std::vector<Note> notes;

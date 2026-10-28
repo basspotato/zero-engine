@@ -343,6 +343,23 @@ int main (int argc, char* argv[])
                 std::printf ("  table %d pos %.2f tilt %+.1f air %.2f ott %.2f grit %.2f width %.2f A %.3f D %.2f S %.2f",
                              (int) p.waveTable, p.wavePos, p.tilt, p.air, p.ottDepth, p.grit, p.stereoWidth, p.ampAttack, p.ampDecay, p.ampSustain);
             std::printf ("\n");
+            if (verbose && result.ok) // what holds the match back: the same with parts of the finishing chain off
+            {
+                ZeroEngineProcessor scorer;
+                scorer.stopProfileSync();
+                auto variant = [&] (const char* name, auto change)
+                {
+                    auto q = p;
+                    change (q);
+                    std::printf ("    %-16s %.2f\n", name, ReferenceMatch::score (scorer, result.target, result.genre, result.type, q, false));
+                };
+                variant ("as found", [] (Profile&) {});
+                variant ("no OTT", [] (Profile& q) { q.ottDepth = 0.0f; });
+                variant ("no reverb/delay", [] (Profile& q) { q.reverbMix = 0.0f; q.delayMix = 0.0f; });
+                variant ("no spectral", [] (Profile& q) { q.spectral = 0.0f; });
+                variant ("all three off", [] (Profile& q) { q.ottDepth = 0.0f; q.reverbMix = 0.0f; q.delayMix = 0.0f; q.spectral = 0.0f; });
+                variant ("+ grit off", [] (Profile& q) { q.ottDepth = 0.0f; q.reverbMix = 0.0f; q.delayMix = 0.0f; q.spectral = 0.0f; q.grit = 0.0f; });
+            }
             if (verbose && result.ok)
                 for (const auto* s : { &result.target, &result.matched })
                 {
