@@ -492,7 +492,9 @@ namespace
         juce::StringArray problems;
         // Not Grit: its drive already glides per sample, and more drive makes the
         // waveform itself sharper, which this measure can't tell from a click.
-        for (const auto* id : { ParamIDs::air, ParamIDs::weight, ParamIDs::ottDepth, ParamIDs::punch, ParamIDs::width, ParamIDs::motion, ParamIDs::spectral })
+        for (const auto* id : { ParamIDs::air, ParamIDs::weight, ParamIDs::ottDepth, ParamIDs::punch, ParamIDs::width, ParamIDs::motion, ParamIDs::spectral,
+                                ParamIDs::wavePos, ParamIDs::tableMix, ParamIDs::detune, ParamIDs::blend, ParamIDs::filterCutoff, ParamIDs::filterRes,
+                                ParamIDs::tilt, ParamIDs::stereoWidth, ParamIDs::output, ParamIDs::delayMix, ParamIDs::reverbMix, ParamIDs::lfoToPos })
         {
             const auto still = sharpest (id, false), swept = sharpest (id, true);
             if (swept > still * 2.0f + 1.0e-3f)
