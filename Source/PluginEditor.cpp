@@ -1279,10 +1279,15 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     for (size_t i = 0; i < macros.size(); ++i)
         setUpMacro (macros[i], macroParams[i].first, macroParams[i].second);
 
-    // Right-click a macro for MIDI learn; the labels show the learned CC.
-    for (auto& macro : macros)
-        macro.knob.addMouseListener (this, false);
+    // Right-click a macro for MIDI learn.
+    addMouseListener (this, true);
     startTimerHz (8);
+
+    undoButton.onClick = [this] { processor.undo(); };
+    redoButton.onClick = [this] { processor.redo(); };
+    addAndMakeVisible (undoButton);
+    addAndMakeVisible (redoButton);
+    setWantsKeyboardFocus (true);
 
     setUpMacro (outputKnob, ParamIDs::output, "Output");
 
@@ -1431,8 +1436,24 @@ void ZeroEngineEditor::mouseDown (const juce::MouseEvent& e)
         }
 }
 
+bool ZeroEngineEditor::keyPressed (const juce::KeyPress& key)
+{
+    const auto command = key.getModifiers().isCommandDown();
+    const auto shift = key.getModifiers().isShiftDown();
+    const auto code = juce::CharacterFunctions::toUpperCase (key.getTextCharacter() > 31 ? key.getTextCharacter() : (juce::juce_wchar) key.getKeyCode());
+
+    if (command && code == 'Z')
+        return shift ? processor.redo() : processor.undo();
+    if (command && code == 'Y')
+        return processor.redo();
+    return false;
+}
+
 void ZeroEngineEditor::timerCallback()
 {
+    undoButton.setEnabled (processor.canUndo());
+    redoButton.setEnabled (processor.canRedo());
+
     for (size_t m = 0; m < macros.size(); ++m)
     {
         auto& macro = macros[m];
@@ -1566,7 +1587,10 @@ void ZeroEngineEditor::resized()
     auto area = juce::Rectangle<int> (designWidth, designHeight).reduced (16);
 
     auto top = area.removeFromTop (44);
-    top.removeFromLeft (240);
+    top.removeFromLeft (200);
+    undoButton.setBounds (top.removeFromLeft (48).withSizeKeepingCentre (48, 22));
+    top.removeFromLeft (4);
+    redoButton.setBounds (top.removeFromLeft (48).withSizeKeepingCentre (48, 22));
     auto outputArea = top.removeFromRight (104);
     outputKnob.label.setBounds (outputArea.removeFromLeft (60));
     outputKnob.knob.setBounds (outputArea);

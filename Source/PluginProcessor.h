@@ -87,12 +87,24 @@ public:
     bool stepHistory (int direction);
     bool canStepHistory (int direction) const { const auto t = historyPos + direction; return t >= 0 && t < (int) history.size(); }
 
+    // Undo / redo (message thread): snapshots of the whole sound. The timer takes a
+    // new step whenever the sound has changed and no mouse button is down, so a
+    // drag, a menu choice, Generate or a Genre/Type change each make one step.
+    bool undo();
+    bool redo();
+    bool canUndo() const noexcept { return ! undoStack.empty(); }
+    bool canRedo() const noexcept { return ! redoStack.empty(); }
+
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboardState;
 
 private:
     void timerCallback() override;
     bool restoreState (const juce::XmlElement&);
+    void adoptCurrentGenreAndType();
+    void checkpoint(); // record an undo step if the sound changed since the last one
+    std::vector<juce::ValueTree> undoStack, redoStack;
+    juce::ValueTree lastKnown;
     void restoreTree (const juce::ValueTree&);
 
     std::vector<juce::ValueTree> history; // Generate history, oldest first (message thread)

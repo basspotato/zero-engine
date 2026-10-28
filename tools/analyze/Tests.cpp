@@ -408,6 +408,41 @@ namespace
         return problems;
     }
 
+    // Undo / redo: a knob change, and a Genre change whose new sound comes back as
+    // it was (not reloaded from the designed profile).
+    juce::StringArray checkUndo()
+    {
+        ZeroEngineProcessor a;
+        loadProfile (a, genreNames.indexOf ("Trap"), typeNames.indexOf ("Lead"));
+        auto value = [&] (const char* id) { return a.state.getRawParameterValue (id)->load(); };
+        auto set = [&] (const char* id, float v) { auto* q = a.state.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+
+        juce::StringArray problems;
+        if (a.undo())
+            problems.add ("undo did something with nothing changed");
+
+        const auto weightBefore = value (ParamIDs::weight);
+        set (ParamIDs::weight, 0.95f);
+        if (! a.undo() || std::abs (value (ParamIDs::weight) - weightBefore) > 1.0e-4f)
+            problems.add ("undo did not restore Weight");
+        if (! a.redo() || std::abs (value (ParamIDs::weight) - 0.95f) > 1.0e-4f)
+            problems.add ("redo did not bring Weight back");
+
+        // Tweak, then change genre; undo must give back the tweaked Trap Lead.
+        set (ParamIDs::grit, 0.123f);
+        a.undo(); a.redo(); // records the tweak as a step
+        set (ParamIDs::genre, (float) genreNames.indexOf ("Synthwave"));
+        a.syncProfile();
+        if (! a.undo())
+            problems.add ("could not undo the genre change");
+        else if ((int) value (ParamIDs::genre) != genreNames.indexOf ("Trap") || std::abs (value (ParamIDs::grit) - 0.123f) > 1.0e-3f)
+            problems.add ("undoing the genre change did not bring back the tweaked sound");
+        a.syncProfile(); // a timer tick afterwards must not reload the designed profile
+        if (std::abs (value (ParamIDs::grit) - 0.123f) > 1.0e-3f)
+            problems.add ("the profile was reloaded over the undone sound");
+        return problems;
+    }
+
     // MIDI learn: the next CC maps to the macro, then moves it, and the mapping
     // survives a project save and load.
     juce::StringArray checkMidiLearn()
@@ -609,6 +644,17 @@ int runTests()
 
     std::printf ("Step sequencer (steps, pitch, accent, chords)... ");
     if (const auto problems = checkSequencer(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Undo / redo (knob, genre change)... ");
+    if (const auto problems = checkUndo(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

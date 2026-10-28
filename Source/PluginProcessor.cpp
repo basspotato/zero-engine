@@ -60,6 +60,8 @@ ZeroEngineProcessor::ZeroEngineProcessor()
 void ZeroEngineProcessor::timerCallback()
 {
     syncProfile();
+    if (! juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
+        checkpoint(); // after syncProfile, so a Genre/Type change and its new sound are one step
 }
 
 void ZeroEngineProcessor::syncProfile()
@@ -423,6 +425,60 @@ void ZeroEngineProcessor::setStateInformation (const void* data, int sizeInBytes
     }
 }
 
+void ZeroEngineProcessor::checkpoint()
+{
+    auto now = state.copyState();
+    if (! lastKnown.isValid())
+    {
+        lastKnown = now; // the starting sound; nothing to undo yet
+        return;
+    }
+    if (now.isEquivalentTo (lastKnown))
+        return;
+
+    constexpr size_t maxSteps = 100;
+    undoStack.push_back (lastKnown);
+    if (undoStack.size() > maxSteps)
+        undoStack.erase (undoStack.begin());
+    redoStack.clear();
+    lastKnown = now;
+}
+
+bool ZeroEngineProcessor::undo()
+{
+    checkpoint(); // a change not yet recorded is the step to undo
+    if (undoStack.empty())
+        return false;
+
+    redoStack.push_back (state.copyState());
+    restoreTree (undoStack.back());
+    undoStack.pop_back();
+    lastKnown = state.copyState();
+    return true;
+}
+
+bool ZeroEngineProcessor::redo()
+{
+    checkpoint();
+    if (redoStack.empty())
+        return false;
+
+    undoStack.push_back (state.copyState());
+    restoreTree (redoStack.back());
+    redoStack.pop_back();
+    lastKnown = state.copyState();
+    return true;
+}
+
+void ZeroEngineProcessor::adoptCurrentGenreAndType()
+{
+    // An undone Genre/Type change brings back that sound's values with it; take
+    // them as they are rather than letting syncProfile reload the designed profile.
+    appliedGenre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
+    appliedType = (int) state.getRawParameterValue (ParamIDs::type)->load();
+    loadMacroMap (macroMap, makeProfile (appliedGenre, appliedType));
+}
+
 bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml)
 {
     if (! xml.hasTagName (state.state.getType()))
@@ -436,10 +492,7 @@ void ZeroEngineProcessor::restoreTree (const juce::ValueTree& tree)
 {
     state.replaceState (tree.createCopy());
 
-    // The saved values already include any tweaks; don't overwrite them with the profile.
-    appliedGenre = (int) state.getRawParameterValue (ParamIDs::genre)->load();
-    appliedType = (int) state.getRawParameterValue (ParamIDs::type)->load();
-    loadMacroMap (macroMap, makeProfile (appliedGenre, appliedType));
+    adoptCurrentGenreAndType(); // the saved values already include any tweaks; keep them
 }
 
 juce::String ZeroEngineProcessor::saveFavourite()

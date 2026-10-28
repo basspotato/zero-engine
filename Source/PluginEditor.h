@@ -234,6 +234,8 @@ private:
     // Every engine parameter, in tabs; ADVANCED opens it over the panels.
     AdvancedPanel advancedPanel;
     juce::TextButton mainButton { "MAIN" }, advancedButton { "ADVANCED" }; // lit = the view showing
+    juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
+    bool keyPressed (const juce::KeyPress&) override; // Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z
     void showAdvanced (bool show);
     juce::MidiKeyboardComponent keyboard;
 
