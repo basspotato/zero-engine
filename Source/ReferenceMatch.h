@@ -32,6 +32,7 @@ public:
         Profile profile {};
         int genre = 0, type = 0;
         juce::String summary;
+        SoundPrint target, matched; // the reference and the best render, for tooling
     };
     Result take();
 

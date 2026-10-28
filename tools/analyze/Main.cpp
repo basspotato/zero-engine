@@ -300,6 +300,60 @@ int main (int argc, char* argv[])
                                argFile (args, 2, "analysis/freesound/refs"),
                                args.size() > 3 ? args[3].getIntValue() : 450);
 
+    if (command == "match" && args.size() >= 2)
+    {
+        // Reference Match from the command line: one file with a genre and type, or a
+        // folder laid out as <Genre>/<Type>/*.wav. Prints how close each gets and
+        // what it chose.
+        const auto verbose = args.contains ("-v");
+        args.removeString ("-v");
+        const juce::File root (juce::File::getCurrentWorkingDirectory().getChildFile (args[1]));
+        struct Job { juce::File file; int genre, type; };
+        std::vector<Job> jobs;
+        auto indexOf = [] (const juce::StringArray& names, const juce::String& name) { return names.indexOf (name, true); };
+        if (root.existsAsFile() && args.size() >= 4)
+            jobs.push_back ({ root, indexOf (genreNames, args[2]), indexOf (typeNames, args[3]) });
+        else
+            for (const auto& file : root.findChildFiles (juce::File::findFiles, true, "*.wav;*.aif;*.aiff;*.flac"))
+                jobs.push_back ({ file, indexOf (genreNames, file.getParentDirectory().getParentDirectory().getFileName()),
+                                  indexOf (typeNames, file.getParentDirectory().getFileName()) });
+
+        ZeroEngineProcessor engine;
+        engine.stopProfileSync();
+        ReferenceMatch match (engine);
+        for (const auto& job : jobs)
+        {
+            if (job.genre < 0 || job.type < 0)
+            {
+                std::printf ("%s: unknown genre/type folder\n", job.file.getFullPathName().toRawUTF8());
+                continue;
+            }
+            const auto began = juce::Time::getMillisecondCounter();
+            match.start (job.file, job.genre, job.type, makeProfile (job.genre, job.type));
+            while (match.getState() == ReferenceMatch::State::running)
+                juce::Thread::sleep (20);
+            const auto result = match.take();
+            const auto& p = result.profile;
+            std::printf ("%-12s %-6s %-22s %5.1f s  %s", genreNames[job.genre].toRawUTF8(), typeNames[job.type].toRawUTF8(),
+                         job.file.getFileName().toRawUTF8(), (juce::Time::getMillisecondCounter() - began) / 1000.0,
+                         result.summary.fromFirstOccurrenceOf ("-  ", false, false).toRawUTF8());
+            if (result.ok)
+                std::printf ("  table %d pos %.2f tilt %+.1f air %.2f ott %.2f grit %.2f width %.2f A %.3f D %.2f S %.2f",
+                             (int) p.waveTable, p.wavePos, p.tilt, p.air, p.ottDepth, p.grit, p.stereoWidth, p.ampAttack, p.ampDecay, p.ampSustain);
+            std::printf ("\n");
+            if (verbose && result.ok)
+                for (const auto* s : { &result.target, &result.matched })
+                {
+                    std::printf ("    %s pitch %4.0f att %4.0f env", s == &result.target ? "ref" : "got", s->pitchHz, s->attackMs);
+                    for (auto e : s->envelopeDb) std::printf (" %5.1f", e);
+                    std::printf ("  bands");
+                    for (auto b : s->bandsDb) std::printf (" %3.0f", b);
+                    std::printf ("  side %4.1f crest %4.1f\n", s->sidePct, s->crestDb);
+                }
+        }
+        return 0;
+    }
+
     if (command == "gendebug" && args.size() >= 4)
     {
         // One Generate result (genre, type, seed): the parameters that shape its tail,

@@ -6,36 +6,58 @@ namespace
 {
     constexpr int fftOrder = 12, fftSize = 1 << fftOrder;
 
-    // Fundamental by autocorrelation of the mono window (50 Hz to 1 kHz), or 0
-    // when nothing repeats clearly (noise, FX).
+    // Fundamental of the mono window (50 Hz to 1 kHz) by YIN (de Cheveigné &
+    // Kawahara 2002): the cumulative-mean-normalised difference function, first
+    // dip under the threshold, refined by parabola. 0 when nothing repeats
+    // clearly (noise, FX). Plain autocorrelation reads any dark, smooth sound as
+    // its highest allowed pitch.
     float pitchOf (const std::vector<float>& mono, double sampleRate)
     {
-        const auto minLag = (int) (sampleRate / 1000.0), maxLag = (int) (sampleRate / 50.0);
-        const auto n = (int) mono.size() - maxLag;
-        if (n <= 0)
+        const auto minLag = juce::jmax (2, (int) (sampleRate / 1000.0)), maxLag = (int) (sampleRate / 50.0);
+        const auto window = juce::jmin ((int) (0.05 * sampleRate), (int) mono.size() - maxLag - 1);
+        if (window < maxLag)
             return 0.0f;
 
-        double energy = 0.0;
-        for (int i = 0; i < n; ++i)
-            energy += (double) mono[(size_t) i] * mono[(size_t) i];
-        if (energy < 1.0e-9)
-            return 0.0f;
-
-        int bestLag = 0;
-        double best = 0.0;
-        for (int lag = minLag; lag <= maxLag; ++lag)
-        {
-            double sum = 0.0;
-            for (int i = 0; i < n; ++i)
-                sum += (double) mono[(size_t) i] * mono[(size_t) (i + lag)];
-            sum /= energy;
-            if (sum > best * 1.02) // first clear peak wins over its octave-down twins
+        std::vector<double> d ((size_t) maxLag + 2, 0.0);
+        for (int lag = 1; lag <= maxLag + 1; ++lag)
+            for (int i = 0; i < window; ++i)
             {
-                best = sum;
-                bestLag = lag;
+                const auto diff = (double) mono[(size_t) i] - mono[(size_t) (i + lag)];
+                d[(size_t) lag] += diff * diff;
             }
+
+        // Normalise: d'(lag) = d(lag) * lag / sum of d up to lag.
+        double running = 0.0;
+        d[0] = 1.0;
+        for (int lag = 1; lag <= maxLag + 1; ++lag)
+        {
+            running += d[(size_t) lag];
+            d[(size_t) lag] = running > 0.0 ? d[(size_t) lag] * lag / running : 1.0;
         }
-        return best > 0.5 && bestLag > 0 ? (float) (sampleRate / bestLag) : 0.0f;
+
+        int found = 0;
+        for (int lag = minLag; lag <= maxLag; ++lag)
+            if (d[(size_t) lag] < 0.15)
+            {
+                while (lag < maxLag && d[(size_t) lag + 1] < d[(size_t) lag])
+                    ++lag;
+                found = lag;
+                break;
+            }
+        if (found == 0) // no clear dip: take the deepest, if it is deep enough
+        {
+            auto deepest = minLag;
+            for (int lag = minLag; lag <= maxLag; ++lag)
+                if (d[(size_t) lag] < d[(size_t) deepest])
+                    deepest = lag;
+            if (d[(size_t) deepest] > 0.35)
+                return 0.0f;
+            found = deepest;
+        }
+
+        const auto a = d[(size_t) found - 1], b = d[(size_t) found], c = d[(size_t) found + 1];
+        const auto shift = std::abs (a - 2.0 * b + c) > 1.0e-12 ? 0.5 * (a - c) / (a - 2.0 * b + c) : 0.0;
+        return (float) (sampleRate / (found + juce::jlimit (-0.5, 0.5, shift)));
     }
 }
 
@@ -47,7 +69,16 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     if (total <= 0 || channels <= 0)
         return print;
 
-    auto sample = [&] (int ch, int i) { return audio.getSample (juce::jmin (ch, channels - 1), i); };
+    // DC removed: recordings often carry an offset that would read as deep sub.
+    float dc[2] {};
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        double sum = 0.0;
+        for (int i = 0; i < total; ++i)
+            sum += audio.getSample (ch, i);
+        dc[ch] = (float) (sum / total);
+    }
+    auto sample = [&] (int ch, int i) { ch = juce::jmin (ch, channels - 1); return audio.getSample (ch, i) - dc[ch]; };
 
     // Energy per 10 ms; the onset is the first block within 30 dB of the loudest,
     // and only the 1.2 s after it are measured.

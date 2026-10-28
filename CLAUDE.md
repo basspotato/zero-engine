@@ -24,6 +24,7 @@ JUCE 8 is fetched by CMake. Outputs land in `build/ZeroEngine_artefacts/Release/
 - `ZeroAnalyze test`: every profile at several rates and block sizes, plus 4 Generate results per profile; fails on non-finite output, clipping, tails that don't die, allocations in `processBlock`, state or favourites that don't round-trip, Generate history, or a mod wheel that does nothing. Takes about 2–3 minutes. `bench`: CPU with 16 voices.
 - `ZeroAnalyze gencheck`: Generate's time per click and how many of its 6 candidates pass the check, per profile.
 - `ZeroAnalyze gendebug <Genre> <Type> <seed> [id=value...]`: one Generate result's key settings and its level and voice count each second through a note and its tail; overrides help find what holds a sound up. `segments <wav> [s]`: loudness and brightness per slice.
+- `ZeroAnalyze match <wav> <Genre> <Type> [-v]` or `match <folder> [-v]` (laid out `<Genre>/<Type>/*.wav`): runs Reference Match as the plugin does and prints how close each gets and what it chose; `-v` shows both fingerprints.
 - `ZeroAnalyze harmonics <out.h> <5 wavs>`: harmonic spectra of recorded notes as a wavetable bank (made `Source/JupiterHarmonics.h`).
 - `ZeroAnalyze snapshot <png> [size=WxH] [button...] [dialog]`: the editor as an image, after playing a chord; clicks buttons by label (e.g. `ADVANCED MOTION`). Send the owner a preview after GUI changes. `foldstrip <png>`: the tesseract's fold, frame by frame.
 - `ZeroAnalyze screen` / `fetch`: Freesound CC0 search and download (needs the owner's `FREESOUND_CLIENT_SECRET` / `FREESOUND_CLIENT_ID`).
@@ -41,6 +42,7 @@ Output goes to `analysis/` by default (git-ignored).
 - `Source/MacroMap.h`: what each macro pushes per profile; the mod wheel adds to Motion
 - `Source/Arpeggiator.*`: tempo-synced arp with a 16-step pattern that shapes every mode (rests, transpose, accent); mode "Sequence" plays all held keys per step. Runs on the MIDI before the synth; its settings are not part of profiles
 - `Source/PluginProcessor.*`: synth, finishing chain, state, Generate (render-and-check), history, favourites (`%APPDATA%/Zero Engine/Favourites`)
+- `Source/SoundPrint.*`, `Source/ReferenceMatch.*`: Reference Match (drop or pick a sound; a background search over the current genre/type's settings, rendering through a second engine; no ML)
 - `Source/PluginEditor.*`: UI (look and feel, display, meter, tesseract, Advanced page); laid out at 900 x 600 and scaled with the window
 - `Resources/Fonts/`: Barlow Condensed and Share Tech Mono (OFL), from the owner's Potato Kicker
 

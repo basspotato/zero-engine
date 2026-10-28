@@ -34,19 +34,18 @@ ReferenceMatch::Result ReferenceMatch::take()
 
 SoundPrint ReferenceMatch::render (const Profile& profile, int note)
 {
-    // 1.3 s of the note (a triad for chords and pads), measured like the reference.
+    // 1.05 s of the note (a triad for chords and pads), measured like the reference.
     constexpr double rate = 48000.0;
-    constexpr int block = 512, length = 62400;
+    constexpr int block = 512, length = 50176;
     engine.setPlayConfigDetails (0, 2, rate, block);
     engine.prepareToPlay (rate, block);
     engine.resetForRender(); // nothing of the last candidate may ring into this one
     engine.loadProfile (genre, type, profile);
 
-    // A quarter second of silence first, so knob smoothing settles and the last
-    // candidate's delay and reverb die away.
+    // A tenth of a second of silence first, so knob smoothing settles.
     juce::AudioBuffer<float> out (2, length), chunk (2, block);
     juce::MidiBuffer midi;
-    for (int pos = 0; pos < 12000; pos += block)
+    for (int pos = 0; pos < 5120; pos += block)
     {
         chunk.clear();
         engine.processBlock (chunk, midi);
@@ -87,6 +86,7 @@ void ReferenceMatch::run()
     juce::AudioBuffer<float> audio (2, juce::jmax (1, length));
     reader->read (&audio, 0, length, 0, true, true);
     const auto target = SoundPrint::of (audio, reader->sampleRate, true);
+    result.target = target;
     if (target.levelDb < -70.0f)
         return fail (file.getFileName() + " is silent");
 
@@ -96,10 +96,32 @@ void ReferenceMatch::run()
         note = juce::roundToInt (69.0 + 12.0 * std::log2 (target.pitchHz / 440.0));
     note = type == 0 ? juce::jlimit (24, 55, note) : juce::jlimit (36, 96, note);
 
-    constexpr int budget = 110; // renders, about 7 s
+    constexpr int budget = 150; // renders, about 7 s
     int renders = 0;
     auto best = from;
-    auto bestDistance = SoundPrint::distance (render (best, note), target);
+    auto bestPrint = render (best, note);
+    auto bestDistance = SoundPrint::distance (bestPrint, target);
+
+    // 0. The octave, for chords and pads (whose period can sit an octave or two
+    //    under the root) and sounds with no clear pitch: try the neighbours and
+    //    keep the closest. A single note's pitch is read reliably.
+    if (type == 2 || type == 3 || target.pitchHz <= 0.0f)
+    {
+        const auto read = note;
+        for (const auto shift : { -12, 12, 24 })
+        {
+            const auto candidate = read + shift;
+            if (candidate < (type == 0 ? 24 : 36) || candidate > (type == 0 ? 55 : 96))
+                continue;
+            const auto print = render (best, candidate);
+            if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
+            {
+                note = candidate;
+                bestPrint = print;
+                bestDistance = d;
+            }
+        }
+    }
 
     // 1. The source: every wavetable at two positions.
     for (int table = 0; table < WavetableBank::numBanks && ! threadShouldExit(); ++table)
@@ -108,10 +130,12 @@ void ReferenceMatch::run()
             auto candidate = best;
             candidate.waveTable = (float) table;
             candidate.wavePos = position;
-            if (const auto d = SoundPrint::distance (render (candidate, note), target); d < bestDistance)
+            const auto print = render (candidate, note);
+            if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
             {
                 best = candidate;
                 bestDistance = d;
+                bestPrint = print;
             }
             progress = 0.4f * (float) ++renders / (float) (WavetableBank::numBanks * 2);
         }
@@ -125,7 +149,8 @@ void ReferenceMatch::run()
         { &Profile::grit, 0.0f, 1.0f, 0.15f },        { &Profile::stereoWidth, 0.0f, 2.0f, 0.3f },
         { &Profile::weight, 0.0f, 1.0f, 0.2f },       { &Profile::detune, 0.0f, 1.0f, 0.15f },
         { &Profile::ampAttack, 0.001f, 2.0f, 1.0f, true }, { &Profile::ampDecay, 0.02f, 4.0f, 1.0f, true },
-        { &Profile::ampSustain, 0.0f, 1.0f, 0.2f },
+        { &Profile::ampSustain, 0.0f, 1.0f, 0.2f },          { &Profile::filterCutoff, 60.0f, 20000.0f, 1.0f, true },
+        { &Profile::reverbMix, 0.0f, 1.0f, 0.15f },          { &Profile::delayMix, 0.0f, 1.0f, 0.15f },
     };
     float steps[std::size (knobs)];
     for (size_t k = 0; k < std::size (knobs); ++k)
@@ -147,13 +172,15 @@ void ReferenceMatch::run()
                     continue;
                 value = moved;
 
-                const auto d = SoundPrint::distance (render (candidate, note), target);
+                const auto print = render (candidate, note);
+                const auto d = SoundPrint::distance (print, target);
                 ++renders;
                 progress = 0.4f + 0.6f * (float) (renders - searchStart) / (float) (budget - searchStart);
                 if (d < bestDistance)
                 {
                     best = candidate;
                     bestDistance = d;
+                    bestPrint = print;
                     improved = true;
                     break;
                 }
@@ -177,6 +204,7 @@ void ReferenceMatch::run()
 
     result.ok = true;
     result.profile = best;
+    result.matched = bestPrint;
     result.genre = genre;
     result.type = type;
     result.summary = "MATCHED " + file.getFileNameWithoutExtension().toUpperCase()

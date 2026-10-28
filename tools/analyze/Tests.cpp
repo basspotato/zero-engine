@@ -587,7 +587,7 @@ namespace
             engine.loadProfile (genre, type, profile);
             juce::AudioBuffer<float> settle (2, 512);
             juce::MidiBuffer none;
-            for (int i = 0; i < 24; ++i) { settle.clear(); engine.processBlock (settle, none); } // as the matcher does
+            for (int i = 0; i < 10; ++i) { settle.clear(); engine.processBlock (settle, none); } // as the matcher does
             juce::AudioBuffer<float> out (2, 72000), chunk (2, 512);
             juce::MidiBuffer midi;
             for (int pos = 0; pos + 512 <= out.getNumSamples(); pos += 512)
