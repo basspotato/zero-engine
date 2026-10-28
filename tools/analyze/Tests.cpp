@@ -408,6 +408,40 @@ namespace
         return problems;
     }
 
+    // MIDI learn: the next CC maps to the macro, then moves it, and the mapping
+    // survives a project save and load.
+    juce::StringArray checkMidiLearn()
+    {
+        ZeroEngineProcessor a;
+        a.setPlayConfigDetails (0, 2, 48000.0, 512);
+        a.prepareToPlay (48000.0, 512);
+        juce::AudioBuffer<float> block (2, 512);
+
+        auto sendCC = [&] (int cc, int value)
+        {
+            juce::MidiBuffer midi;
+            midi.addEvent (juce::MidiMessage::controllerEvent (1, cc, value), 0);
+            a.processBlock (block, midi);
+        };
+
+        juce::StringArray problems;
+        a.learnMacro (0); // Weight
+        sendCC (74, 64);
+        if (a.getMacroCC (0) != 74)
+            problems.add ("Weight did not learn CC74");
+        sendCC (74, 127);
+        if (std::abs (a.state.getRawParameterValue (ParamIDs::weight)->load() - 1.0f) > 0.01f)
+            problems.add ("CC74 did not move Weight");
+
+        juce::MemoryBlock saved;
+        a.getStateInformation (saved);
+        ZeroEngineProcessor b;
+        b.setStateInformation (saved.getData(), (int) saved.getSize());
+        if (b.getMacroCC (0) != 74 || b.getMacroCC (1) != -1)
+            problems.add ("mapping not restored with the project");
+        return problems;
+    }
+
     // A note let go mid-decay must finish its release, whatever the sustain
     // (a zero sustain used to hang the voice forever; a tiny one for minutes).
     juce::StringArray checkReleaseMidDecay()
@@ -575,6 +609,17 @@ int runTests()
 
     std::printf ("Step sequencer (steps, pitch, accent, chords)... ");
     if (const auto problems = checkSequencer(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("MIDI learn (map, move, save)... ");
+    if (const auto problems = checkMidiLearn(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {

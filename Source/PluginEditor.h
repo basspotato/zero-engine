@@ -191,7 +191,8 @@ private:
     float foldProgress = 0.0f; // 0..1 while folding
 };
 
-class ZeroEngineEditor : public juce::AudioProcessorEditor
+class ZeroEngineEditor : public juce::AudioProcessorEditor,
+                         private juce::Timer
 {
 public:
     explicit ZeroEngineEditor (ZeroEngineProcessor&);
@@ -209,6 +210,7 @@ private:
         juce::Slider knob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
         juce::Label label;
         std::unique_ptr<SliderAttachment> attachment;
+        juce::String name; // the label without its CC
     };
 
     ZeroLookAndFeel lookAndFeel; // first, so it outlives every component using it
@@ -238,6 +240,8 @@ private:
     void setUpMacro (Macro&, const char* paramID, const juce::String& name);
     void refreshFavourites();
     void refreshHistoryButtons();
+    void mouseDown (const juce::MouseEvent&) override; // right-click a macro: MIDI learn
+    void timerCallback() override;                     // keeps the macro labels' CC text current
     static constexpr int designWidth = 900, designHeight = 600;
     float uiScale() const { return (float) getWidth() / (float) designWidth; }
     void renameCurrentFavourite();

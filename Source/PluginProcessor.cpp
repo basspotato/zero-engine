@@ -44,6 +44,8 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     for (auto [slot, id] : { std::pair { 0, ParamIDs::arpOn }, { 1, ParamIDs::arpMode }, { 2, ParamIDs::arpRate }, { 3, ParamIDs::arpOctaves }, { 4, ParamIDs::arpGate } })
         arpParams[slot] = state.getRawParameterValue (id);
     seqLengthParam = state.getRawParameterValue (ParamIDs::seqLength);
+    for (auto [m, id] : { std::pair { 0, ParamIDs::weight }, { 1, ParamIDs::grit }, { 2, ParamIDs::punch }, { 3, ParamIDs::width }, { 4, ParamIDs::motion }, { 5, ParamIDs::air } })
+        macroParams[m] = state.getParameter (id);
     for (int step = 0; step < Arpeggiator::maxSteps; ++step)
     {
         seqParams[0][step] = state.getRawParameterValue (SeqIDs::on (step));
@@ -263,10 +265,26 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
-    // Mod wheel (CC 1) rides on top of the Motion macro.
+    // Controllers: the mod wheel (CC 1) rides on top of Motion; MIDI learn takes
+    // the next CC for the macro waiting to learn; learned CCs move their macros.
     for (const auto metadata : midi)
-        if (const auto message = metadata.getMessage(); message.isControllerOfType (1))
-            macroMap.setModWheel ((float) message.getControllerValue() / 127.0f);
+    {
+        const auto message = metadata.getMessage();
+        if (! message.isController())
+            continue;
+
+        const auto cc = message.getControllerNumber();
+        const auto value = (float) message.getControllerValue() / 127.0f;
+        if (cc == 1)
+            macroMap.setModWheel (value);
+
+        if (const auto learning = learningMacro.exchange (-1); learning >= 0)
+            macroCC[(size_t) learning] = cc;
+
+        for (size_t m = 0; m < macroCC.size(); ++m)
+            if (macroCC[m].load() == cc)
+                macroParams[m]->setValueNotifyingHost (value);
+    }
 
     // Host tempo for the delay and synced LFOs; 120 BPM when there is none (standalone).
     auto bpm = 120.0;
@@ -383,13 +401,26 @@ juce::AudioProcessorEditor* ZeroEngineProcessor::createEditor()
 void ZeroEngineProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     if (auto xml = state.copyState().createXml())
+    {
+        // MIDI learn belongs to the project (your controller), not to a sound, so it
+        // is saved here and not in the state tree that favourites copy.
+        juce::StringArray ccs;
+        for (const auto& cc : macroCC)
+            ccs.add (juce::String (cc.load()));
+        xml->setAttribute ("macroCCs", ccs.joinIntoString (","));
         copyXmlToBinary (*xml, destData);
+    }
 }
 
 void ZeroEngineProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    {
         restoreState (*xml);
+        const auto ccs = juce::StringArray::fromTokens (xml->getStringAttribute ("macroCCs"), ",", {});
+        for (size_t m = 0; m < macroCC.size(); ++m)
+            macroCC[m] = m < (size_t) ccs.size() ? ccs[(int) m].getIntValue() : -1;
+    }
 }
 
 bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml)

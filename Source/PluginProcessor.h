@@ -43,6 +43,12 @@ public:
     // Where a playing voice is in its wavetable (envelopes and LFOs included), or -1 when silent.
     float getLivePosition() const noexcept { return livePosition.load (std::memory_order_relaxed); }
 
+    // MIDI learn for the six macros (message thread): learn takes the next CC.
+    void learnMacro (int macro) noexcept { learningMacro = macro; }
+    void clearMacroCC (int macro) noexcept { macroCC[(size_t) macro] = -1; }
+    int getMacroCC (int macro) const noexcept { return macroCC[(size_t) macro].load(); }
+    bool isLearning (int macro) const noexcept { return learningMacro.load() == macro; }
+
     // Voices currently sounding (diagnostics).
     int getActiveVoiceCount() const { int n = 0; for (int i = 0; i < synth.getNumVoices(); ++i) n += synth.getVoice (i)->isVoiceActive() ? 1 : 0; return n; }
 
@@ -112,6 +118,9 @@ private:
     Arpeggiator arp;
     std::atomic<float>* arpParams[5] {}; // on, mode, rate, octaves, gate
     std::atomic<float>* seqLengthParam = nullptr;
+    std::array<std::atomic<int>, 6> macroCC { -1, -1, -1, -1, -1, -1 }; // learned CC per macro, -1 none
+    std::atomic<int> learningMacro { -1 };
+    juce::RangedAudioParameter* macroParams[6] {};
     std::atomic<float>* seqParams[3][Arpeggiator::maxSteps] {}; // on, pitch, accent per step
 
 public:

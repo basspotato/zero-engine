@@ -1279,6 +1279,11 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     for (size_t i = 0; i < macros.size(); ++i)
         setUpMacro (macros[i], macroParams[i].first, macroParams[i].second);
 
+    // Right-click a macro for MIDI learn; the labels show the learned CC.
+    for (auto& macro : macros)
+        macro.knob.addMouseListener (this, false);
+    startTimerHz (8);
+
     setUpMacro (outputKnob, ParamIDs::output, "Output");
 
     genreBox.addItemList (genreNames, 1);
@@ -1403,6 +1408,45 @@ void ZeroEngineEditor::showAdvanced (bool show)
     mainButton.setToggleState (! show, juce::dontSendNotification);
 }
 
+void ZeroEngineEditor::mouseDown (const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu())
+        return;
+
+    for (size_t m = 0; m < macros.size(); ++m)
+        if (e.eventComponent == &macros[m].knob)
+        {
+            const auto cc = processor.getMacroCC ((int) m);
+            juce::PopupMenu menu;
+            menu.addItem (1, "MIDI Learn (move a controller knob)");
+            menu.addItem (2, cc >= 0 ? "Clear CC " + juce::String (cc) : juce::String ("No CC learned"), cc >= 0);
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&macros[m].knob),
+                                [this, m] (int choice)
+                                {
+                                    if (choice == 1) processor.learnMacro ((int) m);
+                                    if (choice == 2) processor.clearMacroCC ((int) m);
+                                    timerCallback();
+                                });
+            return;
+        }
+}
+
+void ZeroEngineEditor::timerCallback()
+{
+    for (size_t m = 0; m < macros.size(); ++m)
+    {
+        auto& macro = macros[m];
+        const auto learning = processor.isLearning ((int) m);
+        const auto cc = processor.getMacroCC ((int) m);
+        const auto text = learning ? macro.name + "  LEARNING..." : cc >= 0 ? macro.name + "  CC" + juce::String (cc) : macro.name;
+        if (macro.label.getText() != text)
+        {
+            macro.label.setText (text, juce::dontSendNotification);
+            macro.label.setColour (juce::Label::textColourId, learning ? Palette::yellow : Palette::accent);
+        }
+    }
+}
+
 void ZeroEngineEditor::refreshHistoryButtons()
 {
     backButton.setEnabled (processor.canStepHistory (-1));
@@ -1452,7 +1496,8 @@ void ZeroEngineEditor::renameCurrentFavourite()
 
 void ZeroEngineEditor::setUpMacro (Macro& macro, const char* paramID, const juce::String& name)
 {
-    macro.label.setText (name.toUpperCase(), juce::dontSendNotification);
+    macro.name = name.toUpperCase();
+    macro.label.setText (macro.name, juce::dontSendNotification);
     macro.label.setJustificationType (juce::Justification::centred);
     macro.label.setFont (Fonts::ui (12.0f, true));
     macro.label.setColour (juce::Label::textColourId, Palette::accent);
