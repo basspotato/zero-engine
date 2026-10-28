@@ -3,7 +3,7 @@
 void Arpeggiator::prepare (double newSampleRate, int maxBlockSize)
 {
     sampleRate = newSampleRate;
-    out.ensureSize ((size_t) juce::jmax (256, maxBlockSize) * 6); // room for a busy block, so process never allocates
+    out.ensureSize ((size_t) juce::jmax (256, maxBlockSize) * 8); // room for a busy block, so process never allocates
     reset();
 }
 
@@ -11,24 +11,25 @@ void Arpeggiator::reset() noexcept
 {
     numHeld = 0;
     sequenceLength = 0;
-    step = -1;
+    step = seqStep = -1;
     direction = 1;
-    sounding = -1;
+    numSounding = 0;
     samplesToNextStep = 0.0;
     samplesToNoteOff = -1.0;
+    currentStep.store (-1, std::memory_order_relaxed);
 }
 
-void Arpeggiator::noteOn (int note, juce::uint8 velocity) noexcept
+void Arpeggiator::keyOn (int note, juce::uint8 velocity) noexcept
 {
-    noteOff (note); // a repeated key moves to the end, like a fresh press
+    keyOff (note); // a repeated key moves to the end, like a fresh press
     if (numHeld == maxHeld)
-        noteOff (played[0]);
+        keyOff (played[0]);
     played[(size_t) numHeld] = note;
     velocities[(size_t) numHeld] = velocity;
     ++numHeld;
 }
 
-void Arpeggiator::noteOff (int note) noexcept
+void Arpeggiator::keyOff (int note) noexcept
 {
     for (int i = 0; i < numHeld; ++i)
         if (played[(size_t) i] == note)
@@ -55,29 +56,41 @@ int Arpeggiator::nextNote() noexcept
         const auto pick = rng.nextInt (sequenceLength - 1);
         step = pick >= step ? pick + 1 : pick;
     }
-    else
-    {
-        step += direction;
-        if (step >= sequenceLength || step < 0)
-        {
-            step = direction > 0 ? 0 : sequenceLength - 1;
-        }
-    }
-    return sequence[(size_t) step];
+    else if (++step >= sequenceLength)
+        step = 0;
+
+    return pattern[(size_t) step];
+}
+
+void Arpeggiator::play (int note, juce::uint8 velocity, int position) noexcept
+{
+    if (note < 0 || note > 127 || numSounding == (int) sounding.size())
+        return;
+    for (int i = 0; i < numSounding; ++i)
+        if (sounding[(size_t) i] == note)
+            return; // already on this step (e.g. two keys an octave apart in a sequence)
+    out.addEvent (juce::MidiMessage::noteOn (1, note, velocity), position);
+    sounding[(size_t) numSounding++] = note;
+}
+
+void Arpeggiator::stopAll (int position) noexcept
+{
+    for (int i = 0; i < numSounding; ++i)
+        out.addEvent (juce::MidiMessage::noteOff (1, sounding[(size_t) i]), position);
+    numSounding = 0;
 }
 
 const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int numSamples, const Settings& s) noexcept
 {
     out.clear();
 
-    // Switched off: pass everything through, ending any arp note first.
+    // Switched off: pass everything through, ending any pattern notes first.
     if (! s.on)
     {
         if (! wasOn)
             return midi;
 
-        if (sounding >= 0)
-            out.addEvent (juce::MidiMessage::noteOff (1, sounding), 0);
+        stopAll (0);
         out.addEvents (midi, 0, numSamples, 0);
         reset();
         wasOn = false;
@@ -87,6 +100,8 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
 
     const auto stepSamples = juce::jmax (1.0, s.beatsPerStep * 60.0 / juce::jmax (20.0, s.bpm) * sampleRate);
     const auto octaves = juce::jlimit (1, 4, s.octaves);
+    const auto length = juce::jlimit (1, maxSteps, s.length);
+    const auto isSequence = s.mode == sequence;
 
     auto rebuild = [&]
     {
@@ -101,16 +116,16 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
         for (int o = 0; o < octaves; ++o)
             for (int i = 0; i < numHeld; ++i)
                 if (const auto n = notes[(size_t) i] + 12 * o; n <= 127)
-                    sequence[(size_t) sequenceLength++] = n;
+                    pattern[(size_t) sequenceLength++] = n;
 
         if (s.mode == down)
-            std::reverse (sequence.begin(), sequence.begin() + sequenceLength);
+            std::reverse (pattern.begin(), pattern.begin() + sequenceLength);
         else if (s.mode == upDown && sequenceLength > 2)
         {
             // Up then back down, without repeating the top and bottom notes.
             const auto top = sequenceLength;
             for (int i = top - 2; i >= 1; --i)
-                sequence[(size_t) sequenceLength++] = sequence[(size_t) i];
+                pattern[(size_t) sequenceLength++] = pattern[(size_t) i];
         }
         direction = s.mode == random ? 0 : 1;
         if (step >= sequenceLength)
@@ -121,7 +136,6 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
     auto events = midi.begin();
     for (int pos = 0; pos <= numSamples; ++pos)
     {
-        // Key events at this sample.
         bool changed = false;
         while (events != midi.end() && (*events).samplePosition <= pos)
         {
@@ -129,17 +143,17 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
             if (message.isNoteOn())
             {
                 const auto wasEmpty = numHeld == 0;
-                noteOn (message.getNoteNumber(), message.getVelocity());
+                keyOn (message.getNoteNumber(), message.getVelocity());
                 changed = true;
                 if (wasEmpty)
                 {
-                    step = -1;
+                    step = seqStep = -1;
                     samplesToNextStep = 0.0; // the first key starts the pattern at once
                 }
             }
             else if (message.isNoteOff())
             {
-                noteOff (message.getNoteNumber());
+                keyOff (message.getNoteNumber());
                 changed = true;
             }
             else
@@ -152,41 +166,46 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
         if (pos == numSamples)
             break;
 
-        // The current note's gate ends.
-        if (sounding >= 0 && samplesToNoteOff >= 0.0 && --samplesToNoteOff < 0.0)
-        {
-            out.addEvent (juce::MidiMessage::noteOff (1, sounding), pos);
-            sounding = -1;
-        }
+        // The current notes' gate ends.
+        if (numSounding > 0 && samplesToNoteOff >= 0.0 && --samplesToNoteOff < 0.0)
+            stopAll (pos);
 
         // All keys up: stop.
         if (numHeld == 0)
         {
-            if (sounding >= 0)
-            {
-                out.addEvent (juce::MidiMessage::noteOff (1, sounding), pos);
-                sounding = -1;
-            }
+            stopAll (pos);
+            currentStep.store (-1, std::memory_order_relaxed);
             continue;
         }
 
         // Next step.
         if (samplesToNextStep <= 0.0)
         {
-            if (sounding >= 0)
-                out.addEvent (juce::MidiMessage::noteOff (1, sounding), pos);
+            stopAll (pos);
 
-            if (const auto note = nextNote(); note >= 0)
+            if (isSequence)
+            {
+                seqStep = (seqStep + 1) % length;
+                currentStep.store (seqStep, std::memory_order_relaxed);
+                if (s.stepOn[(size_t) seqStep])
+                    for (int i = 0; i < numHeld; ++i)
+                    {
+                        const auto velocity = s.stepAccent[(size_t) seqStep] ? (juce::uint8) 127
+                                                                               : (juce::uint8) juce::jmax (1, velocities[(size_t) i] * 3 / 4);
+                        play (played[(size_t) i] + s.stepPitch[(size_t) seqStep], velocity, pos);
+                    }
+            }
+            else if (const auto note = nextNote(); note >= 0)
             {
                 // Velocity of the key this note came from (any octave).
-                soundingVelocity = 100;
+                juce::uint8 velocity = 100;
                 for (int i = 0; i < numHeld; ++i)
                     if ((note - played[(size_t) i]) % 12 == 0)
-                        soundingVelocity = velocities[(size_t) i];
-                out.addEvent (juce::MidiMessage::noteOn (1, note, soundingVelocity), pos);
-                sounding = note;
-                samplesToNoteOff = juce::jlimit (0.05, 1.0, (double) s.gate) * stepSamples;
+                        velocity = velocities[(size_t) i];
+                play (note, velocity, pos);
             }
+
+            samplesToNoteOff = juce::jlimit (0.05, 1.0, (double) s.gate) * stepSamples;
             samplesToNextStep += stepSamples;
         }
         samplesToNextStep -= 1.0;

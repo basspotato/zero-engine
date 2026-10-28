@@ -845,6 +845,158 @@ void ScopeView::drawWavetable (juce::Graphics& g, juce::Rectangle<float> area)
 }
 
 //==============================================================================
+SequencerGrid::SequencerGrid (juce::AudioProcessorValueTreeState& state, std::function<int()> step)
+    : playingStep (std::move (step))
+{
+    auto attach = [&] (const juce::String& id, std::function<void (float)> onChange)
+    {
+        auto attachment = std::make_unique<juce::ParameterAttachment> (*state.getParameter (id), std::move (onChange));
+        attachment->sendInitialUpdate();
+        return attachment;
+    };
+
+    for (int s = 0; s < steps; ++s)
+    {
+        onAttachments[s]     = attach (SeqIDs::on (s),     [this, s] (float v) { on[s] = v > 0.5f; repaint(); });
+        pitchAttachments[s]  = attach (SeqIDs::pitch (s),  [this, s] (float v) { pitch[s] = juce::roundToInt (v); repaint(); });
+        accentAttachments[s] = attach (SeqIDs::accent (s), [this, s] (float v) { accent[s] = v > 0.5f; repaint(); });
+    }
+    lengthAttachment = attach (ParamIDs::seqLength, [this] (float v) { length = juce::roundToInt (v); repaint(); });
+
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    startTimerHz (30);
+}
+
+void SequencerGrid::timerCallback()
+{
+    if (const auto now = playingStep(); now != lit)
+    {
+        lit = now;
+        repaint();
+    }
+}
+
+juce::Rectangle<float> SequencerGrid::cell (int step, Row row) const
+{
+    // Columns of pads, in groups of four; rows: pad, pitch, accent.
+    auto area = getLocalBounds().toFloat();
+    const auto groupGap = 8.0f;
+    const auto columnWidth = (area.getWidth() - groupGap * 3.0f) / (float) steps;
+    const auto x = area.getX() + (float) step * columnWidth + (float) (step / 4) * groupGap;
+    const auto column = juce::Rectangle<float> (x, area.getY(), columnWidth, area.getHeight()).reduced (2.0f, 0.0f);
+
+    const auto padHeight = juce::jmin (column.getWidth(), area.getHeight() * 0.45f);
+    switch (row)
+    {
+        case padRow:    return column.withHeight (padHeight);
+        case pitchRow:  return column.withY (column.getY() + padHeight + 6.0f).withHeight (22.0f);
+        case accentRow: return column.withY (column.getY() + padHeight + 34.0f).withHeight (14.0f);
+        default:        return {};
+    }
+}
+
+std::pair<int, SequencerGrid::Row> SequencerGrid::hit (juce::Point<float> p) const
+{
+    for (int s = 0; s < steps; ++s)
+        for (const auto row : { padRow, pitchRow, accentRow })
+            if (cell (s, row).expanded (1.0f, 2.0f).contains (p))
+                return { s, row };
+    return { -1, noRow };
+}
+
+void SequencerGrid::paint (juce::Graphics& g)
+{
+    for (int s = 0; s < steps; ++s)
+    {
+        const auto active = s < length;
+        const auto playing = s == lit;
+        const auto dim = active ? 1.0f : 0.3f;
+
+        // Pad: lit orange-to-yellow when on (brighter on accents), outlined when playing.
+        auto pad = cell (s, padRow);
+        g.setColour (Palette::screen);
+        g.fillRoundedRectangle (pad, 4.0f);
+        if (on[s])
+        {
+            const auto colour = (accent[s] ? Palette::yellow : Palette::orange).withMultipliedAlpha (dim);
+            g.setColour (colour.withAlpha (0.25f * dim));
+            g.fillRoundedRectangle (pad.expanded (2.0f), 5.0f);
+            g.setGradientFill (juce::ColourGradient (colour.brighter (0.3f), pad.getX(), pad.getY(),
+                                                     colour.darker (0.3f), pad.getX(), pad.getBottom(), false));
+            g.fillRoundedRectangle (pad.reduced (2.0f), 3.0f);
+        }
+        g.setColour (playing ? Palette::accent : Palette::panelEdge.withMultipliedAlpha (dim));
+        g.drawRoundedRectangle (pad, 4.0f, playing ? 2.0f : 1.0f);
+
+        // Step number every four.
+        if (s % 4 == 0)
+        {
+            g.setColour (Palette::text.withAlpha (0.4f * dim));
+            g.setFont (Fonts::mono (9.0f));
+            g.drawText (juce::String (s + 1), pad.withHeight (12.0f).translated (3.0f, 2.0f), juce::Justification::topLeft);
+        }
+
+        // Pitch: drag up or down.
+        auto box = cell (s, pitchRow);
+        g.setColour (Palette::screen.withAlpha (0.8f));
+        g.fillRoundedRectangle (box, 3.0f);
+        g.setColour ((pitch[s] == 0 ? Palette::text.withAlpha (0.45f) : Palette::accent).withMultipliedAlpha (dim));
+        g.setFont (Fonts::mono (10.5f));
+        g.drawText (pitch[s] > 0 ? "+" + juce::String (pitch[s]) : juce::String (pitch[s]), box, juce::Justification::centred);
+
+        // Accent dot.
+        const auto dot = juce::Rectangle<float> (8.0f, 8.0f).withCentre (cell (s, accentRow).getCentre());
+        g.setColour ((accent[s] ? Palette::yellow : Palette::track.brighter (0.4f)).withMultipliedAlpha (dim));
+        g.fillEllipse (dot);
+    }
+
+    g.setColour (Palette::text.withAlpha (0.4f));
+    g.setFont (Fonts::ui (9.0f, true, 0.06f));
+    const auto legend = cell (0, accentRow).withX (0.0f).withWidth ((float) getWidth()).translated (0.0f, 16.0f);
+    g.drawText ("PAD: ON / OFF    PITCH: DRAG, DOUBLE-CLICK = 0    DOT: ACCENT", legend, juce::Justification::centredLeft);
+}
+
+void SequencerGrid::mouseDown (const juce::MouseEvent& e)
+{
+    const auto [s, row] = hit (e.position);
+    dragStep = -1;
+    if (s < 0)
+        return;
+
+    if (row == padRow)
+        onAttachments[s]->setValueAsCompleteGesture (on[s] ? 0.0f : 1.0f);
+    else if (row == accentRow)
+        accentAttachments[s]->setValueAsCompleteGesture (accent[s] ? 0.0f : 1.0f);
+    else if (row == pitchRow)
+    {
+        dragStep = s;
+        dragStartPitch = pitch[s];
+        pitchAttachments[s]->beginGesture();
+    }
+}
+
+void SequencerGrid::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragStep < 0)
+        return;
+    const auto semitones = juce::jlimit (-12, 12, dragStartPitch - e.getDistanceFromDragStartY() / 6);
+    pitchAttachments[dragStep]->setValueAsPartOfGesture ((float) semitones);
+}
+
+void SequencerGrid::mouseUp (const juce::MouseEvent&)
+{
+    if (dragStep >= 0)
+        pitchAttachments[dragStep]->endGesture();
+    dragStep = -1;
+}
+
+void SequencerGrid::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (const auto [s, row] = hit (e.position); s >= 0 && row == pitchRow)
+        pitchAttachments[s]->setValueAsCompleteGesture (0.0f);
+}
+
+//==============================================================================
 juce::Component* AdvancedPanel::Control::widget() const
 {
     if (knob != nullptr)   return knob.get();
@@ -852,7 +1004,8 @@ juce::Component* AdvancedPanel::Control::widget() const
     return toggle.get();
 }
 
-AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
+AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::function<int()> playingStep)
+    : grid (std::make_unique<SequencerGrid> (state, std::move (playingStep)))
 {
     using namespace ParamIDs;
     using Ids = std::vector<const char*>;
@@ -869,7 +1022,8 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
                         { "PLAY",         { playMode, glide, bendRange, velSens } } },
                       { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
                         { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
-        { "ARP",    { { { "ARPEGGIATOR",  { arpOn, arpMode, arpRate, arpOctaves, arpGate } } } } },
+        { "ARP",    { { { "ARPEGGIATOR",  { arpOn, arpMode, arpRate, arpOctaves, arpGate, seqLength } } },
+                      { { "STEP SEQUENCER  (arp mode: Sequence)", {} } } } },
     };
 
     auto makeControl = [&] (const char* id) -> std::unique_ptr<Control>
@@ -963,6 +1117,14 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
         pages.push_back (std::move (page));
     }
 
+    // The step grid draws its own section.
+    addChildComponent (grid.get());
+    for (auto& page : pages)
+        for (auto& row : page.rows)
+            for (auto& section : row)
+                if (section.name.startsWith ("STEP SEQUENCER"))
+                    section.custom = grid.get();
+
     show (0);
 }
 
@@ -974,8 +1136,12 @@ void AdvancedPanel::show (size_t page)
         pages[p].button->setToggleState (p == current, juce::dontSendNotification);
         for (auto& row : pages[p].rows)
             for (auto& section : row)
+            {
                 for (auto& control : section.controls)
                     control->widget()->setVisible (p == current);
+                if (section.custom != nullptr)
+                    section.custom->setVisible (p == current);
+            }
     }
     resized();
     repaint();
@@ -1063,6 +1229,8 @@ void AdvancedPanel::resized()
             const auto width = s + 1 == row.size() ? rowArea.getWidth()
                                                    : usable * juce::jmax (1, (int) section.controls.size()) / total;
             section.bounds = rowArea.removeFromLeft (width);
+            if (section.custom != nullptr)
+                section.custom->setBounds (section.bounds.withTrimmedTop (22).reduced (8, 6));
             rowArea.removeFromLeft (sectionGap);
 
             // Controls in one line under the section title, a name above each.
@@ -1096,7 +1264,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
       processor (p),
       display (p),
       levelMeter (p.getMeters()),
-      advancedPanel (p.state),
+      advancedPanel (p.state, [&p] { return p.getSequenceStep(); }),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
 {
     setLookAndFeel (&lookAndFeel);

@@ -111,6 +111,13 @@ private:
     ZeroSynth synth;
     Arpeggiator arp;
     std::atomic<float>* arpParams[5] {}; // on, mode, rate, octaves, gate
+    std::atomic<float>* seqLengthParam = nullptr;
+    std::atomic<float>* seqParams[3][Arpeggiator::maxSteps] {}; // on, pitch, accent per step
+
+public:
+    int getSequenceStep() const noexcept { return arp.getCurrentStep(); } // for the step grid
+
+private:
     std::atomic<int> appliedGenre { -1 }, appliedType { -1 };
     FinishingChain finishing;
     juce::AudioBuffer<float> synthBuffer; // L, R and the clean sub, sized in prepareToPlay

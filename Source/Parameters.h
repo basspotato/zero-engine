@@ -78,6 +78,7 @@ namespace ParamIDs
     inline constexpr auto arpRate     = "arpRate";
     inline constexpr auto arpOctaves  = "arpOctaves";
     inline constexpr auto arpGate     = "arpGate";
+    inline constexpr auto seqLength   = "seqLength";   // step sequencer (arp mode "Sequence")
     inline constexpr auto tilt        = "tilt";
     inline constexpr auto monoFreq    = "monoFreq";
     inline constexpr auto stereoWidth = "stereoWidth";
@@ -88,7 +89,15 @@ inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech
 inline const juce::StringArray typeNames     { "Bass", "Lead", "Chord", "Pad", "Pluck", "FX" };
 inline const juce::StringArray lfoShapeNames { "Sine", "Triangle", "Saw", "Square", "Sample & Hold" };
 inline const juce::StringArray lfoSyncNames  { "Off", "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
-inline const juce::StringArray arpModeNames  { "Up", "Down", "Up / Down", "Random", "As Played" };
+inline const juce::StringArray arpModeNames  { "Up", "Down", "Up / Down", "Random", "As Played", "Sequence" };
+
+// Step sequencer parameter IDs, steps counted from 1 (seqOn1 .. seqOn16).
+namespace SeqIDs
+{
+    inline juce::String on (int step)     { return "seqOn" + juce::String (step + 1); }
+    inline juce::String pitch (int step)  { return "seqPitch" + juce::String (step + 1); }
+    inline juce::String accent (int step) { return "seqAccent" + juce::String (step + 1); }
+}
 inline const juce::StringArray arpRateNames  { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
 inline constexpr double arpRateBeats[]       { 1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125 };
 inline constexpr float lfoSyncBeats[]       { 0.0f, 4.0f, 2.0f, 1.0f, 2.0f / 3.0f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f }; // one LFO cycle, in beats
@@ -208,6 +217,17 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::arpOctaves, 1 }, "Arp Octaves", 1, 4, 1));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::arpGate, 1 }, "Arp Gate",
                                                        NormalisableRange<float> (0.05f, 1.0f), 0.6f));
+
+    // Step sequencer: every step on, accents on the beats, so it plays at once.
+    layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::seqLength, 1 }, "Seq Length", 1, 16, 16));
+    for (int step = 0; step < 16; ++step)
+    {
+        const auto n = juce::String (step + 1);
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { SeqIDs::on (step), 1 }, "Step " + n + " On", true));
+        layout.add (std::make_unique<AudioParameterInt> (ParameterID { SeqIDs::pitch (step), 1 }, "Step " + n + " Pitch", -12, 12, 0,
+                                                         AudioParameterIntAttributes().withLabel ("st")));
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { SeqIDs::accent (step), 1 }, "Step " + n + " Accent", step % 4 == 0));
+    }
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::tilt, 1 }, "Tilt",
                                                        NormalisableRange<float> (-6.0f, 6.0f), 0.0f,
                                                        AudioParameterFloatAttributes().withLabel ("dB")));

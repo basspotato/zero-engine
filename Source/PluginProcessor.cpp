@@ -43,6 +43,13 @@ ZeroEngineProcessor::ZeroEngineProcessor()
 
     for (auto [slot, id] : { std::pair { 0, ParamIDs::arpOn }, { 1, ParamIDs::arpMode }, { 2, ParamIDs::arpRate }, { 3, ParamIDs::arpOctaves }, { 4, ParamIDs::arpGate } })
         arpParams[slot] = state.getRawParameterValue (id);
+    seqLengthParam = state.getRawParameterValue (ParamIDs::seqLength);
+    for (int step = 0; step < Arpeggiator::maxSteps; ++step)
+    {
+        seqParams[0][step] = state.getRawParameterValue (SeqIDs::on (step));
+        seqParams[1][step] = state.getRawParameterValue (SeqIDs::pitch (step));
+        seqParams[2][step] = state.getRawParameterValue (SeqIDs::accent (step));
+    }
 
     syncProfile(); // start on the default genre/type's profile
     startTimerHz (10);
@@ -278,6 +285,13 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     arpSettings.octaves = (int) arpParams[3]->load();
     arpSettings.gate = arpParams[4]->load();
     arpSettings.bpm = bpm;
+    arpSettings.length = (int) seqLengthParam->load();
+    for (int step = 0; step < Arpeggiator::maxSteps; ++step)
+    {
+        arpSettings.stepOn[(size_t) step] = seqParams[0][step]->load() > 0.5f;
+        arpSettings.stepPitch[(size_t) step] = juce::roundToInt (seqParams[1][step]->load());
+        arpSettings.stepAccent[(size_t) step] = seqParams[2][step]->load() > 0.5f;
+    }
     const auto& notes = arp.process (midi, numSamples, arpSettings);
 
     // Sub Split: voices write their sub to a third channel that skips the

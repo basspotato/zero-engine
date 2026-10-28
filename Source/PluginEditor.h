@@ -80,6 +80,35 @@ private:
     std::vector<float> spectrumDb = std::vector<float> ((size_t) fftSize / 2, -100.0f);
 };
 
+// The 16-step sequencer: per step a lit on/off pad, a pitch you drag up or down
+// (double-click for 0) and an accent dot; steps past Seq Length are dimmed and
+// the playing step is lit.
+class SequencerGrid : public juce::Component,
+                      private juce::Timer
+{
+public:
+    SequencerGrid (juce::AudioProcessorValueTreeState&, std::function<int()> playingStep);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+
+private:
+    static constexpr int steps = 16;
+    enum Row { padRow, pitchRow, accentRow, noRow };
+
+    void timerCallback() override;
+    juce::Rectangle<float> cell (int step, Row row) const;
+    std::pair<int, Row> hit (juce::Point<float>) const;
+
+    std::function<int()> playingStep;
+    std::unique_ptr<juce::ParameterAttachment> onAttachments[steps], pitchAttachments[steps], accentAttachments[steps], lengthAttachment;
+    bool on[steps] {}, accent[steps] {};
+    int pitch[steps] {}, length = steps, lit = -1;
+    int dragStep = -1, dragStartPitch = 0;
+};
+
 // Every engine parameter in the console style: knobs for numbers, slim menus
 // for choices, toggles for switches. Three pages, each with bordered sections
 // arranged in rows (small sections share a row). Covers the panels between the
@@ -87,7 +116,7 @@ private:
 class AdvancedPanel : public juce::Component
 {
 public:
-    explicit AdvancedPanel (juce::AudioProcessorValueTreeState&);
+    AdvancedPanel (juce::AudioProcessorValueTreeState&, std::function<int()> playingStep);
     void paint (juce::Graphics&) override;
     void resized() override;
 
@@ -110,6 +139,7 @@ private:
         juce::String name;
         std::vector<std::unique_ptr<Control>> controls;
         juce::Rectangle<int> bounds; // set in resized()
+        juce::Component* custom = nullptr; // a section drawn by its own component (the step grid)
     };
 
     struct Page
@@ -123,6 +153,7 @@ private:
 
     std::vector<Page> pages;
     size_t current = 0;
+    std::unique_ptr<SequencerGrid> grid;
 };
 
 // A small chevron button for stepping through Generate's history.

@@ -308,6 +308,64 @@ namespace
         return problems;
     }
 
+    // Sequence mode: steps on/off, pitch offsets, accents, length, and chords.
+    juce::StringArray checkSequencer()
+    {
+        auto run = [] (std::initializer_list<int> held)
+        {
+            Arpeggiator arp;
+            arp.prepare (48000.0, 512);
+            Arpeggiator::Settings s;
+            s.on = true;
+            s.mode = Arpeggiator::sequence;
+            s.beatsPerStep = 0.25;
+            s.bpm = 120.0;
+            s.length = 4;
+            s.stepOn = { true, true, false, true };
+            s.stepPitch = { 0, 7, 0, 0 };
+            s.stepAccent = { false, false, false, true };
+
+            std::vector<std::tuple<int, int, int>> ons; // sample, note, velocity
+            juce::MidiBuffer keys;
+            for (int block = 0; block < 48000 / 512; ++block)
+            {
+                keys.clear();
+                if (block == 0)
+                    for (auto note : held)
+                        keys.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+                for (const auto m : arp.process (keys, 512, s))
+                    if (m.getMessage().isNoteOn())
+                        ons.push_back ({ block * 512 + m.samplePosition, m.getMessage().getNoteNumber(), m.getMessage().getVelocity() });
+            }
+            return ons;
+        };
+
+        juce::StringArray problems;
+
+        // One key: C, G, rest, C (accented), twice in a second.
+        const auto single = run ({ 60 });
+        const int notes[] { 60, 67, 60, 60, 67, 60 };
+        const int at[] { 0, 6000, 18000, 24000, 30000, 42000 };
+        if (single.size() != std::size (notes))
+            problems.add ("one key: " + juce::String ((int) single.size()) + " notes, expected 6");
+        else
+            for (size_t i = 0; i < single.size(); ++i)
+            {
+                const auto [sample, note, velocity] = single[i];
+                if (note != notes[i] || std::abs (sample - at[i]) > 1)
+                    problems.add ("one key: note " + juce::String ((int) i) + " was " + juce::String (note) + " at " + juce::String (sample));
+                const auto accented = i == 2 || i == 5;
+                if (accented != (velocity == 127))
+                    problems.add ("one key: note " + juce::String ((int) i) + " accent wrong (velocity " + juce::String (velocity) + ")");
+            }
+
+        // A chord: every step that's on plays both keys.
+        if (const auto chord = run ({ 60, 64 }); chord.size() != 12)
+            problems.add ("chord: " + juce::String ((int) chord.size()) + " notes, expected 12");
+
+        return problems;
+    }
+
     // A note let go mid-decay must finish its release, whatever the sustain
     // (a zero sustain used to hang the voice forever; a tiny one for minutes).
     juce::StringArray checkReleaseMidDecay()
@@ -464,6 +522,17 @@ int runTests()
 
     std::printf ("Arpeggiator (order, timing, stop)... ");
     if (const auto problems = checkArpeggiator(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Step sequencer (steps, pitch, accent, chords)... ");
+    if (const auto problems = checkSequencer(); problems.isEmpty())
         std::printf ("ok\n");
     else
     {
