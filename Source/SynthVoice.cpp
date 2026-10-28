@@ -53,10 +53,9 @@ void ZeroVoice::setCurrentPlaybackSampleRate (double newRate)
 
 void ZeroVoice::updateEnvelopes()
 {
-    // juce::ADSR::setParameters recomputes the release speed from the sustain level,
-    // replacing the one noteOff() set from where the envelope actually was. Done
-    // during a release, a low sustain made notes ring on for minutes, and a zero
-    // sustain (plucks, stabs let go mid-decay) made them hang forever.
+    // Parameters are left alone once a note is released: the release then runs
+    // as it began. (juce::ADSR, used before, recomputed its release speed from
+    // the sustain level here, which once made released notes hang.)
     if (releasing)
         return;
 

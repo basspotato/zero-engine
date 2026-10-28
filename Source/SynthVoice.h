@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "MacroMap.h"
+#include "Envelope.h"
 
 struct ZeroSound : public juce::SynthesiserSound
 {
@@ -121,7 +122,7 @@ private:
     void updateEnvelopes();
     float nextLfo (float increment);
 
-    juce::ADSR ampEnv, modEnv;
+    Envelope ampEnv, modEnv; // analog-style curves (Envelope.h)
     bool releasing = false; // after note-off: envelope settings must not be re-applied (see updateEnvelopes)
     const juce::int64 seed;
     juce::Random random;
