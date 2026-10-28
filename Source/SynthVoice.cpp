@@ -19,7 +19,7 @@ namespace
 
 ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map, const std::atomic<float>& bpm,
                       std::atomic<float>& position, int index)
-    : macroMap (map), hostBpm (bpm), livePosition (position), random (0x5eed + index)
+    : macroMap (map), hostBpm (bpm), livePosition (position), seed (0x5eed + index), random (seed)
 {
     auto get = [&] (const char* id) { return state.getRawParameterValue (id); };
 

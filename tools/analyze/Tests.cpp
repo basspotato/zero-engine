@@ -585,7 +585,10 @@ namespace
             engine.setPlayConfigDetails (0, 2, 48000.0, 512);
             engine.prepareToPlay (48000.0, 512);
             engine.loadProfile (genre, type, profile);
-            juce::AudioBuffer<float> out (2, 48000), chunk (2, 512);
+            juce::AudioBuffer<float> settle (2, 512);
+            juce::MidiBuffer none;
+            for (int i = 0; i < 24; ++i) { settle.clear(); engine.processBlock (settle, none); } // as the matcher does
+            juce::AudioBuffer<float> out (2, 72000), chunk (2, 512);
             juce::MidiBuffer midi;
             for (int pos = 0; pos + 512 <= out.getNumSamples(); pos += 512)
             {
@@ -606,6 +609,8 @@ namespace
         changed.tilt = start.tilt - 4.0f;
         changed.stereoWidth = 0.2f;
         changed.ottDepth = juce::jmin (1.0f, start.ottDepth + 0.4f);
+        changed.ampDecay = 0.15f; // plucked: short decay, low sustain
+        changed.ampSustain = 0.15f;
 
         const auto reference = renderTo (changed);
         const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_match_test.wav");
@@ -626,6 +631,7 @@ namespace
         ZeroEngineProcessor renderEngine;
         renderEngine.stopProfileSync();
         ReferenceMatch match (renderEngine);
+        const auto began = juce::Time::getMillisecondCounter();
         match.start (file, genre, type, start);
         const auto timeout = juce::Time::getMillisecondCounter() + 60000;
         while (match.getState() == ReferenceMatch::State::running && juce::Time::getMillisecondCounter() < timeout)
@@ -636,7 +642,7 @@ namespace
         if (! result.ok)
             return { "match failed: " + result.summary };
         const auto after = SoundPrint::distance (SoundPrint::of (renderTo (result.profile), 48000.0, false), target);
-        std::printf ("(%s; distance %.2f -> %.2f) ", result.summary.toRawUTF8(), before, after);
+        std::printf ("(%s; distance %.2f -> %.2f in %.1f s) ", result.summary.toRawUTF8(), before, after, (juce::Time::getMillisecondCounter() - began) / 1000.0);
         if (after > 0.5f * before)
             problems.add ("match only got from " + juce::String (before, 2) + " to " + juce::String (after, 2));
         return problems;

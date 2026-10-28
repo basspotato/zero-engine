@@ -20,6 +20,7 @@ public:
     // fresh engine renders identically; phases still vary from note to note.
     ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& macroMap, const std::atomic<float>& hostBpm,
                std::atomic<float>& livePosition, int index);
+    void reseed() { random.setSeed (seed); } // back to a fresh engine's phases (offline renders)
 
     bool canPlaySound (juce::SynthesiserSound* sound) override;
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel) override;
@@ -122,6 +123,7 @@ private:
 
     juce::ADSR ampEnv, modEnv;
     bool releasing = false; // after note-off: envelope settings must not be re-applied (see updateEnvelopes)
+    const juce::int64 seed;
     juce::Random random;
 
     // Pitch in octaves (log2 Hz), so glides are even in pitch.

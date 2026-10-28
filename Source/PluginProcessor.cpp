@@ -624,3 +624,12 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new ZeroEngineProcessor();
 }
+
+void ZeroEngineProcessor::resetForRender()
+{
+    synth.allNotesOff (0, false);
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        if (auto* voice = dynamic_cast<ZeroVoice*> (synth.getVoice (i)))
+            voice->reseed(); // the same start phases every time, as a fresh engine
+    finishing.reset();
+}

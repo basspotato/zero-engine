@@ -34,15 +34,24 @@ ReferenceMatch::Result ReferenceMatch::take()
 
 SoundPrint ReferenceMatch::render (const Profile& profile, int note)
 {
-    // 0.6 s of the note (a triad for chords and pads), measured like the reference.
+    // 1.3 s of the note (a triad for chords and pads), measured like the reference.
     constexpr double rate = 48000.0;
-    constexpr int block = 512, length = 28800;
+    constexpr int block = 512, length = 62400;
     engine.setPlayConfigDetails (0, 2, rate, block);
     engine.prepareToPlay (rate, block);
+    engine.resetForRender(); // nothing of the last candidate may ring into this one
     engine.loadProfile (genre, type, profile);
 
+    // A quarter second of silence first, so knob smoothing settles and the last
+    // candidate's delay and reverb die away.
     juce::AudioBuffer<float> out (2, length), chunk (2, block);
     juce::MidiBuffer midi;
+    for (int pos = 0; pos < 12000; pos += block)
+    {
+        chunk.clear();
+        engine.processBlock (chunk, midi);
+    }
+
     const auto chord = type == 2 || type == 3;
     constexpr int intervals[] { 0, 4, 7 };
     for (int pos = 0; pos < length; pos += block)
@@ -87,7 +96,7 @@ void ReferenceMatch::run()
         note = juce::roundToInt (69.0 + 12.0 * std::log2 (target.pitchHz / 440.0));
     note = type == 0 ? juce::jlimit (24, 55, note) : juce::jlimit (36, 96, note);
 
-    constexpr int budget = 130; // renders, about 4 s
+    constexpr int budget = 110; // renders, about 7 s
     int renders = 0;
     auto best = from;
     auto bestDistance = SoundPrint::distance (render (best, note), target);
@@ -107,13 +116,16 @@ void ReferenceMatch::run()
             progress = 0.4f * (float) ++renders / (float) (WavetableBank::numBanks * 2);
         }
 
-    // 2. Coordinate search on what shapes tone, width and density.
-    struct Knob { float Profile::* member; float min, max, step; };
+    // 2. Coordinate search on what shapes tone, width, density and movement.
+    //    Attack and decay move by doublings (a step of 1 = twice as long).
+    struct Knob { float Profile::* member; float min, max, step; bool doubling = false; };
     const Knob knobs[] {
         { &Profile::wavePos, 0.0f, 1.0f, 0.1f },     { &Profile::tilt, -6.0f, 6.0f, 1.5f },
         { &Profile::air, 0.0f, 1.0f, 0.2f },          { &Profile::ottDepth, 0.0f, 1.0f, 0.2f },
         { &Profile::grit, 0.0f, 1.0f, 0.15f },        { &Profile::stereoWidth, 0.0f, 2.0f, 0.3f },
         { &Profile::weight, 0.0f, 1.0f, 0.2f },       { &Profile::detune, 0.0f, 1.0f, 0.15f },
+        { &Profile::ampAttack, 0.001f, 2.0f, 1.0f, true }, { &Profile::ampDecay, 0.02f, 4.0f, 1.0f, true },
+        { &Profile::ampSustain, 0.0f, 1.0f, 0.2f },
     };
     float steps[std::size (knobs)];
     for (size_t k = 0; k < std::size (knobs); ++k)
@@ -128,7 +140,9 @@ void ReferenceMatch::run()
             {
                 auto candidate = best;
                 auto& value = candidate.*knobs[k].member;
-                const auto moved = juce::jlimit (knobs[k].min, knobs[k].max, value + direction * steps[k]);
+                const auto moved = juce::jlimit (knobs[k].min, knobs[k].max, knobs[k].doubling
+                                                     ? juce::jmax (value, knobs[k].min) * std::exp2 (direction * steps[k])
+                                                     : value + direction * steps[k]);
                 if (moved == value)
                     continue;
                 value = moved;

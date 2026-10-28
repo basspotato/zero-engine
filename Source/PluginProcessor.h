@@ -18,6 +18,9 @@ public:
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
+    // Silence everything at once (voices, delay, reverb, compressors): offline
+    // renders such as Reference Match start each candidate from scratch.
+    void resetForRender();
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 

@@ -1,5 +1,6 @@
 #include "SoundPrint.h"
 #include <juce_dsp/juce_dsp.h>
+#include <algorithm>
 
 namespace
 {
@@ -48,17 +49,44 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
 
     auto sample = [&] (int ch, int i) { return audio.getSample (juce::jmin (ch, channels - 1), i); };
 
-    // Window: from 20 ms after the loudest 10 ms, 0.4 s long (shorter if the sound is).
+    // Energy per 10 ms; the onset is the first block within 30 dB of the loudest,
+    // and only the 1.2 s after it are measured.
     const auto block = juce::jmax (1, (int) (0.01 * sampleRate));
-    int loudest = 0;
-    double loudestEnergy = -1.0;
+    std::vector<double> energy;
     for (int start = 0; start + block <= total; start += block)
     {
         double e = 0.0;
         for (int i = start; i < start + block; ++i)
             e += sample (0, i) * sample (0, i) + sample (1, i) * sample (1, i);
-        if (e > loudestEnergy) { loudestEnergy = e; loudest = start; }
+        energy.push_back (e);
     }
+    if (energy.empty())
+        return print;
+
+    const auto overall = *std::max_element (energy.begin(), energy.end());
+    const auto onset = (int) (std::find_if (energy.begin(), energy.end(), [&] (double e) { return e > overall * 1.0e-3; }) - energy.begin());
+    const auto last = juce::jmin ((int) energy.size(), onset + (int) (span * 100.0));
+    const auto peakBlock = (int) (std::max_element (energy.begin() + onset, energy.begin() + last) - energy.begin());
+    const auto peakEnergy = juce::jmax (1.0e-12, energy[(size_t) peakBlock]);
+
+    // Attack: until the first block within 3 dB of the loudest (a sound that
+    // swells slowly after a quick start still counts as quick).
+    auto reached = onset;
+    while (reached < peakBlock && energy[(size_t) reached] < 0.5 * peakEnergy)
+        ++reached;
+    print.attackMs = 10.0f * (float) (reached - onset);
+
+    constexpr int pointBlocks[] { 10, 25, 50, 90 };
+    for (int p = 0; p < numEnvelopePoints; ++p)
+    {
+        const auto b = onset + pointBlocks[p];
+        print.envelopeDb[(size_t) p] = b + 1 < last
+            ? (float) (10.0 * std::log10 (0.5 * (energy[(size_t) b] + energy[(size_t) b + 1]) / peakEnergy + 1.0e-9))
+            : -60.0f;
+    }
+
+    // Spectrum window: from 20 ms after the loudest 10 ms, 0.4 s long (shorter if the sound is).
+    const auto loudest = peakBlock * block;
     const auto from = juce::jmin (loudest + (int) (0.02 * sampleRate), juce::jmax (0, total - fftSize));
     const auto length = juce::jmin ((int) (0.4 * sampleRate), total - from);
     if (length < 1024)
@@ -129,7 +157,18 @@ float SoundPrint::distance (const SoundPrint& a, const SoundPrint& b)
     }
     shape = counted > 0 ? shape / counted : 0.0;
 
+    // Movement: the level after the peak (6 dB apart counts like a band), and
+    // the attack on a log scale (twice as slow counts about as much).
+    double envelope = 0.0;
+    for (int p = 0; p < numEnvelopePoints; ++p)
+    {
+        const auto d = (juce::jmax (a.envelopeDb[(size_t) p], -40.0f) - juce::jmax (b.envelopeDb[(size_t) p], -40.0f)) / 6.0f;
+        envelope += d * d;
+    }
+    envelope /= numEnvelopePoints;
+    const auto attack = std::log2 ((a.attackMs + 10.0f) / (b.attackMs + 10.0f));
+
     const auto width = (a.sidePct - b.sidePct) / 15.0f;
     const auto density = (a.crestDb - b.crestDb) / 4.0f;
-    return (float) (shape + 0.5 * width * width + 0.5 * density * density);
+    return (float) (shape + 0.5 * envelope + 0.3 * attack * attack + 0.5 * width * width + 0.5 * density * density);
 }

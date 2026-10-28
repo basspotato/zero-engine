@@ -8,7 +8,7 @@ class ZeroEngineProcessor;
 
 // Reference Match: on a background thread, fingerprints a dropped sound, then
 // searches the current genre/type's sound (wavetable and position, tilt, Air,
-// OTT, Grit, Weight, width, detune) for the settings whose render is closest,
+// OTT, Grit, Weight, width, detune, amp envelope) for the settings whose render is closest,
 // played at the reference's pitch. Renders through its own engine, so the
 // plugin keeps playing. A few seconds; no machine learning.
 class ReferenceMatch : private juce::Thread

@@ -5,14 +5,18 @@
 
 // A compact fingerprint of a sound for Reference Match: its spectral shape in ten
 // octave bands (31 Hz to 16 kHz, dB relative to the total), stereo width, density
-// (peak-to-RMS) and pitch. Taken from the same window of any sound: from just
-// after its loudest moment, 0.4 s long, so a reference and an engine render are
-// measured alike.
+// (peak-to-RMS), pitch, and how it moves: its attack time and its level at four
+// times after the onset. Only the first 1.2 s after the onset counts, and the
+// spectrum is taken from just after the loudest moment, so a reference and an
+// engine render are measured alike.
 struct SoundPrint
 {
-    static constexpr int numBands = 10;
+    static constexpr int numBands = 10, numEnvelopePoints = 4;
+    static constexpr double span = 1.2; // seconds after the onset that are measured
+
     std::array<float, numBands> bandsDb {};
-    float sidePct = 0.0f, crestDb = 0.0f, levelDb = -100.0f, pitchHz = 0.0f;
+    std::array<float, numEnvelopePoints> envelopeDb {}; // 100, 250, 500, 900 ms after the onset, dB below the loudest
+    float sidePct = 0.0f, crestDb = 0.0f, levelDb = -100.0f, pitchHz = 0.0f, attackMs = 0.0f;
 
     // findPitch is for references; engine renders already know their note.
     static SoundPrint of (const juce::AudioBuffer<float>& audio, double sampleRate, bool findPitch = true);
