@@ -359,6 +359,48 @@ namespace
                     problems.add ("one key: note " + juce::String ((int) i) + " accent wrong (velocity " + juce::String (velocity) + ")");
             }
 
+        // Up mode shaped by the pattern: rests don't skip arp notes, pitch and accent apply.
+        {
+            Arpeggiator arp;
+            arp.prepare (48000.0, 512);
+            Arpeggiator::Settings s;
+            s.on = true;
+            s.mode = Arpeggiator::up;
+            s.beatsPerStep = 0.25;
+            s.bpm = 120.0;
+            s.length = 4;
+            s.stepOn = { true, false, true, true };
+            s.stepPitch = { 0, 0, 12, 0 };
+            s.stepAccent = { true, false, false, false };
+
+            std::vector<std::tuple<int, int, int>> ons;
+            juce::MidiBuffer keys;
+            for (int block = 0; block < 48000 / 512; ++block)
+            {
+                keys.clear();
+                if (block == 0)
+                    for (auto note : { 60, 64, 67 })
+                        keys.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+                for (const auto m : arp.process (keys, 512, s))
+                    if (m.getMessage().isNoteOn())
+                        ons.push_back ({ block * 512 + m.samplePosition, m.getMessage().getNoteNumber(), m.getMessage().getVelocity() });
+            }
+
+            const int upNotes[] { 60, 76, 67, 60, 76, 67 };
+            const int upAt[] { 0, 12000, 18000, 24000, 36000, 42000 };
+            if (ons.size() != std::size (upNotes))
+                problems.add ("up mode: " + juce::String ((int) ons.size()) + " notes, expected 6");
+            else
+                for (size_t i = 0; i < ons.size(); ++i)
+                {
+                    const auto [sample, note, velocity] = ons[i];
+                    if (note != upNotes[i] || std::abs (sample - upAt[i]) > 1)
+                        problems.add ("up mode: note " + juce::String ((int) i) + " was " + juce::String (note) + " at " + juce::String (sample));
+                    if ((i % 3 == 0) != (velocity == 127))
+                        problems.add ("up mode: note " + juce::String ((int) i) + " accent wrong");
+                }
+        }
+
         // A chord: every step that's on plays both keys.
         if (const auto chord = run ({ 60, 64 }); chord.size() != 12)
             problems.add ("chord: " + juce::String ((int) chord.size()) + " notes, expected 12");

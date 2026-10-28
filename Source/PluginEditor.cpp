@@ -862,7 +862,6 @@ SequencerGrid::SequencerGrid (juce::AudioProcessorValueTreeState& state, std::fu
         accentAttachments[s] = attach (SeqIDs::accent (s), [this, s] (float v) { accent[s] = v > 0.5f; repaint(); });
     }
     lengthAttachment = attach (ParamIDs::seqLength, [this] (float v) { length = juce::roundToInt (v); repaint(); });
-    modeAttachment = attach (ParamIDs::arpMode, [this] (float v) { arpMode = juce::roundToInt (v); });
 
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     startTimerHz (30);
@@ -957,12 +956,6 @@ void SequencerGrid::paint (juce::Graphics& g)
     g.drawText ("PAD: ON / OFF    PITCH: DRAG, DOUBLE-CLICK = 0    DOT: ACCENT", legend, juce::Justification::centredLeft);
 }
 
-void SequencerGrid::useSequenceMode()
-{
-    // The steps only play in Sequence mode; editing one means you want to hear it.
-    if (arpMode != Arpeggiator::sequence)
-        modeAttachment->setValueAsCompleteGesture ((float) Arpeggiator::sequence);
-}
 
 void SequencerGrid::mouseDown (const juce::MouseEvent& e)
 {
@@ -971,7 +964,6 @@ void SequencerGrid::mouseDown (const juce::MouseEvent& e)
     if (s < 0)
         return;
 
-    useSequenceMode();
 
     if (row == padRow)
         onAttachments[s]->setValueAsCompleteGesture (on[s] ? 0.0f : 1.0f);
@@ -1004,7 +996,6 @@ void SequencerGrid::mouseDoubleClick (const juce::MouseEvent& e)
 {
     if (const auto [s, row] = hit (e.position); s >= 0 && row == pitchRow)
     {
-        useSequenceMode();
         pitchAttachments[s]->setValueAsCompleteGesture (0.0f);
     }
 }
@@ -1036,7 +1027,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
                       { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
                         { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
         { "ARP",    { { { "ARPEGGIATOR",  { arpOn, arpMode, arpRate, arpOctaves, arpGate, seqLength } } },
-                      { { "STEP SEQUENCER  (arp mode: Sequence)", {} } } } },
+                      { { "STEP SEQUENCER  (rests, pitch and accents for every arp mode)", {} } } } },
     };
 
     auto makeControl = [&] (const char* id) -> std::unique_ptr<Control>

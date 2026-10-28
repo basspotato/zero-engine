@@ -39,7 +39,7 @@ Output goes to `analysis/` by default (git-ignored).
 - `Source/FinishingChain.*`: saturation, OTT, EQ, width, spectral stage, clipper, meters
 - `Source/SpectralCompressor.*`: our own many-band (256-bin STFT) up/down compressor, level-neutral, leaves < 150 Hz alone; adds 512 samples of latency
 - `Source/MacroMap.h`: what each macro pushes per profile; the mod wheel adds to Motion
-- `Source/Arpeggiator.*`: tempo-synced arp and 16-step sequencer (mode "Sequence"), run on the MIDI before the synth; its settings are not part of profiles
+- `Source/Arpeggiator.*`: tempo-synced arp with a 16-step pattern that shapes every mode (rests, transpose, accent); mode "Sequence" plays all held keys per step. Runs on the MIDI before the synth; its settings are not part of profiles
 - `Source/PluginProcessor.*`: synth, finishing chain, state, Generate (render-and-check), history, favourites (`%APPDATA%/Zero Engine/Favourites`)
 - `Source/PluginEditor.*`: UI (look and feel, display, meter, tesseract, Advanced page); laid out at 900 x 600 and scaled with the window
 - `Resources/Fonts/`: Barlow Condensed and Share Tech Mono (OFL), from the owner's Potato Kicker

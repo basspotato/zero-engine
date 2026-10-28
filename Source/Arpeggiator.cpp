@@ -183,26 +183,32 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
         {
             stopAll (pos);
 
-            if (isSequence)
+            // The step pattern shapes every mode: a step that's off rests, its
+            // pitch transposes, and an accent plays at full velocity.
+            seqStep = (seqStep + 1) % length;
+            currentStep.store (seqStep, std::memory_order_relaxed);
+            const auto stepPlays = s.stepOn[(size_t) seqStep];
+            const auto transpose = s.stepPitch[(size_t) seqStep];
+            const auto accented = s.stepAccent[(size_t) seqStep];
+
+            if (stepPlays && isSequence)
             {
-                seqStep = (seqStep + 1) % length;
-                currentStep.store (seqStep, std::memory_order_relaxed);
-                if (s.stepOn[(size_t) seqStep])
-                    for (int i = 0; i < numHeld; ++i)
-                    {
-                        const auto velocity = s.stepAccent[(size_t) seqStep] ? (juce::uint8) 127
-                                                                               : (juce::uint8) juce::jmax (1, velocities[(size_t) i] * 3 / 4);
-                        play (played[(size_t) i] + s.stepPitch[(size_t) seqStep], velocity, pos);
-                    }
-            }
-            else if (const auto note = nextNote(); note >= 0)
-            {
-                // Velocity of the key this note came from (any octave).
-                juce::uint8 velocity = 100;
+                // Every held key (chords).
                 for (int i = 0; i < numHeld; ++i)
-                    if ((note - played[(size_t) i]) % 12 == 0)
-                        velocity = velocities[(size_t) i];
-                play (note, velocity, pos);
+                    play (played[(size_t) i] + transpose,
+                          accented ? (juce::uint8) 127 : (juce::uint8) juce::jmax (1, velocities[(size_t) i] * 3 / 4), pos);
+            }
+            else if (stepPlays)
+            {
+                // The arp's next note; it only moves on when a step plays, so rests don't skip notes.
+                if (const auto note = nextNote(); note >= 0)
+                {
+                    juce::uint8 velocity = 100; // the key this note came from (any octave)
+                    for (int i = 0; i < numHeld; ++i)
+                        if ((note - played[(size_t) i]) % 12 == 0)
+                            velocity = velocities[(size_t) i];
+                    play (note + transpose, accented ? (juce::uint8) 127 : velocity, pos);
+                }
             }
 
             samplesToNoteOff = juce::jlimit (0.05, 1.0, (double) s.gate) * stepSamples;

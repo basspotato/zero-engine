@@ -10,9 +10,9 @@
 // notes go out; everything else (pitch bend, CCs) passes through. No allocation
 // once prepared. Starts on the first key and stops when all keys are released.
 //
-// Arp modes walk through the held notes one at a time. Sequence mode is a
-// 16-step sequencer: each step that's on plays every held key (so chords work),
-// shifted by that step's pitch, louder on accented steps.
+// Arp modes walk through the held notes one at a time; Sequence mode plays every
+// held key (chords). In all modes the 16-step pattern shapes the steps: a step
+// that's off rests, its pitch transposes, an accent plays at full velocity.
 class Arpeggiator
 {
 public:
@@ -29,7 +29,8 @@ public:
         double bpm = 120.0;
 
         int length = maxSteps;      // sequence mode
-        std::array<bool, maxSteps> stepOn {};
+        std::array<bool, maxSteps> stepOn { true, true, true, true, true, true, true, true,
+                                            true, true, true, true, true, true, true, true };
         std::array<int, maxSteps> stepPitch {};
         std::array<bool, maxSteps> stepAccent {};
     };
