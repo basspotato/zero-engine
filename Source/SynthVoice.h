@@ -32,7 +32,7 @@ public:
 
     // Mono/legato: move this sounding voice to a new note, sliding over the
     // Glide time. retrigger restarts the envelopes (Mono); Legato doesn't.
-    void glideTo (int midiNote, float velocity, bool retrigger);
+    void glideTo (int midiNote, float velocity, bool retrigger, bool jump = false); // jump: no slide, start on the note
 
 private:
     struct Params

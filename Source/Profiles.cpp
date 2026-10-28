@@ -38,7 +38,7 @@ namespace
 
         p.filterMode = 1.0f;        // Low 24, fully open: bypassed
         p.filterCutoff = 20000.0f;
-        p.velSens = 1.0f;
+        p.velSens = 0.5f;           // soft notes about 6 dB down at most: a light key press still plays
         p.waveTableB = growlTable;  // unused while tableMix is 0
         p.delayTime = 2.0f;         // 1/8 dotted
         p.delayFeedback = 0.35f;
@@ -259,7 +259,7 @@ namespace
             p.modToPos = 0.0f;
             p.filterMode = 0.0f; p.filterCutoff = 4500.0f;
             p.lfoRate = 0.2f; p.lfoToPos = 0.15f;
-            p.grit = 0.05f; p.ottDepth = 0.2f; p.air = 0.35f; p.tilt = 1.5f; p.levelTrim = 4.5f; // 5 clipped with Spectral at full
+            p.grit = 0.05f; p.ottDepth = 0.2f; p.air = 0.35f; p.tilt = 1.5f; p.levelTrim = 3.5f; // 4.5 clipped with Spectral at full
             p.reverbMix = 0.4f;
         }
 

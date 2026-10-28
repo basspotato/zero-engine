@@ -26,7 +26,7 @@ private:
     void processFrame (float amount) noexcept;
 
     juce::dsp::FFT fft { order };
-    std::vector<float> window, levelDb, gainDb, binHz;
+    std::vector<float> window, levelDb, gainDb, appliedDb, binHz; // appliedDb: gainDb smoothed across neighbouring bins
     std::vector<float> input[2], output[2], frame[2]; // frame holds 2 * size for the FFT
     int channels = 2, pos = 0, hopCount = 0, firstBin = 1;
     float attack = 0.0f, release = 0.0f; // per frame

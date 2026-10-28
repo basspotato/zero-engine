@@ -354,6 +354,78 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "noise" && args.size() >= 2)
+    {
+        // Noise between the harmonics of a held C4 (dB under the harmonics), per
+        // profile: a clean synth is quiet there; hiss and aliasing raised by the
+        // compressors are not. Genre/Type, or "all"; then id=value overrides
+        // (e.g. spectral=0 ottDepth=0) to find which stage adds it.
+        std::vector<std::pair<int, int>> pairs;
+        auto overrides = args;
+        overrides.removeRange (0, args[1] == "all" ? 2 : 3);
+        if (args[1] == "all")
+            for (int g = 0; g < genreNames.size(); ++g)
+                for (int t = 0; t < typeNames.size(); ++t)
+                    pairs.push_back ({ g, t });
+        else
+            pairs.push_back ({ genreNames.indexOf (args[1], true), typeNames.indexOf (args[2], true) });
+
+        constexpr int fftOrder = 14, fftSize = 1 << fftOrder;
+        juce::dsp::FFT fft (fftOrder);
+        for (const auto& [g, t] : pairs)
+        {
+            ZeroEngineProcessor engine;
+            engine.stopProfileSync();
+            engine.loadProfile (g, t, makeProfile (g, t));
+            for (const auto& o : overrides)
+                if (auto* param = engine.state.getParameter (o.upToFirstOccurrenceOf ("=", false, false)))
+                    param->setValueNotifyingHost (param->convertTo0to1 (o.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
+            engine.setPlayConfigDetails (0, 2, 48000.0, 512);
+            engine.prepareToPlay (48000.0, 512);
+
+            juce::AudioBuffer<float> out (2, 48000 * 2), block (2, 512);
+            juce::MidiBuffer midi;
+            for (int pos = 0; pos + 512 <= out.getNumSamples(); pos += 512)
+            {
+                midi.clear();
+                if (pos == 0)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+                block.clear();
+                engine.processBlock (block, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    out.copyFrom (ch, pos, block, ch, 0, 512);
+            }
+
+            std::vector<float> frame ((size_t) fftSize * 2, 0.0f);
+            const auto from = 48000 / 2;
+            for (int i = 0; i < fftSize; ++i)
+                frame[(size_t) i] = 0.5f * (out.getSample (0, from + i) + out.getSample (1, from + i))
+                                  * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) fftSize));
+            fft.performFrequencyOnlyForwardTransform (frame.data());
+
+            // Harmonics of C4 from 1 to 10 kHz, and the midpoints between them.
+            const auto f0 = 261.63, binHz = 48000.0 / fftSize;
+            double harmonics = 0.0, between = 0.0;
+            int count = 0;
+            for (int h = 4; h * f0 < 10000.0; ++h)
+            {
+                auto peakNear = [&] (double hz, int radius)
+                {
+                    double best = 0.0;
+                    for (int b = (int) (hz / binHz) - radius; b <= (int) (hz / binHz) + radius; ++b)
+                        best = juce::jmax (best, (double) frame[(size_t) b] * frame[(size_t) b]);
+                    return best;
+                };
+                harmonics += peakNear (h * f0, 3);
+                between += peakNear ((h + 0.5) * f0, 1);
+                ++count;
+            }
+            std::printf ("%-12s %-6s floor %6.1f dB under the harmonics\n", genreNames[g].toRawUTF8(), typeNames[t].toRawUTF8(),
+                         10.0 * std::log10 (harmonics / juce::jmax (1.0e-20, between)));
+        }
+        return 0;
+    }
+
     if (command == "gendebug" && args.size() >= 4)
     {
         // One Generate result (genre, type, seed): the parameters that shape its tail,

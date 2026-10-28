@@ -82,9 +82,11 @@ void ZeroVoice::setVelocity (float velocity)
     level = 0.3f * (1.0f - sensitivity + sensitivity * velocity);
 }
 
-void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger)
+void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger, bool jump)
 {
     targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
+    if (jump)
+        pitch = targetPitch;
 
     if (retrigger)
     {
@@ -363,7 +365,12 @@ void ZeroSynth::noteOn (int midiChannel, int midiNoteNumber, float velocity)
         return;
 
     if (voice->isVoiceActive())
-        voice->glideTo (midiNoteNumber, velocity, mode == mono || numHeld == 1); // legato only slides while a key is held
+    {
+        // No other key held (the last note is only releasing): a fresh note,
+        // started on its own pitch. Overlapping keys slide (and mono retriggers).
+        const auto fresh = numHeld == 1;
+        voice->glideTo (midiNoteNumber, velocity, mode == mono || fresh, fresh);
+    }
     else
         startVoice (voice, getSound (0).get(), midiChannel, midiNoteNumber, velocity);
 }
