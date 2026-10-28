@@ -72,6 +72,7 @@ target_sources(ZeroAnalyze
         tools/analyze/Descriptors.cpp
         tools/analyze/Freesound.cpp
         tools/analyze/Tests.cpp
+        tools/analyze/MatchBench.cpp
         tools/analyze/Library.cpp
         tools/analyze/Tuner.cpp
         tools/analyze/Harmonics.cpp
