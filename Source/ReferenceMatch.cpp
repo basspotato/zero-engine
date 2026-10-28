@@ -195,7 +195,7 @@ void ReferenceMatch::run()
     }
     const auto searchRenders = searchBudget; // per worker
     const auto numPresets = genreNames.size() * typeNames.size();
-    const auto expected = (float) (numPresets + workers * (WavetableBank::numBanks + searchRenders));
+    const auto expected = (float) (numPresets + workers * (WavetableBank::numBanks + 2 * searchRenders));
     std::atomic<int> renders { 0 };
     auto counted = [&] { progress = juce::jmin (0.99f, (float) ++renders / expected); };
 
@@ -262,17 +262,17 @@ void ReferenceMatch::run()
             break;
     }
 
-    // 2. Each start refined on its own engine: the octave, the wavetable, then a pattern search.
-    std::vector<std::vector<Candidate>> finals ((size_t) workers); // each worker's best few
-    inParallel ([&] (int w)
+    // Refining one start on one engine. The first round settles the octave and
+    // the wavetable, seeds any wobble, then searches; a second round starts
+    // from a good result nudged at random (seed) and searches with finer steps.
+    // Returns its best few, re-scored at full quality at the end.
+    auto refine = [&] (int w, Candidate start, bool firstRound, unsigned seed)
     {
-        if (w >= (int) starts.size())
-            return;
         auto& engine = *engines[(size_t) w];
-        auto best = starts[(size_t) w];
-        auto mine = playing; // this worker's note, octave settled below
+        auto best = start;
+        auto mine = firstRound ? playing : start.playing; // the notes this worker plays, octave settled below
         best.playing = mine;
-        std::vector<Candidate> top; // the best few, re-scored at full quality at the end
+        std::vector<Candidate> top;
         auto consider = [&] (const Profile& p, double gateUnit = -1.0)
         {
             auto play = mine;
@@ -294,61 +294,71 @@ void ReferenceMatch::run()
             return (double) d;
         };
 
-        // The octave: a pitch read an octave high (a strong second harmonic) is
-        // tried an octave down, when the spectrum has real energy there. Never
-        // up: a correct reading always loses to its octave neighbours somewhere.
-        const auto below = (int) std::floor (std::log2 (juce::MidiMessage::getMidiNoteInHertz (mine.firstNote() - 12) / 31.25) + 0.5);
-        const auto strongest = *std::max_element (target.bandsDb.begin(), target.bandsDb.end());
-        const auto octaveDown = below >= 0 && below < SoundPrint::numBands && target.bandsDb[(size_t) below] > strongest - 12.0f;
-        for (const auto shift : { -12 })
+        if (firstRound)
         {
-            if (! octaveDown)
-                break;
-            auto other = mine;
-            other.shift = mine.shift + shift;
-            auto print = render (engine, best.genre, best.type, best.profile, other);
-            if (const auto d = SoundPrint::distance (print, target); d < best.distance)
+            // The octave: a pitch read an octave high (a strong second harmonic)
+            // is tried an octave down, when the spectrum has real energy there.
+            // Never up: a correct reading always loses to its octave neighbours somewhere.
+            const auto below = (int) std::floor (std::log2 (juce::MidiMessage::getMidiNoteInHertz (mine.firstNote() - 12) / 31.25) + 0.5);
+            const auto strongest = *std::max_element (target.bandsDb.begin(), target.bandsDb.end());
+            if (below >= 0 && below < SoundPrint::numBands && target.bandsDb[(size_t) below] > strongest - 12.0f)
             {
-                best.distance = d;
-                best.print = std::move (print);
-                mine = other;
-                best.playing = mine;
+                auto other = mine;
+                other.shift = mine.shift - 12;
+                auto print = render (engine, best.genre, best.type, best.profile, other);
+                if (const auto d = SoundPrint::distance (print, target); d < best.distance)
+                {
+                    best.distance = d;
+                    best.print = std::move (print);
+                    mine = other;
+                    best.playing = mine;
+                }
+                counted();
             }
-            counted();
-        }
 
-        for (int table = 0; table < WavetableBank::numBanks && ! threadShouldExit(); ++table)
-        {
-            auto p = best.profile;
-            p.waveTable = (float) table;
-            consider (p);
-        }
-
-
-        // A wobble in the reference: a free-running LFO at its rate, on the
-        // filter or the wavetable position, tried before the search refines it.
-        if (target.moveRateHz > 0.0f)
-            for (const auto [toCutoff, toPos] : { std::pair { 1.5f, 0.0f }, { 3.0f, 0.0f }, { 0.0f, 0.5f } })
+            for (int table = 0; table < WavetableBank::numBanks && ! threadShouldExit(); ++table)
             {
                 auto p = best.profile;
-                p.lfoSync = 0.0f;
-                p.lfoRate = target.moveRateHz;
-                p.lfoToCutoff = toCutoff;
-                p.lfoToPos = toPos;
-                if (toCutoff > 0.0f)
-                    p.filterCutoff = juce::jmin (p.filterCutoff, 800.0f);
-                if (! threadShouldExit())
-                    consider (p, (best.playing.gate - 0.05) / 0.95);
+                p.waveTable = (float) table;
+                consider (p);
             }
+
+            // A wobble in the reference: a free-running LFO at its rate, on the
+            // filter or the wavetable position, tried before the search refines it.
+            if (target.moveRateHz > 0.0f)
+                for (const auto [toCutoff, toPos] : { std::pair { 1.5f, 0.0f }, { 3.0f, 0.0f }, { 0.0f, 0.5f } })
+                {
+                    auto p = best.profile;
+                    p.lfoSync = 0.0f;
+                    p.lfoRate = target.moveRateHz;
+                    p.lfoToCutoff = toCutoff;
+                    p.lfoToPos = toPos;
+                    if (toCutoff > 0.0f)
+                        p.filterCutoff = juce::jmin (p.filterCutoff, 800.0f);
+                    if (! threadShouldExit())
+                        consider (p, (best.playing.gate - 0.05) / 0.95);
+                }
+        }
+        const auto beforeSearch = best.distance;
+
         auto base = best.profile;
         if (target.moveRateHz > 0.0f)
             base.lfoSync = 0.0f; // free-running, so the rate dimension counts
-
         std::vector<double> units;
         for (const auto& d : dimensions)
             units.push_back (toUnit (d, base.*d.member));
-        const auto currentGate = [&] { return (double) (best.playing.gate - 0.05f) / 0.95; };
-        units.push_back (currentGate()); // and how long each note is held
+        units.push_back ((double) (best.playing.gate - 0.05f) / 0.95); // and how long each note is held
+
+        auto stepSize = 0.15;
+        if (! firstRound)
+        {
+            std::mt19937 rng (seed);
+            std::normal_distribution<double> nudge (0.0, 0.05);
+            for (auto& u : units)
+                u = std::clamp (u + nudge (rng), 0.0, 1.0);
+            stepSize = 0.08;
+        }
+
         if (useCmaes)
         {
             // CMA-ES with restarts: when a run stops gaining for five
@@ -356,11 +366,7 @@ void ReferenceMatch::run()
             auto lambda = 0;
             for (int done = 0; done < searchRenders && ! threadShouldExit();)
             {
-                std::vector<double> from;
-                for (const auto& d : dimensions)
-                    from.push_back (toUnit (d, best.profile.*d.member));
-                from.push_back (currentGate());
-                Cmaes cmaes (from, 0.15, (unsigned) (w * 101 + done + 1), lambda);
+                Cmaes cmaes (units, stepSize, seed + (unsigned) done, lambda);
                 lambda = cmaes.populationSize() * 2;
                 auto stale = 0;
                 for (auto before = best.distance; done + cmaes.populationSize() <= searchRenders && stale < 5 && ! threadShouldExit();)
@@ -380,42 +386,76 @@ void ReferenceMatch::run()
         }
         else
         {
-        // Pattern search: each setting a step either way, keeping any gain;
-        // when a full pass gains nothing, the steps halve.
-        auto cost = (double) best.distance;
-        std::vector<double> steps (units.size(), 0.15);
-        for (int done = 0; done < searchRenders && ! threadShouldExit();)
-        {
-            bool improved = false;
-            for (size_t k = 0; k < units.size() && done < searchRenders && ! threadShouldExit(); ++k)
-                for (const auto direction : { 1.0, -1.0 })
-                {
-                    auto candidate = units;
-                    candidate[k] = std::clamp (units[k] + direction * steps[k], 0.0, 1.0);
-                    if (candidate[k] == units[k])
-                        continue;
-                    ++done;
-                    if (const auto c = consider (withUnits (base, candidate), candidate.back()); c < cost)
-                    {
-                        units = candidate;
-                        cost = c;
-                        improved = true;
-                        break;
-                    }
-                }
-            if (! improved)
+            // Pattern search: each setting a step either way, keeping any gain;
+            // when a full pass gains nothing, the steps halve.
+            auto cost = firstRound ? (double) best.distance : consider (withUnits (base, units), units.back());
+            std::vector<double> steps (units.size(), stepSize);
+            for (int done = 0; done < searchRenders && ! threadShouldExit();)
             {
-                for (auto& s : steps)
-                    s *= 0.5;
-                if (steps[0] < 0.005)
-                    break;
+                bool improved = false;
+                for (size_t k = 0; k < units.size() && done < searchRenders && ! threadShouldExit(); ++k)
+                    for (const auto direction : { 1.0, -1.0 })
+                    {
+                        auto candidate = units;
+                        candidate[k] = std::clamp (units[k] + direction * steps[k], 0.0, 1.0);
+                        if (candidate[k] == units[k])
+                            continue;
+                        ++done;
+                        if (const auto c = consider (withUnits (base, candidate), candidate.back()); c < cost)
+                        {
+                            units = candidate;
+                            cost = c;
+                            improved = true;
+                            break;
+                        }
+                    }
+                if (! improved)
+                {
+                    for (auto& s : steps)
+                        s *= 0.5;
+                    if (steps[0] < 0.005)
+                        break;
+                }
             }
         }
-        }
+
+        if (debugPrint)
+            std::printf ("    %s worker %d %s %s: start %.2f, before search %.2f, after %.2f\n", firstRound ? "first " : "second", w,
+                         genreNames[best.genre].toRawUTF8(), typeNames[best.type].toRawUTF8(), start.distance, beforeSearch, best.distance);
         if (top.empty())
             top.push_back (best);
-        finals[(size_t) w] = std::move (top);
+        return top;
+    };
+
+    // 2. Each start refined on its own engine.
+    std::vector<std::vector<Candidate>> finals ((size_t) workers); // each worker's best few
+    inParallel ([&] (int w)
+    {
+        if (w < (int) starts.size())
+            finals[(size_t) w] = refine (w, starts[(size_t) w], true, (unsigned) w + 1);
     });
+    if (threadShouldExit())
+        return fail ("Match cancelled");
+
+    // 2b. Successive halving: every engine goes on from one of the two best
+    //     results so far, each nudged differently, instead of the weaker starts.
+    std::vector<Candidate> leaders;
+    for (const auto& f : finals)
+        if (! f.empty())
+            leaders.push_back (f.front());
+    std::sort (leaders.begin(), leaders.end(), [] (const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
+    leaders.resize (juce::jmin ((size_t) 2, leaders.size()));
+    if (! leaders.empty())
+    {
+        std::vector<std::vector<Candidate>> more ((size_t) workers);
+        inParallel ([&] (int w)
+        {
+            more[(size_t) w] = refine (w, leaders[(size_t) w % leaders.size()], false, (unsigned) (101 + w));
+        });
+        for (int w = 0; w < workers; ++w)
+            for (auto& c : more[(size_t) w])
+                finals[(size_t) w].push_back (std::move (c));
+    }
     if (threadShouldExit())
         return fail ("Match cancelled");
 
@@ -430,6 +470,15 @@ void ReferenceMatch::run()
             c.distance = SoundPrint::distance (c.print, target);
         }
     });
+    if (debugPrint) // tooling: the finalists at full quality, term by term
+        for (const auto& f : finals)
+            for (const auto& c : f)
+            {
+                juce::String terms;
+                SoundPrint::distance (c.print, target, &terms);
+                std::printf ("    final  %-12s %-6s %.2f  gate %.2f  %s\n", genreNames[c.genre].toRawUTF8(), typeNames[c.type].toRawUTF8(), c.distance,
+                             c.playing.gate, terms.toRawUTF8());
+            }
     std::vector<Candidate> all;
     for (auto& f : finals)
         for (auto& c : f)

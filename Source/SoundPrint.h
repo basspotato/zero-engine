@@ -45,5 +45,6 @@ struct SoundPrint
     static inline Weights weights;
 
     // How far apart two prints are; about 1 means "clearly a different sound".
-    static float distance (const SoundPrint& a, const SoundPrint& b);
+    // explain (tooling): set to the terms that make up the distance.
+    static float distance (const SoundPrint& a, const SoundPrint& b, juce::String* explain = nullptr);
 };

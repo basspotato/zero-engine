@@ -652,7 +652,7 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     return print;
 }
 
-float SoundPrint::distance (const SoundPrint& a, const SoundPrint& b)
+float SoundPrint::distance (const SoundPrint& a, const SoundPrint& b, juce::String* explain)
 {
     // How the two evolve: the mean dB difference of their spectrograms over the
     // first note, tone and attack resolution alike (4 dB off counts as 1), plus
@@ -672,6 +672,9 @@ float SoundPrint::distance (const SoundPrint& a, const SoundPrint& b)
         // "clearly different".
         const auto c = compositeDistance (overLonger, a.melTone, b.melTone);
         const auto width = (a.sidePct - b.sidePct) / 15.0f;
+        if (explain != nullptr)
+            *explain = juce::String::formatted ("mel %.2f mfcc %.2f centroid %.2f loudness %.2f width %.2f", mel, c.mfcc / 4.0f, c.centroid / 2.0f,
+                                                c.loudness / 3.0f, 0.5f * width * width);
         return weights.mel * mel + weights.mfcc * c.mfcc / 4.0f + weights.centroid * c.centroid / 2.0f
              + weights.loudness * c.loudness / 3.0f + 0.5f * width * width;
     }
