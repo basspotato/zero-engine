@@ -88,6 +88,7 @@ private:
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
     SpectralCompressor spectral;
     juce::SmoothedValue<float> drive, bias, sideGain, outputGain;
+    juce::SmoothedValue<float> ottDepth; // glides, so turning the knob doesn't crackle
     float dcState[2] {}, dcPrev[2] {}, dcCoeff = 0.999f;
 
     juce::dsp::LinkwitzRileyFilter<float> xoverLow, xoverHigh, lowAllpass, monoXover;

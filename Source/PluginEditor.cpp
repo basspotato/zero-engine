@@ -869,6 +869,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
                         { "PLAY",         { playMode, glide, bendRange, velSens } } },
                       { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
                         { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
+        { "ARP",    { { { "ARPEGGIATOR",  { arpOn, arpMode, arpRate, arpOctaves, arpGate } } } } },
     };
 
     auto makeControl = [&] (const char* id) -> std::unique_ptr<Control>
@@ -887,9 +888,9 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state)
             control->menuAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, id, *control->menu);
         }
         else if (auto* steps = dynamic_cast<juce::AudioParameterInt*> (param);
-                 steps != nullptr && steps->getRange().getLength() <= 2)
+                 steps != nullptr && steps->getRange().getLength() <= 3)
         {
-            // A two- or three-position setting reads better as a menu than a knob.
+            // A setting with up to four positions reads better as a menu than a knob.
             const auto lowest = steps->getRange().getStart();
             auto stepName = [id] (int v)
             {

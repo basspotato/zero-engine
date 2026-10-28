@@ -10,6 +10,7 @@
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/Parameters.h"
 #include "../../Source/SpectralCompressor.h"
+#include "../../Source/Arpeggiator.h"
 #include <cstdlib>
 #include <new>
 
@@ -61,12 +62,17 @@ namespace
 
     // Plays a chord of three notes for a second, then 8 s of silence.
     // Returns problems found; empty means it passed.
-    juce::StringArray checkRender (int genre, int type, double rate, int blockSize, juce::int64 generateSeed = 0, float spectral = -1.0f)
+    juce::StringArray checkRender (int genre, int type, double rate, int blockSize, juce::int64 generateSeed = 0, float spectral = -1.0f, bool arp = false)
     {
         ZeroEngineProcessor engine;
         loadProfile (engine, genre, type);
         if (generateSeed != 0)
             engine.generate (generateSeed); // a Generate-button variation instead of the designed profile
+        if (arp)
+        {
+            auto* q = engine.state.getParameter (ParamIDs::arpOn);
+            q->setValueNotifyingHost (1.0f);
+        }
         if (spectral >= 0.0f) // force the spectral stage to this amount
         {
             auto* q = engine.state.getParameter (ParamIDs::spectral);
@@ -245,6 +251,63 @@ namespace
         return problems;
     }
 
+    // The arp plays the held chord in order, on time, and stops when the keys lift.
+    juce::StringArray checkArpeggiator()
+    {
+        Arpeggiator arp;
+        arp.prepare (48000.0, 512);
+        Arpeggiator::Settings s;
+        s.on = true;
+        s.mode = Arpeggiator::up;
+        s.beatsPerStep = 0.25; // 1/16 at 120 BPM: a step every 6000 samples
+        s.bpm = 120.0;
+
+        juce::MidiBuffer keys;
+        std::vector<std::pair<int, int>> ons; // (sample, note)
+        int offsTotal = 0, onsAfterRelease = 0;
+        const auto releaseAt = 48000; // keys lift after 1 s
+
+        for (int block = 0; block < 48000 * 2 / 512; ++block)
+        {
+            const auto start = block * 512;
+            keys.clear();
+            if (block == 0)
+                for (auto note : { 64, 60, 67 }) // pressed out of order
+                    keys.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+            if (start <= releaseAt && releaseAt < start + 512)
+                for (auto note : { 60, 64, 67 })
+                    keys.addEvent (juce::MidiMessage::noteOff (1, note), releaseAt - start);
+
+            for (const auto m : arp.process (keys, 512, s))
+            {
+                const auto at = start + m.samplePosition;
+                const auto msg = m.getMessage();
+                if (msg.isNoteOn())
+                {
+                    ons.push_back ({ at, msg.getNoteNumber() });
+                    onsAfterRelease += at > releaseAt ? 1 : 0;
+                }
+                else if (msg.isNoteOff())
+                    ++offsTotal;
+            }
+        }
+
+        juce::StringArray problems;
+        const int expected[] { 60, 64, 67, 60, 64, 67, 60, 64 };
+        if (ons.size() != std::size (expected))
+            problems.add (juce::String ((int) ons.size()) + " notes in 1 s, expected 8");
+        for (size_t i = 0; i < juce::jmin (ons.size(), std::size (expected)); ++i)
+        {
+            if (ons[i].second != expected[i])
+                problems.add ("step " + juce::String ((int) i) + " played " + juce::String (ons[i].second));
+            if (std::abs (ons[i].first - (int) i * 6000) > 1)
+                problems.add ("step " + juce::String ((int) i) + " at sample " + juce::String (ons[i].first));
+        }
+        if (onsAfterRelease > 0 || offsTotal != (int) ons.size()) // nothing new after release, nothing left hanging
+            problems.add ("did not stop cleanly when the keys lifted");
+        return problems;
+    }
+
     // A note let go mid-decay must finish its release, whatever the sustain
     // (a zero sustain used to hang the voice forever; a tiny one for minutes).
     juce::StringArray checkReleaseMidDecay()
@@ -397,6 +460,29 @@ int runTests()
                 std::printf ("    %s\n", line.toRawUTF8());
             failures += report.size();
         }
+    }
+
+    std::printf ("Arpeggiator (order, timing, stop)... ");
+    if (const auto problems = checkArpeggiator(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
+    std::printf ("Arp running through the engine... ");
+    {
+        juce::StringArray report;
+        for (const auto& [g, t] : { std::pair { "EDM", "Pluck" }, { "Trance", "Lead" }, { "Dubstep", "Bass" } })
+            for (const auto& problem : checkRender (genreNames.indexOf (g), typeNames.indexOf (t), 48000.0, 512, 0, -1.0f, true))
+                report.add (juce::String (g) + " / " + t + ": " + problem);
+        std::printf (report.isEmpty() ? "ok\n" : "FAILED\n");
+        for (const auto& line : report)
+            std::printf ("    %s\n", line.toRawUTF8());
+        failures += report.size();
     }
 
     std::printf ("Release mid-decay... ");

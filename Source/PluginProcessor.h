@@ -6,6 +6,7 @@
 #include "MacroMap.h"
 #include "SynthVoice.h"
 #include "Profiles.h"
+#include "Arpeggiator.h"
 #include <optional>
 
 class ZeroEngineProcessor : public juce::AudioProcessor,
@@ -108,6 +109,8 @@ private:
     std::array<float, scopeSize> scope {};
     std::atomic<int> scopeWrite { 0 };
     ZeroSynth synth;
+    Arpeggiator arp;
+    std::atomic<float>* arpParams[5] {}; // on, mode, rate, octaves, gate
     std::atomic<int> appliedGenre { -1 }, appliedType { -1 };
     FinishingChain finishing;
     juce::AudioBuffer<float> synthBuffer; // L, R and the clean sub, sized in prepareToPlay

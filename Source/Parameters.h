@@ -73,6 +73,11 @@ namespace ParamIDs
     inline constexpr auto levelTrim   = "levelTrim"; // per-profile loudness match, before Output
     inline constexpr auto ottDepth    = "ottDepth";
     inline constexpr auto spectral    = "spectral";    // many-band compression before the clipper
+    inline constexpr auto arpOn       = "arpOn";       // arpeggiator: a playing setting, not part of a profile
+    inline constexpr auto arpMode     = "arpMode";
+    inline constexpr auto arpRate     = "arpRate";
+    inline constexpr auto arpOctaves  = "arpOctaves";
+    inline constexpr auto arpGate     = "arpGate";
     inline constexpr auto tilt        = "tilt";
     inline constexpr auto monoFreq    = "monoFreq";
     inline constexpr auto stereoWidth = "stereoWidth";
@@ -83,6 +88,9 @@ inline const juce::StringArray genreNames    { "EDM", "Dubstep", "Techno", "Tech
 inline const juce::StringArray typeNames     { "Bass", "Lead", "Chord", "Pad", "Pluck", "FX" };
 inline const juce::StringArray lfoShapeNames { "Sine", "Triangle", "Saw", "Square", "Sample & Hold" };
 inline const juce::StringArray lfoSyncNames  { "Off", "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
+inline const juce::StringArray arpModeNames  { "Up", "Down", "Up / Down", "Random", "As Played" };
+inline const juce::StringArray arpRateNames  { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
+inline constexpr double arpRateBeats[]       { 1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125 };
 inline constexpr float lfoSyncBeats[]       { 0.0f, 4.0f, 2.0f, 1.0f, 2.0f / 3.0f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f }; // one LFO cycle, in beats
 // Append only: saved sessions store the index.
 inline const juce::StringArray waveTableNames  { "Basic", "Growl", "Digital", "Organ", "FM", "Wavefold",
@@ -193,6 +201,13 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
                                                        AudioParameterFloatAttributes().withLabel ("dB")));
     unit (ParamIDs::ottDepth, "OTT Depth", 0.35f);
     unit (ParamIDs::spectral, "Spectral", 0.0f);
+
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::arpOn, 1 }, "Arp", false));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::arpMode, 1 }, "Arp Mode", arpModeNames, 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::arpRate, 1 }, "Arp Rate", arpRateNames, 3));
+    layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::arpOctaves, 1 }, "Arp Octaves", 1, 4, 1));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::arpGate, 1 }, "Arp Gate",
+                                                       NormalisableRange<float> (0.05f, 1.0f), 0.6f));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::tilt, 1 }, "Tilt",
                                                        NormalisableRange<float> (-6.0f, 6.0f), 0.0f,
                                                        AudioParameterFloatAttributes().withLabel ("dB")));

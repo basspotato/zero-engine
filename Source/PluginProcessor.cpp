@@ -41,6 +41,9 @@ ZeroEngineProcessor::ZeroEngineProcessor()
 
     synth.addSound (new ZeroSound());
 
+    for (auto [slot, id] : { std::pair { 0, ParamIDs::arpOn }, { 1, ParamIDs::arpMode }, { 2, ParamIDs::arpRate }, { 3, ParamIDs::arpOctaves }, { 4, ParamIDs::arpGate } })
+        arpParams[slot] = state.getRawParameterValue (id);
+
     syncProfile(); // start on the default genre/type's profile
     startTimerHz (10);
 }
@@ -233,6 +236,7 @@ void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     synth.setCurrentPlaybackSampleRate (sampleRate);
     synthBuffer.setSize (3, juce::jmax (samplesPerBlock, 4096)); // L, R, clean sub
     finishing.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
+    arp.prepare (sampleRate, samplesPerBlock);
     setLatencySamples (finishing.getLatencySamples());
     keyboardState.reset();
 }
@@ -266,6 +270,16 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     hostBpm.store ((float) bpm);
     livePosition.store (-1.0f, std::memory_order_relaxed); // voices that play this block overwrite it
 
+    // Arpeggiator: the keys in, the pattern out (the input itself when it's off).
+    Arpeggiator::Settings arpSettings;
+    arpSettings.on = arpParams[0]->load() > 0.5f;
+    arpSettings.mode = (int) arpParams[1]->load();
+    arpSettings.beatsPerStep = arpRateBeats[juce::jlimit (0, (int) std::size (arpRateBeats) - 1, (int) arpParams[2]->load())];
+    arpSettings.octaves = (int) arpParams[3]->load();
+    arpSettings.gate = arpParams[4]->load();
+    arpSettings.bpm = bpm;
+    const auto& notes = arp.process (midi, numSamples, arpSettings);
+
     // Sub Split: voices write their sub to a third channel that skips the
     // chain. A block bigger than prepared falls back to the mixed path rather
     // than allocating here.
@@ -274,7 +288,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         juce::AudioBuffer<float> view (synthBuffer.getArrayOfWritePointers(), 3, numSamples);
         view.clear();
-        synth.renderNextBlock (view, midi, 0, numSamples);
+        synth.renderNextBlock (view, notes, 0, numSamples);
 
         for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
             buffer.copyFrom (ch, 0, view, juce::jmin (ch, 1), 0, numSamples);
@@ -282,7 +296,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
     else
     {
-        synth.renderNextBlock (buffer, midi, 0, numSamples);
+        synth.renderNextBlock (buffer, notes, 0, numSamples);
     }
 
     FinishingSettings settings;

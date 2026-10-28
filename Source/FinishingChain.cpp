@@ -80,6 +80,7 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
     spectral.prepare (fs, channels);
 
     drive.reset (fs * 2.0, 0.02);
+    ottDepth.reset (fs, 0.03);
     bias.reset (fs * 2.0, 0.02);
     sideGain.reset (fs, 0.02);
     outputGain.reset (fs, 0.02);
@@ -392,26 +393,17 @@ void FinishingChain::space (juce::AudioBuffer<float>& buffer, int numSamples, co
 
 void FinishingChain::compress (juce::AudioBuffer<float>& buffer, int numSamples, float depth)
 {
-    if (depth <= 0.0f)
-    {
-        // Keep the crossovers' state warm so turning depth up doesn't click.
-        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-            for (int i = 0; i < numSamples; ++i)
-            {
-                float lo, hi, mid, top;
-                const auto x = buffer.getSample (ch, i);
-                xoverLow.processSample (ch, x, lo, hi);
-                xoverHigh.processSample (ch, hi, mid, top);
-                lowAllpass.processSample (ch, lo);
-            }
-        return;
-    }
+    // Always the same path, with depth gliding per sample: a separate bypass at 0
+    // (dry signal, not the crossover's phase-shifted sum) popped when crossing 0,
+    // and depth jumping once per block crackled while the knob moved.
+    ottDepth.setTargetValue (juce::jlimit (0.0f, 1.0f, depth));
 
     const auto numCh = buffer.getNumChannels();
     float split[2][3];
 
     for (int i = 0; i < numSamples; ++i)
     {
+        const auto amount = ottDepth.getNextValue();
         for (int ch = 0; ch < numCh; ++ch)
         {
             float lo, hi;
@@ -442,8 +434,8 @@ void FinishingChain::compress (juce::AudioBuffer<float>& buffer, int numSamples,
                 gainDb = juce::jmin ((upThreshDb - levelDb) * upSlope, maxUpDb)
                        * juce::jlimit (0.0f, 1.0f, (levelDb - floorDb) / floorFadeDb);
 
-            const auto gain = juce::Decibels::decibelsToGain (gainDb * depth);
-            bandGainSum[b] += gainDb * depth;
+            const auto gain = juce::Decibels::decibelsToGain (gainDb * amount);
+            bandGainSum[b] += gainDb * amount;
 
             for (int ch = 0; ch < numCh; ++ch)
                 out[ch] += split[ch][b] * gain;
