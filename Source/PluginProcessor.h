@@ -21,6 +21,7 @@ public:
     // Silence everything at once (voices, delay, reverb, compressors): offline
     // renders such as Reference Match start each candidate from scratch.
     void resetForRender();
+    void setLightRender (bool on) { finishing.setLight (on); } // offline search renders: see FinishingChain::setLight
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
@@ -120,8 +121,8 @@ private:
     std::vector<juce::ValueTree> undoStack, redoStack;
     juce::ValueTree lastKnown;
 
-    std::unique_ptr<ZeroEngineProcessor> matchEngine; // renders for Reference Match (made on first use)
-    std::unique_ptr<ReferenceMatch> matcher;           // after matchEngine, so it stops first
+    std::unique_ptr<MatchEngines> matchEngines;        // render for Reference Match (made on first use)
+    std::unique_ptr<ReferenceMatch> matcher;           // after matchEngines, so it stops first
     juce::String matchSummary;
     double matchSummaryUntil = 0.0;
     void restoreTree (const juce::ValueTree&);

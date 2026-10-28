@@ -68,6 +68,147 @@ namespace
         return (float) (sampleRate / (found + juce::jlimit (-0.5, 0.5, shift)));
     }
 
+
+    // Log-mel frames of a mono signal: 40 bands from 40 Hz to 16 kHz, in dB under
+    // the loudest cell, floor -80. Zero-padded so even a short note gets a frame.
+    std::vector<std::array<float, SoundPrint::melBands>> melFrames (const std::vector<float>& x, double sampleRate, int order, int hop)
+    {
+        constexpr auto bands = SoundPrint::melBands;
+        const auto size = 1 << order;
+        auto mel = [] (double hz) { return 2595.0 * std::log10 (1.0 + hz / 700.0); };
+        auto hzOf = [] (double m) { return 700.0 * (std::pow (10.0, m / 2595.0) - 1.0); };
+        const auto lo = mel (40.0), hi = mel (juce::jmin (16000.0, 0.45 * sampleRate));
+        std::vector<std::array<float, bands>> weights ((size_t) size / 2);
+        for (int b = 0; b < bands; ++b)
+        {
+            const auto left = hzOf (lo + (hi - lo) * b / (bands + 1)), centre = hzOf (lo + (hi - lo) * (b + 1) / (bands + 1)),
+                       right = hzOf (lo + (hi - lo) * (b + 2) / (bands + 1));
+            for (int bin = 1; bin < size / 2; ++bin)
+            {
+                const auto hz = bin * sampleRate / size;
+                weights[(size_t) bin][(size_t) b] = (float) juce::jmax (0.0, hz < centre ? (hz - left) / (centre - left) : (right - hz) / (right - centre));
+            }
+        }
+
+        juce::dsp::FFT fft (order);
+        std::vector<float> frame ((size_t) size * 2);
+        std::vector<std::array<float, bands>> out;
+        float loudest = -200.0f;
+        for (int start = 0; start == 0 || start + size / 2 <= (int) x.size(); start += hop)
+        {
+            std::fill (frame.begin(), frame.end(), 0.0f);
+            for (int i = 0; i < size && start + i < (int) x.size(); ++i)
+                frame[(size_t) i] = x[(size_t) (start + i)] * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size));
+            fft.performFrequencyOnlyForwardTransform (frame.data());
+
+            std::array<float, bands> cell {};
+            for (int b = 0; b < bands; ++b)
+            {
+                double power = 0.0;
+                for (int bin = 1; bin < size / 2; ++bin)
+                    if (const auto w = weights[(size_t) bin][(size_t) b]; w > 0.0f)
+                        power += w * frame[(size_t) bin] * frame[(size_t) bin];
+                cell[(size_t) b] = (float) (10.0 * std::log10 (power + 1.0e-12));
+                loudest = juce::jmax (loudest, cell[(size_t) b]);
+            }
+            out.push_back (cell);
+        }
+        for (auto& cell : out)
+            for (auto& v : cell)
+                v = juce::jmax (-80.0f, v - loudest);
+        return out;
+    }
+
+    // Mean dB difference of two spectrograms over the frames both have (cells
+    // under -70 dB in both skipped).
+    float melDistance (bool overLonger, const std::vector<std::array<float, SoundPrint::melBands>>& a,
+                       const std::vector<std::array<float, SoundPrint::melBands>>& b)
+    {
+        double sum = 0.0;
+        int n = 0;
+        const auto frames = overLonger ? juce::jmax (a.size(), b.size()) : juce::jmin (a.size(), b.size());
+        for (size_t f = 0; f < frames; ++f)
+            for (size_t band = 0; band < (size_t) SoundPrint::melBands; ++band)
+            {
+                const auto x = f < a.size() ? a[f][band] : -80.0f, y = f < b.size() ? b[f][band] : -80.0f; // past the end: silence
+                if (x > -70.0f || y > -70.0f)
+                {
+                    sum += std::abs (x - y);
+                    ++n;
+                }
+            }
+        return n > 0 ? (float) (sum / n) : 0.0f;
+    }
+
+    // Per-frame perceptual features of a log-mel frame (dB): its timbre as MFCCs
+    // 1-13 (orthonormal DCT-II of the band levels, so the overall level, c0, is
+    // left out), its brightness as the centroid in mel bands, and its loudness.
+    struct FrameFeatures { std::array<float, 13> mfcc {}; float centroid = 0.0f, loudnessDb = -80.0f; };
+
+    FrameFeatures featuresOf (const std::array<float, SoundPrint::melBands>& frame)
+    {
+        constexpr auto bands = SoundPrint::melBands;
+        FrameFeatures f;
+        for (int k = 1; k <= 13; ++k)
+        {
+            double sum = 0.0;
+            for (int b = 0; b < bands; ++b)
+                sum += frame[(size_t) b] * std::cos (juce::MathConstants<double>::pi * k * (b + 0.5) / bands);
+            f.mfcc[(size_t) k - 1] = (float) (sum * std::sqrt (2.0 / bands));
+        }
+        double power = 0.0, weighted = 0.0;
+        for (int b = 0; b < bands; ++b)
+        {
+            const auto p = std::pow (10.0, frame[(size_t) b] / 10.0);
+            power += p;
+            weighted += b * p;
+        }
+        f.loudnessDb = (float) (10.0 * std::log10 (power + 1.0e-12));
+        f.centroid = power > 0.0 ? (float) (weighted / power) : 0.0f;
+        return f;
+    }
+
+    // The composite terms over the frames (silence past an end, when comparing
+    // whole sounds): mean MFCC difference (dB), centroid difference (mel bands)
+    // over frames where both sound, and loudness difference (dB).
+    struct Composite { float mfcc = 0.0f, centroid = 0.0f, loudness = 0.0f; };
+
+    Composite compositeDistance (bool overLonger, const std::vector<std::array<float, SoundPrint::melBands>>& a,
+                                 const std::vector<std::array<float, SoundPrint::melBands>>& b)
+    {
+        std::array<float, SoundPrint::melBands> silence;
+        silence.fill (-80.0f);
+        const auto frames = overLonger ? juce::jmax (a.size(), b.size()) : juce::jmin (a.size(), b.size());
+        double mfcc = 0.0, centroid = 0.0, loudness = 0.0;
+        int n = 0, sounding = 0;
+        for (size_t i = 0; i < frames; ++i)
+        {
+            const auto x = featuresOf (i < a.size() ? a[i] : silence), y = featuresOf (i < b.size() ? b[i] : silence);
+            if (x.loudnessDb < -60.0f && y.loudnessDb < -60.0f)
+                continue;
+            double m = 0.0;
+            for (size_t k = 0; k < x.mfcc.size(); ++k)
+                m += std::abs (x.mfcc[k] - y.mfcc[k]);
+            mfcc += m / (double) x.mfcc.size();
+            loudness += std::abs (juce::jmax (-60.0f, x.loudnessDb) - juce::jmax (-60.0f, y.loudnessDb));
+            ++n;
+            if (x.loudnessDb > -60.0f && y.loudnessDb > -60.0f)
+            {
+                centroid += std::abs (x.centroid - y.centroid);
+                ++sounding;
+            }
+        }
+        Composite c;
+        if (n > 0)
+        {
+            c.mfcc = (float) (mfcc / n);
+            c.loudness = (float) (loudness / n);
+        }
+        if (sounding > 0)
+            c.centroid = (float) (centroid / sounding);
+        return c;
+    }
+
     // A repeating wobble in a series of 10 ms dB values: the series minus its
     // straight-line trend (the decay), its depth (RMS, dB) and its rate (Hz) by
     // autocorrelation over 2 to 12 Hz, or 0 when nothing repeats clearly.
@@ -161,73 +302,207 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
 
     const auto overall = *std::max_element (energy.begin(), energy.end());
     const auto onset = (int) (std::find_if (energy.begin(), energy.end(), [&] (double e) { return e > overall * 1.0e-3; }) - energy.begin());
-    // A loop or phrase: only the first note counts. The next note starts at a
-    // pitch change (an arp; references only, tracked every 20 ms), or at a sharp
-    // re-attack: the level up 9 dB within 10 ms after falling 12 dB under the
-    // loudest so far (a filter wobble moves too smoothly to count).
-    auto last = juce::jmin ((int) energy.size(), onset + (int) (span * 100.0));
-    bool cut = false; // ended by the next note: what comes after is unknown, not silence
-    float notePitch = 0.0f; // the first note's pitch, from readings across it (references)
+    // A loop or phrase is split into notes (references only; an engine render
+    // is always taken whole). A note starts where the spectrum gains energy all
+    // of a sudden (positive spectral flux, a peak well over its neighbourhood,
+    // at least 60 ms after the last), which finds arp notes even when one rings
+    // into the next. Each note's pitch is the median YIN reading over the first
+    // part of it, before the next note's bleed.
+    const auto pitchFrame = (int) (0.06 * sampleRate);
+    auto pitchAt = [&] (int b)
     {
-        auto loudestSoFar = energy[(size_t) onset];
-        for (int b = onset + 2; b < last; ++b)
-        {
-            if (energy[(size_t) b] > 8.0 * energy[(size_t) b - 1] && energy[(size_t) b - 1] < loudestSoFar / 16.0)
-            {
-                last = b - 1;
-                cut = true;
-                break;
-            }
-            loudestSoFar = juce::jmax (loudestSoFar, energy[(size_t) b]);
-        }
-    }
+        std::vector<float> slice ((size_t) pitchFrame);
+        for (int i = 0; i < pitchFrame; ++i)
+            slice[(size_t) i] = b * block + i < total ? 0.5f * (sample (0, b * block + i) + sample (1, b * block + i)) : 0.0f;
+        return pitchOf (slice, sampleRate);
+    };
+
+    auto last = juce::jmin ((int) energy.size(), onset + (int) (span * 100.0));
+    bool cut = false; // the first note ended by the next: what comes after is unknown, not silence
+    float notePitch = 0.0f;
     if (findPitch)
     {
-        const auto frame = (int) (0.06 * sampleRate);
-        auto pitchAt = [&] (int b)
+        const auto limit = juce::jmin ((int) energy.size(), onset + 250);
+        std::vector<int> starts { onset };
+
+        constexpr int order = 10, size = 1 << order, hop = 256;
+        juce::dsp::FFT fft (order);
+        std::vector<float> frame ((size_t) size * 2), previous ((size_t) size / 2, 0.0f);
+        std::vector<float> flux;
+        const auto from = onset * block;
+        for (int start = from; start + size <= juce::jmin (total, limit * block); start += hop)
         {
-            std::vector<float> slice ((size_t) frame);
-            for (int i = 0; i < frame; ++i)
-                slice[(size_t) i] = b * block + i < total ? 0.5f * (sample (0, b * block + i) + sample (1, b * block + i)) : 0.0f;
-            return pitchOf (slice, sampleRate);
+            std::fill (frame.begin(), frame.end(), 0.0f);
+            for (int i = 0; i < size; ++i)
+                frame[(size_t) i] = 0.5f * (sample (0, start + i) + sample (1, start + i))
+                                  * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size));
+            fft.performFrequencyOnlyForwardTransform (frame.data());
+            float rise = 0.0f;
+            for (int bin = 1; bin < size / 2; ++bin)
+            {
+                const auto level = std::log1p (100.0f * frame[(size_t) bin]);
+                rise += juce::jmax (0.0f, level - previous[(size_t) bin]);
+                previous[(size_t) bin] = level;
+            }
+            flux.push_back (rise);
+        }
+
+        const auto biggest = flux.empty() ? 0.0f : *std::max_element (flux.begin(), flux.end());
+        const auto spacing = (int) (0.06 * sampleRate / hop);
+        int lastPeak = 0;
+        for (int n = 1; n + 1 < (int) flux.size(); ++n)
+        {
+            std::vector<float> around;
+            for (int k = juce::jmax (0, n - 10); k <= juce::jmin ((int) flux.size() - 1, n + 10); ++k)
+                around.push_back (flux[(size_t) k]);
+            std::nth_element (around.begin(), around.begin() + (long) around.size() / 2, around.end());
+            const auto isPeak = flux[(size_t) n] >= flux[(size_t) n - 1] && flux[(size_t) n] > flux[(size_t) n + 1]
+                             && flux[(size_t) n] > around[around.size() / 2] + 0.15f * biggest;
+            if (isPeak && n - lastPeak >= spacing)
+            {
+                // The frame's window ends where the new energy arrived.
+                const auto at = (from + n * hop + size / 2) / block;
+                if (at > starts.back() + 5 && at < limit)
+                    starts.push_back (at);
+                lastPeak = n;
+            }
+        }
+
+        // A note's pitch from the energy it brings: the spectrum just after its
+        // start minus the one just before (the last note still ringing cancels
+        // out), then the fundamental whose harmonics carry most of that new
+        // energy (weighted 0.8 per harmonic, so an octave below, which also
+        // collects the even ones, scores lower). YIN refines it when it agrees.
+        constexpr int pitchOrder = 12, pitchSize = 1 << pitchOrder;
+        juce::dsp::FFT pitchFft (pitchOrder);
+        auto spectrumAt = [&] (int startSample)
+        {
+            std::vector<float> s ((size_t) pitchSize * 2, 0.0f);
+            for (int i = 0; i < pitchSize; ++i)
+                if (const auto at = startSample + i; at >= 0 && at < total)
+                    s[(size_t) i] = 0.5f * (sample (0, at) + sample (1, at))
+                                  * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) pitchSize));
+            pitchFft.performFrequencyOnlyForwardTransform (s.data());
+            s.resize ((size_t) pitchSize / 2);
+            return s;
         };
-        auto semitonesApart = [] (float x, float y)
+        auto newNotePitch = [&] (int beginBlock, int endBlock)
         {
-            auto s = std::abs (12.0f * std::log2 (x / y));
-            return std::abs (s - 12.0f) < 0.6f ? 0.0f : s; // an octave slip in the reading, not a new note
+            const auto after = spectrumAt (beginBlock * block + block);
+            const auto before = spectrumAt (beginBlock * block - pitchSize);
+            const auto binHz = sampleRate / pitchSize;
+            std::vector<float> arrived (after.size());
+            for (size_t b = 0; b < after.size(); ++b)
+                arrived[b] = juce::jmax (0.0f, after[b] - (beginBlock == onset ? 0.0f : before[b]));
+
+            auto energyNear = [&] (double hz)
+            {
+                const auto centre = (int) std::round (hz / binHz);
+                auto best = 0.0f;
+                for (int b = centre - 1; b <= centre + 1; ++b)
+                    if (b > 0 && b < (int) arrived.size())
+                        best = juce::jmax (best, arrived[(size_t) b]);
+                return best;
+            };
+            double bestScore = 0.0, bestHz = 0.0;
+            for (double hz = 50.0; hz <= 1000.0; hz *= std::exp2 (1.0 / 48.0))
+            {
+                double score = 0.0, weight = 1.0;
+                for (int h = 1; h <= 8 && h * hz < 0.45 * sampleRate; ++h, weight *= 0.8)
+                    score += weight * energyNear (h * hz);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestHz = hz;
+                }
+            }
+
+            std::vector<float> readings;
+            for (int b = beginBlock + 2; b <= beginBlock + juce::jmax (3, (int) (0.6 * (endBlock - beginBlock))) && b < endBlock; b += 2)
+                if (const auto p = pitchAt (b); p > 0.0f && std::abs (12.0 * std::log2 (p / bestHz)) < 1.0)
+                    readings.push_back (p);
+            if (readings.empty())
+                return (float) bestHz;
+            std::nth_element (readings.begin(), readings.begin() + (long) readings.size() / 2, readings.end());
+            return readings[readings.size() / 2];
         };
 
-        // A new note: two readings in a row a semitone or more from the first
-        // note's and within a third of a semitone of each other (a wobble
-        // makes readings wander; an arp note holds steady). The note's own
-        // pitch is the median of its readings.
-        std::vector<float> readings;
-        float pending = 0.0f;
-        int pendingAt = -1;
-        for (int b = onset + 2; b + 2 < last; b += 2)
+        std::vector<std::vector<float>> shapes; // per note, for telling echoes from notes
+        for (size_t i = 0; i < starts.size() && i < 24; ++i)
         {
-            const auto p = pitchAt (b);
-            if (p <= 0.0f)
-                continue;
-            if (readings.empty() || semitonesApart (p, readings.front()) < 1.0f)
-            {
-                readings.push_back (p);
-                pendingAt = -1;
-                continue;
-            }
-            if (pendingAt >= 0 && semitonesApart (p, pending) < 0.35f)
-            {
-                last = pendingAt;
-                cut = true;
-                break;
-            }
-            pending = p;
-            pendingAt = b;
+            const auto begin = starts[i], end = i + 1 < starts.size() ? starts[i + 1] : limit;
+            print.notes.push_back ({ 0.01f * (float) (begin - onset), 0.01f * (float) (end - begin), newNotePitch (begin, end) });
+            auto shape = spectrumAt (begin * block + block); // the note just after it starts, up to 5 kHz, unit length
+            shape.resize ((size_t) (5000.0 / (sampleRate / pitchSize)));
+            const auto norm = std::sqrt (std::inner_product (shape.begin(), shape.end(), shape.begin(), 0.0));
+            for (auto& v : shape)
+                v = (float) (v / juce::jmax (1.0e-12, norm));
+            shapes.push_back (std::move (shape));
         }
-        if (! readings.empty())
+
+        // An echo is not a note: one at the last note's pitch (or an octave of
+        // it, as its arrived energy can read) and over 6 dB quieter is the delay
+        // repeating it, so it joins the note before; so does anything over 9 dB
+        // under the loudest note (an echo of an earlier one, a reverb swell), and
+        // anything with the last note's spectrum but 4 dB quieter (its echo, or
+        // a wobble opening the filter again), and the same pitch again with no
+        // dip between (a held note).
+        auto loudestIn = [&] (const Note& n)
         {
-            std::nth_element (readings.begin(), readings.begin() + (long) readings.size() / 2, readings.end());
-            notePitch = readings[readings.size() / 2];
+            const auto from = onset + juce::roundToInt (n.start * 100.0f), to = from + juce::jmax (1, juce::roundToInt (n.length * 100.0f));
+            double loudest = 0.0;
+            for (int b = from; b < juce::jmin (to, (int) energy.size()); ++b)
+                loudest = juce::jmax (loudest, energy[(size_t) b]);
+            return loudest;
+        };
+        // Whether the level fell 6 dB under the note before's loudest in the 50 ms
+        // before this one: a re-played note has a gap or a decay first; a held
+        // note whose wobble reads as an onset does not.
+        auto dipBefore = [&] (const Note& n, const Note& before)
+        {
+            const auto at = onset + juce::roundToInt (n.start * 100.0f);
+            auto quietest = 1.0e30;
+            for (int b = juce::jmax (onset, at - 5); b < at && b < (int) energy.size(); ++b)
+                quietest = juce::jmin (quietest, energy[(size_t) b]);
+            return quietest < 0.25 * loudestIn (before);
+        };
+        // Whether the pitch just before an onset is the pitch just after (plain
+        // YIN readings): no new note, whatever the arrived energy reads as.
+        auto pitchHolds = [&] (const Note& n)
+        {
+            const auto at = onset + juce::roundToInt (n.start * 100.0f);
+            const auto x = pitchAt (at - 7), y = pitchAt (at + 2);
+            return x > 0.0f && y > 0.0f && std::abs (12.0f * std::log2 (x / y)) < 0.7f;
+        };
+        double loudestNote = 0.0;
+        for (const auto& n : print.notes)
+            loudestNote = juce::jmax (loudestNote, loudestIn (n));
+        for (size_t i = 1; i < print.notes.size();)
+        {
+            auto& before = print.notes[i - 1];
+            const auto& n = print.notes[i];
+            const auto semitones = n.pitchHz > 0.0f && before.pitchHz > 0.0f ? std::abs (12.0f * std::log2 (n.pitchHz / before.pitchHz)) : 99.0f;
+            const auto sameNote = std::abs (semitones - 12.0f * std::round (semitones / 12.0f)) < 0.7f && semitones < 25.0f;
+            const auto similar = std::inner_product (shapes[i].begin(), shapes[i].end(), shapes[i - 1].begin(), 0.0) > 0.9;
+            if ((sameNote && loudestIn (n) < 0.25 * loudestIn (before)) || loudestIn (n) < loudestNote / 8.0
+                || (similar && loudestIn (n) < 0.63 * loudestIn (before)) || (! dipBefore (n, before) && (sameNote || pitchHolds (n))))
+            {
+                before.length = n.start + n.length - before.start;
+                print.notes.erase (print.notes.begin() + (long) i);
+                shapes.erase (shapes.begin() + (long) i);
+            }
+            else
+                ++i;
+        }
+        starts.clear();
+        for (const auto& n : print.notes)
+            starts.push_back (onset + juce::roundToInt (n.start * 100.0f));
+
+        notePitch = print.notes.front().pitchHz;
+        if (starts.size() > 1)
+        {
+            last = starts[1];
+            cut = true;
         }
     }
     const auto peakBlock = (int) (std::max_element (energy.begin() + onset, energy.begin() + last) - energy.begin());
@@ -239,6 +514,25 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     while (reached < peakBlock && energy[(size_t) reached] < 0.5 * peakEnergy)
         ++reached;
     print.attackMs = 10.0f * (float) (reached - onset);
+
+    // The sound over time: every note of a phrase and the release after, from
+    // the onset to where it dies away (up to 2.5 s; a longer sound is cut there).
+    // Candidates play the same notes, so the whole of it is compared.
+    auto end = juce::jmin ((int) energy.size(), onset + 250);
+    // Still sounding at the window's end: the reference goes on past what is
+    // measured, so candidates are compared only that far (cut).
+    print.cut = energy[(size_t) end - 1] >= overall * 1.0e-5; // or the file ends mid-tail
+    while (end > onset + 1 && energy[(size_t) end - 1] < overall * 1.0e-5)
+        --end;
+    end = juce::jmin ((int) energy.size(), end + 3);
+    print.noteSeconds = 0.01f * (float) (end - onset);
+    {
+        std::vector<float> note ((size_t) juce::jmax (0, juce::jmin (total, end * block) - onset * block));
+        for (size_t i = 0; i < note.size(); ++i)
+            note[i] = 0.5f * (sample (0, onset * block + (int) i) + sample (1, onset * block + (int) i));
+        print.melTone = melFrames (note, sampleRate, 11, 512);
+        print.melAttack = melFrames (note, sampleRate, 9, 128);
+    }
 
     constexpr int pointBlocks[] { 10, 25, 50, 90 };
     for (int p = 0; p < numEnvelopePoints; ++p)
@@ -360,6 +654,29 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
 
 float SoundPrint::distance (const SoundPrint& a, const SoundPrint& b)
 {
+    // How the two evolve: the mean dB difference of their spectrograms over the
+    // first note, tone and attack resolution alike (4 dB off counts as 1), plus
+    // stereo width, which the mono spectrograms can't see.
+    // Spectrograms are normalised to their own loudest cell, so a near-silent
+    // sound (a high-pass at 20 kHz, say) would show its noise floor as a full
+    // spectrum: one 40 dB quieter than the other is simply not a match.
+    if (std::abs (a.levelDb - b.levelDb) > 40.0f)
+        return 100.0f;
+
+    if (! a.melTone.empty() && ! b.melTone.empty())
+    {
+        const auto overLonger = ! a.cut && ! b.cut; // whole sounds: a tail one has and the other lacks counts
+        const auto mel = 0.5f * (melDistance (overLonger, a.melTone, b.melTone) + melDistance (overLonger, a.melAttack, b.melAttack)) / 4.0f;
+        // Composite (the research's advice): timbre as MFCCs, brightness over
+        // time, and the loudness envelope, each scaled so about one unit means
+        // "clearly different".
+        const auto c = compositeDistance (overLonger, a.melTone, b.melTone);
+        const auto width = (a.sidePct - b.sidePct) / 15.0f;
+        return weights.mel * mel + weights.mfcc * c.mfcc / 4.0f + weights.centroid * c.centroid / 2.0f
+             + weights.loudness * c.loudness / 3.0f + 0.5f * width * width;
+    }
+
+    // Without spectrograms (too short to measure): the single-window prints.
     // Spectral shape matters most. Quiet top bands are where "air" lives, so
     // from 2 kHz up they count down to -60 dB of the total; lower bands under
     // -40 dB are rumble and count as -40. Below the floor in both: ignored.

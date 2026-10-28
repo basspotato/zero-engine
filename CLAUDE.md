@@ -25,6 +25,8 @@ JUCE 8 is fetched by CMake. Outputs land in `build/ZeroEngine_artefacts/Release/
 - `ZeroAnalyze gencheck`: Generate's time per click and how many of its 6 candidates pass the check, per profile.
 - `ZeroAnalyze gendebug <Genre> <Type> <seed> [id=value...]`: one Generate result's key settings and its level and voice count each second through a note and its tail; overrides help find what holds a sound up. `segments <wav> [s]`: loudness and brightness per slice.
 - `ZeroAnalyze match <wav> <Genre> <Type> [-v]` or `match <folder> [-v]` (laid out `<Genre>/<Type>/*.wav`): runs Reference Match as the plugin does and prints how close each gets and what it chose; `-v` shows both fingerprints.
+- `ZeroAnalyze matchbench [refFolder] [budget=N] [cmaes=1] [light=0] [w=mel,mfcc,centroid,loudness]`: scores Reference Match on 12 engine-made targets (notes and arp loops): the match replays the target's notes and is judged by log-mel dB difference and MFCC timbre. Writes targets and matches to `%TEMP%/zero_matchbench`; with refFolder, matches the owner's references there and writes what it found to `analysis/match_v2`. Use it to judge any change to SoundPrint or ReferenceMatch.
+- `ZeroAnalyze noise <Genre> <Type>|all [id=value...]`: noise between the harmonics of a held C4 (dB under them), to find stages that add hiss.
 - `ZeroAnalyze harmonics <out.h> <5 wavs>`: harmonic spectra of recorded notes as a wavetable bank (made `Source/JupiterHarmonics.h`).
 - `ZeroAnalyze snapshot <png> [size=WxH] [button...] [dialog]`: the editor as an image, after playing a chord; clicks buttons by label (e.g. `ADVANCED MOTION`). Send the owner a preview after GUI changes. `foldstrip <png>`: the tesseract's fold, frame by frame.
 - `ZeroAnalyze screen` / `fetch`: Freesound CC0 search and download (needs the owner's `FREESOUND_CLIENT_SECRET` / `FREESOUND_CLIENT_ID`).
@@ -42,7 +44,7 @@ Output goes to `analysis/` by default (git-ignored).
 - `Source/MacroMap.h`: what each macro pushes per profile; the mod wheel adds to Motion
 - `Source/Arpeggiator.*`: tempo-synced arp with a 16-step pattern that shapes every mode (rests, transpose, accent); mode "Sequence" plays all held keys per step. Runs on the MIDI before the synth; its settings are not part of profiles
 - `Source/PluginProcessor.*`: synth, finishing chain, state, Generate (render-and-check), history, favourites (`%APPDATA%/Zero Engine/Favourites`)
-- `Source/SoundPrint.*`, `Source/ReferenceMatch.*`: Reference Match (drop or pick a sound; a background search over the current genre/type's settings, rendering through a second engine; no ML)
+- `Source/SoundPrint.*`, `Source/ReferenceMatch.*`, `Source/Cmaes.h`: Reference Match. Fingerprint = the first note's log-mel spectrograms over time (two resolutions) plus MFCC, centroid and loudness per frame; search = every preset at the reference's pitch, then the closest 6 refined in parallel (low-priority pool, light renders: no spectral stage or oversampling), finalists re-scored at full quality. Can change genre/type. Our own CMA-ES is optional (lost to the pattern search at this budget). No ML.
 - `Source/PluginEditor.*`: UI (look and feel, display, meter, tesseract, Advanced page); laid out at 900 x 600 and scaled with the window
 - `Resources/Fonts/`: Barlow Condensed and Share Tech Mono (OFL), from the owner's Potato Kicker
 

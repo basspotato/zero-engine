@@ -2,20 +2,149 @@
 #include "PluginProcessor.h"
 #include "Parameters.h"
 #include "Wavetable.h"
+#include "Cmaes.h"
 
-ReferenceMatch::ReferenceMatch (ZeroEngineProcessor& renderEngine)
-    : juce::Thread ("Reference Match"), engine (renderEngine)
+
+namespace
+{
+    constexpr double rate = 48000.0;
+    constexpr int block = 512;
+
+    // The notes a candidate plays (the reference's, transcribed), in samples from
+    // the start, shifted together by octave checks; and how much is recorded.
+    struct Playing
+    {
+        // span: from the note's start to the next note's (or, for the last, to the
+        // end of the sound); the note is held for gate x span, the gate being
+        // searched like a setting, since how long a note was held can't be heard
+        // apart from its release.
+        struct Event { int start = 0, span = 0, note = 60; };
+        std::vector<Event> events;
+        int lengthSamples = 0, shift = 0;
+        float gate = 0.75f;
+        int firstNote() const { return (events.empty() ? 60 : events.front().note) + shift; }
+        int hold (const Event& e) const { return juce::jmax (block, (int) (gate * (float) e.span)); }
+    };
+
+    SoundPrint render (ZeroEngineProcessor& engine, int genre, int type, const Profile& profile, const Playing& playing)
+    {
+        engine.resetForRender(); // nothing of the last candidate may ring into this one
+        engine.loadProfile (genre, type, profile);
+
+        // A tenth of a second of silence first, so knob smoothing settles.
+        juce::AudioBuffer<float> out (2, playing.lengthSamples), chunk (2, block);
+        juce::MidiBuffer midi;
+        for (int pos = 0; pos < 5120; pos += block)
+        {
+            chunk.clear();
+            engine.processBlock (chunk, midi);
+        }
+
+        // The reference's notes, one at a time as it has them (a chord type
+        // sounds its tone on single notes too).
+        for (int pos = 0; pos < playing.lengthSamples; pos += block)
+        {
+            midi.clear();
+            for (const auto& e : playing.events)
+            {
+                const auto note = juce::jlimit (0, 127, e.note + playing.shift);
+                if (e.start >= pos && e.start < pos + block)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), e.start - pos);
+                if (e.start + playing.hold (e) >= pos && e.start + playing.hold (e) < pos + block)
+                    midi.addEvent (juce::MidiMessage::noteOff (1, note), e.start + playing.hold (e) - pos);
+            }
+            chunk.clear();
+            engine.processBlock (chunk, midi);
+            for (int ch = 0; ch < 2; ++ch)
+                out.copyFrom (ch, pos, chunk, ch, 0, juce::jmin (block, playing.lengthSamples - pos));
+        }
+        return SoundPrint::of (out, rate, false);
+    }
+
+
+    // The reference's notes as candidates play them (one note, when no pitch
+    // can be followed), recorded half a second past its end so a tail that
+    // rings on counts (or exactly as far as measured, when it goes on past that).
+    Playing playingFor (const SoundPrint& target)
+    {
+        Playing playing;
+        auto toNote = [] (float hz, int fallback)
+        {
+            return hz > 0.0f ? juce::jlimit (24, 96, juce::roundToInt (69.0 + 12.0 * std::log2 (hz / 440.0))) : fallback;
+        };
+        auto previous = toNote (target.pitchHz, 60);
+        const auto seconds = [] (double s) { return (int) (s * rate); };
+        // A sound still going at the window's end is held through it.
+        const auto lastSpan = [&] (float start) { return target.cut ? seconds (10.0) : seconds (target.noteSeconds - start); };
+        std::vector<float> lengths; // the typical note spacing of a phrase
+        for (size_t i = 0; i + 1 < target.notes.size(); ++i)
+            lengths.push_back (target.notes[i].length);
+        std::sort (lengths.begin(), lengths.end());
+        const auto spacing = lengths.empty() ? 0.0f : lengths[lengths.size() / 2];
+        if (target.notes.empty()) // no pitch to follow: one note
+            playing.events.push_back ({ 0, lastSpan (0.0f), previous });
+        for (size_t i = 0; i < target.notes.size(); ++i)
+        {
+            const auto& n = target.notes[i];
+            previous = toNote (n.pitchHz, previous);
+            const auto span = i + 1 < target.notes.size() ? seconds (n.length)
+                            : target.notes.size() > 1 ? seconds (spacing) // a phrase's last note: held like the others
+                                                                    : lastSpan (n.start);
+            playing.events.push_back ({ seconds (n.start), span, previous });
+        }
+        playing.lengthSamples = juce::jmax (4 * block, seconds (target.cut ? target.noteSeconds : target.noteSeconds + 0.5));
+        return playing;
+    }
+    // The settings the search moves, each mapped from 0..1 (log for times and frequency).
+    struct Dimension { float Profile::* member; float min, max; bool log; };
+    const Dimension dimensions[] {
+        { &Profile::wavePos, 0.0f, 1.0f, false },        { &Profile::tilt, -6.0f, 6.0f, false },
+        { &Profile::air, 0.0f, 1.0f, false },            { &Profile::ottDepth, 0.0f, 1.0f, false },
+        { &Profile::grit, 0.0f, 1.0f, false },           { &Profile::stereoWidth, 0.0f, 2.0f, false },
+        { &Profile::weight, 0.0f, 1.0f, false },         { &Profile::detune, 0.0f, 1.0f, false },
+        { &Profile::ampAttack, 0.001f, 2.0f, true },     { &Profile::ampDecay, 0.02f, 4.0f, true },
+        { &Profile::ampSustain, 0.0f, 1.0f, false },     { &Profile::ampRelease, 0.01f, 3.0f, true },
+        { &Profile::filterCutoff, 60.0f, 20000.0f, true }, { &Profile::filterRes, 0.0f, 0.9f, false },
+        { &Profile::filterEnv, -2.0f, 6.0f, false },     { &Profile::modDecay, 0.01f, 2.0f, true },
+        { &Profile::reverbMix, 0.0f, 1.0f, false },      { &Profile::delayMix, 0.0f, 1.0f, false },
+        { &Profile::lfoRate, 0.1f, 20.0f, true },        { &Profile::lfoToCutoff, 0.0f, 6.0f, false },
+        { &Profile::lfoToPos, 0.0f, 1.0f, false },
+    };
+
+    double toUnit (const Dimension& d, float value)
+    {
+        value = juce::jlimit (d.min, d.max, value);
+        return d.log ? std::log (value / d.min) / std::log (d.max / d.min) : (value - d.min) / (d.max - d.min);
+    }
+
+    float fromUnit (const Dimension& d, double unit)
+    {
+        return (float) (d.log ? d.min * std::pow (d.max / d.min, unit) : d.min + unit * (d.max - d.min));
+    }
+
+    Profile withUnits (Profile p, const std::vector<double>& units)
+    {
+        for (size_t i = 0; i < std::size (dimensions); ++i)
+            p.*dimensions[i].member = fromUnit (dimensions[i], units[i]);
+        return p;
+    }
+
+    struct Candidate { int genre = 0, type = 0; Profile profile {}; float distance = 1.0e9f; SoundPrint print; Playing playing {}; };
+}
+
+ReferenceMatch::ReferenceMatch (std::vector<ZeroEngineProcessor*> renderEngines)
+    : juce::Thread ("Reference Match"), engines (std::move (renderEngines))
 {
 }
 
 ReferenceMatch::~ReferenceMatch()
 {
-    stopThread (4000);
+    stopThread (10000);
 }
 
 void ReferenceMatch::start (const juce::File& reference, int newGenre, int newType, const Profile& startFrom)
 {
-    stopThread (4000);
+    stopThread (10000);
     file = reference;
     genre = newGenre;
     type = newType;
@@ -30,42 +159,6 @@ ReferenceMatch::Result ReferenceMatch::take()
 {
     state = State::idle;
     return result;
-}
-
-SoundPrint ReferenceMatch::render (const Profile& profile, int note)
-{
-    // 1.05 s of the note (a triad for chords and pads), measured like the reference.
-    constexpr double rate = 48000.0;
-    constexpr int block = 512;
-    const auto length = 50176;
-    engine.setPlayConfigDetails (0, 2, rate, block);
-    engine.prepareToPlay (rate, block);
-    engine.resetForRender(); // nothing of the last candidate may ring into this one
-    engine.loadProfile (genre, type, profile);
-
-    // A tenth of a second of silence first, so knob smoothing settles.
-    juce::AudioBuffer<float> out (2, length), chunk (2, block);
-    juce::MidiBuffer midi;
-    for (int pos = 0; pos < 5120; pos += block)
-    {
-        chunk.clear();
-        engine.processBlock (chunk, midi);
-    }
-
-    const auto chord = type == 2 || type == 3;
-    constexpr int intervals[] { 0, 4, 7 };
-    for (int pos = 0; pos < length; pos += block)
-    {
-        midi.clear();
-        if (pos == 0)
-            for (int i = 0; i < (chord ? 3 : 1); ++i)
-                midi.addEvent (juce::MidiMessage::noteOn (1, juce::jlimit (0, 127, note + intervals[i]), (juce::uint8) 110), 0);
-        chunk.clear();
-        engine.processBlock (chunk, midi);
-        for (int ch = 0; ch < 2; ++ch)
-            out.copyFrom (ch, pos, chunk, ch, 0, juce::jmin (block, length - pos));
-    }
-    return SoundPrint::of (out, rate, false);
 }
 
 void ReferenceMatch::run()
@@ -88,195 +181,311 @@ void ReferenceMatch::run()
     reader->read (&audio, 0, length, 0, true, true);
     const auto target = SoundPrint::of (audio, reader->sampleRate, true);
     result.target = target;
-    if (target.levelDb < -70.0f)
+    if (target.levelDb < -70.0f || target.melTone.empty())
         return fail (file.getFileName() + " is silent");
 
-    // Play the candidates at the reference's pitch, kept to the type's range.
-    auto note = type == 0 ? 36 : type == 1 || type == 4 ? 72 : 60;
-    if (target.pitchHz > 0.0f)
-        note = juce::roundToInt (69.0 + 12.0 * std::log2 (target.pitchHz / 440.0));
-    note = type == 0 ? juce::jlimit (24, 55, note) : juce::jlimit (36, 96, note);
+    const auto playing = playingFor (target);
 
-    constexpr int budget = 150; // renders, about 7 s
-    int renders = 0;
-    auto best = from;
-    auto bestPrint = render (best, note);
-    auto bestDistance = SoundPrint::distance (bestPrint, target);
-
-    // 0. The octave, for chords and pads (whose period can sit an octave or two
-    //    under the root) and sounds with no clear pitch: try the neighbours and
-    //    keep the closest. A single note's pitch is read reliably.
-    if (type == 2 || type == 3 || target.pitchHz <= 0.0f)
+    const auto workers = (int) engines.size();
+    for (auto* engine : engines) // once: preparing allocates (delay lines, oversampling); renders only reset
     {
-        const auto read = note;
-        for (const auto shift : { -12, 12, 24 })
-        {
-            const auto candidate = read + shift;
-            if (candidate < (type == 0 ? 24 : 36) || candidate > (type == 0 ? 55 : 96))
-                continue;
-            const auto print = render (best, candidate);
-            if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
-            {
-                note = candidate;
-                bestPrint = print;
-                bestDistance = d;
-            }
-        }
+        engine->setPlayConfigDetails (0, 2, rate, block);
+        engine->prepareToPlay (rate, block);
+        engine->setLightRender (lightSearch);
     }
+    const auto searchRenders = searchBudget; // per worker
+    const auto numPresets = genreNames.size() * typeNames.size();
+    const auto expected = (float) (numPresets + workers * (WavetableBank::numBanks + searchRenders));
+    std::atomic<int> renders { 0 };
+    auto counted = [&] { progress = juce::jmin (0.99f, (float) ++renders / expected); };
 
-    // 0b. The envelope, roughly, so the wavetable stage compares tones on a sound
-    //     that already moves like the reference.
-    for (const auto sustain : { 0.0f, 0.5f, 1.0f })
-        for (const auto decay : { 0.15f, 0.6f, 2.0f })
-        {
-            auto candidate = best;
-            candidate.ampSustain = sustain;
-            candidate.ampDecay = decay;
-            const auto print = render (candidate, note);
-            if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
-            {
-                best = candidate;
-                bestDistance = d;
-                bestPrint = print;
-            }
-        }
-
-    // 1. The source: every wavetable at two positions.
-    for (int table = 0; table < WavetableBank::numBanks && ! threadShouldExit(); ++table)
-        for (const auto position : { 0.3f, 0.7f })
-        {
-            auto candidate = best;
-            candidate.waveTable = (float) table;
-            candidate.wavePos = position;
-            const auto print = render (candidate, note);
-            if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
-            {
-                best = candidate;
-                bestDistance = d;
-                bestPrint = print;
-            }
-            progress = 0.4f * (float) ++renders / (float) (WavetableBank::numBanks * 2);
-        }
-
-    // 1a. Brightness, coarsely: the filter and tilt together, since either
-    //     alone can stall halfway (a darker filter with a brighter tilt).
+    // Runs job (worker index) on every engine at once, on low-priority threads
+    // so a match never competes with the host's audio thread.
+    juce::ThreadPool pool (juce::ThreadPoolOptions{}.withThreadName ("Reference Match worker")
+                                                    .withNumberOfThreads (workers)
+                                                    .withDesiredThreadPriority (juce::Thread::Priority::low));
+    auto inParallel = [&] (auto job)
     {
-        const auto base = best;
-        for (const auto cutoff : { 250.0f, 600.0f, 1500.0f, 4000.0f, 20000.0f })
-            for (const auto tilt : { -4.0f, 0.0f, 3.0f })
-            {
-                auto candidate = base;
-                candidate.filterCutoff = cutoff;
-                candidate.filterEnv = juce::jmin (base.filterEnv, 2.0f); // an envelope sweep would hide the cutoff
-                candidate.tilt = tilt;
-                const auto print = render (candidate, note);
-                if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
-                {
-                    best = candidate;
-                    bestDistance = d;
-                    bestPrint = print;
-                }
-            }
-    }
-
-    // 1b. A wobble in the reference: a free-running LFO at its rate, on the
-    //     filter or the wavetable position.
-    if (target.moveRateHz > 0.0f)
-        for (const auto [toCutoff, toPos] : { std::pair { 1.5f, 0.0f }, { 3.0f, 0.0f }, { 0.0f, 0.5f } })
-        {
-            auto candidate = best;
-            candidate.lfoSync = 0.0f;
-            candidate.lfoRate = target.moveRateHz;
-            candidate.lfoToCutoff = toCutoff;
-            candidate.lfoToPos = toPos;
-            const auto print = render (candidate, note);
-            if (const auto d = SoundPrint::distance (print, target); d < bestDistance)
-            {
-                best = candidate;
-                bestDistance = d;
-                bestPrint = print;
-            }
-        }
-
-    // 2. Coordinate search on what shapes tone, width, density, envelope and wobble.
-    //    Attack and decay move by doublings (a step of 1 = twice as long).
-    struct Knob { float Profile::* member; float min, max, step; bool doubling = false; };
-    const Knob knobs[] {
-        { &Profile::wavePos, 0.0f, 1.0f, 0.1f },     { &Profile::tilt, -6.0f, 6.0f, 1.5f },
-        { &Profile::air, 0.0f, 1.0f, 0.2f },          { &Profile::ottDepth, 0.0f, 1.0f, 0.2f },
-        { &Profile::grit, 0.0f, 1.0f, 0.15f },        { &Profile::stereoWidth, 0.0f, 2.0f, 0.3f },
-        { &Profile::weight, 0.0f, 1.0f, 0.2f },       { &Profile::detune, 0.0f, 1.0f, 0.15f },
-        { &Profile::ampAttack, 0.001f, 2.0f, 1.0f, true }, { &Profile::ampDecay, 0.02f, 4.0f, 1.0f, true },
-        { &Profile::ampSustain, 0.0f, 1.0f, 0.2f },          { &Profile::filterCutoff, 60.0f, 20000.0f, 1.0f, true },
-        { &Profile::reverbMix, 0.0f, 1.0f, 0.15f },          { &Profile::delayMix, 0.0f, 1.0f, 0.15f },
-        { &Profile::lfoRate, 0.1f, 20.0f, 0.5f, true },     { &Profile::lfoToCutoff, 0.0f, 6.0f, 1.0f },
-        { &Profile::lfoToPos, 0.0f, 1.0f, 0.2f },          { &Profile::filterEnv, -2.0f, 6.0f, 1.0f },
+        for (int w = 0; w < workers; ++w)
+            pool.addJob ([&, w] { job (w); });
+        while (pool.getNumJobs() > 0)
+            juce::Thread::sleep (5);
     };
-    float steps[std::size (knobs)];
-    for (size_t k = 0; k < std::size (knobs); ++k)
-        steps[k] = knobs[k].step;
 
-    const auto searchStart = renders;
-    while (renders < budget && ! threadShouldExit())
+    // 1. Every preset at the reference's pitch.
+    std::vector<Candidate> presets ((size_t) numPresets);
+    std::atomic<int> next { 0 };
+    inParallel ([&] (int w)
     {
-        bool improved = false;
-        for (size_t k = 0; k < std::size (knobs) && renders < budget && ! threadShouldExit(); ++k)
-            for (const auto direction : { 1.0f, -1.0f })
+        for (int i = next++; i < numPresets && ! threadShouldExit(); i = next++)
+        {
+            auto& c = presets[(size_t) i];
+            c.genre = i / typeNames.size();
+            c.type = i % typeNames.size();
+            c.profile = c.genre == genre && c.type == type ? from : makeProfile (c.genre, c.type);
+            c.print = render (*engines[(size_t) w], c.genre, c.type, c.profile, playing);
+            c.distance = SoundPrint::distance (c.print, target);
+            if (target.moveRateHz > 0.0f) // a wobbling reference: each preset with the wobble too
             {
-                auto candidate = best;
-                if (knobs[k].member == &Profile::lfoRate && candidate.lfoSync > 0.5f)
-                    continue; // tempo-synced: the rate knob does nothing
-                auto& value = candidate.*knobs[k].member;
-                const auto moved = juce::jlimit (knobs[k].min, knobs[k].max, knobs[k].doubling
-                                                     ? juce::jmax (value, knobs[k].min) * std::exp2 (direction * steps[k])
-                                                     : value + direction * steps[k]);
-                if (moved == value)
-                    continue;
-                value = moved;
-
-                const auto print = render (candidate, note);
-                const auto d = SoundPrint::distance (print, target);
-                ++renders;
-                progress = 0.4f + 0.6f * (float) (renders - searchStart) / (float) (budget - searchStart);
-                if (d < bestDistance)
+                auto p = c.profile;
+                p.lfoSync = 0.0f;
+                p.lfoRate = target.moveRateHz;
+                p.lfoToCutoff = juce::jmax (p.lfoToCutoff, 2.0f);
+                p.filterCutoff = juce::jmin (p.filterCutoff, 800.0f); // a wide-open filter has nothing to wobble
+                auto print = render (*engines[(size_t) w], c.genre, c.type, p, playing);
+                if (const auto d = SoundPrint::distance (print, target); d < c.distance)
                 {
-                    best = candidate;
-                    bestDistance = d;
-                    bestPrint = print;
-                    improved = true;
-                    break;
+                    c.profile = p;
+                    c.print = std::move (print);
+                    c.distance = d;
                 }
             }
-
-        if (! improved)
-        {
-            bool anyLeft = false;
-            for (auto& step : steps)
-            {
-                step *= 0.5f;
-                anyLeft = anyLeft || step > 0.01f;
-            }
-            if (! anyLeft)
-                break;
+            counted();
         }
-    }
-
+    });
     if (threadShouldExit())
         return fail ("Match cancelled");
 
+    // The closest few, at most two of any one type, so the starts differ.
+    std::sort (presets.begin(), presets.end(), [] (const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
+    if (debugPrint) // tooling: the presets as ranked
+        for (size_t i = 0; i < 12; ++i)
+            std::printf ("    preset %-12s %-6s %.2f\n", genreNames[presets[i].genre].toRawUTF8(), typeNames[presets[i].type].toRawUTF8(), presets[i].distance);
+
+    std::vector<Candidate> starts;
+    for (const auto& c : presets)
+    {
+        const auto sameType = std::count_if (starts.begin(), starts.end(), [&] (const Candidate& s) { return s.type == c.type; });
+        if (sameType < 2)
+            starts.push_back (c);
+        if ((int) starts.size() == workers)
+            break;
+    }
+
+    // 2. Each start refined on its own engine: the octave, the wavetable, then a pattern search.
+    std::vector<std::vector<Candidate>> finals ((size_t) workers); // each worker's best few
+    inParallel ([&] (int w)
+    {
+        if (w >= (int) starts.size())
+            return;
+        auto& engine = *engines[(size_t) w];
+        auto best = starts[(size_t) w];
+        auto mine = playing; // this worker's note, octave settled below
+        best.playing = mine;
+        std::vector<Candidate> top; // the best few, re-scored at full quality at the end
+        auto consider = [&] (const Profile& p, double gateUnit = -1.0)
+        {
+            auto play = mine;
+            if (gateUnit >= 0.0)
+                play.gate = (float) (0.05 + 0.95 * gateUnit); // held from 5 % of the note to all of it
+            Candidate c { best.genre, best.type, p, 0.0f, render (engine, best.genre, best.type, p, play), play };
+            c.distance = SoundPrint::distance (c.print, target);
+            counted();
+            const auto d = c.distance;
+            if (d < best.distance)
+                best = c;
+            if (top.size() < 3 || d < top.back().distance)
+            {
+                top.push_back (std::move (c));
+                std::sort (top.begin(), top.end(), [] (const Candidate& x, const Candidate& y) { return x.distance < y.distance; });
+                if (top.size() > 3)
+                    top.pop_back();
+            }
+            return (double) d;
+        };
+
+        // The octave: a pitch read an octave high (a strong second harmonic) is
+        // tried an octave down, when the spectrum has real energy there. Never
+        // up: a correct reading always loses to its octave neighbours somewhere.
+        const auto below = (int) std::floor (std::log2 (juce::MidiMessage::getMidiNoteInHertz (mine.firstNote() - 12) / 31.25) + 0.5);
+        const auto strongest = *std::max_element (target.bandsDb.begin(), target.bandsDb.end());
+        const auto octaveDown = below >= 0 && below < SoundPrint::numBands && target.bandsDb[(size_t) below] > strongest - 12.0f;
+        for (const auto shift : { -12 })
+        {
+            if (! octaveDown)
+                break;
+            auto other = mine;
+            other.shift = mine.shift + shift;
+            auto print = render (engine, best.genre, best.type, best.profile, other);
+            if (const auto d = SoundPrint::distance (print, target); d < best.distance)
+            {
+                best.distance = d;
+                best.print = std::move (print);
+                mine = other;
+                best.playing = mine;
+            }
+            counted();
+        }
+
+        for (int table = 0; table < WavetableBank::numBanks && ! threadShouldExit(); ++table)
+        {
+            auto p = best.profile;
+            p.waveTable = (float) table;
+            consider (p);
+        }
+
+
+        // A wobble in the reference: a free-running LFO at its rate, on the
+        // filter or the wavetable position, tried before the search refines it.
+        if (target.moveRateHz > 0.0f)
+            for (const auto [toCutoff, toPos] : { std::pair { 1.5f, 0.0f }, { 3.0f, 0.0f }, { 0.0f, 0.5f } })
+            {
+                auto p = best.profile;
+                p.lfoSync = 0.0f;
+                p.lfoRate = target.moveRateHz;
+                p.lfoToCutoff = toCutoff;
+                p.lfoToPos = toPos;
+                if (toCutoff > 0.0f)
+                    p.filterCutoff = juce::jmin (p.filterCutoff, 800.0f);
+                if (! threadShouldExit())
+                    consider (p, (best.playing.gate - 0.05) / 0.95);
+            }
+        auto base = best.profile;
+        if (target.moveRateHz > 0.0f)
+            base.lfoSync = 0.0f; // free-running, so the rate dimension counts
+
+        std::vector<double> units;
+        for (const auto& d : dimensions)
+            units.push_back (toUnit (d, base.*d.member));
+        const auto currentGate = [&] { return (double) (best.playing.gate - 0.05f) / 0.95; };
+        units.push_back (currentGate()); // and how long each note is held
+        if (useCmaes)
+        {
+            // CMA-ES with restarts: when a run stops gaining for five
+            // generations, start again around the best with twice the population.
+            auto lambda = 0;
+            for (int done = 0; done < searchRenders && ! threadShouldExit();)
+            {
+                std::vector<double> from;
+                for (const auto& d : dimensions)
+                    from.push_back (toUnit (d, best.profile.*d.member));
+                from.push_back (currentGate());
+                Cmaes cmaes (from, 0.15, (unsigned) (w * 101 + done + 1), lambda);
+                lambda = cmaes.populationSize() * 2;
+                auto stale = 0;
+                for (auto before = best.distance; done + cmaes.populationSize() <= searchRenders && stale < 5 && ! threadShouldExit();)
+                {
+                    const auto population = cmaes.ask();
+                    std::vector<double> costs;
+                    for (const auto& x : population)
+                        costs.push_back (consider (withUnits (base, x), x.back()));
+                    cmaes.tell (costs);
+                    done += (int) population.size();
+                    stale = best.distance < before - 1.0e-4f ? 0 : stale + 1;
+                    before = juce::jmin (before, best.distance);
+                }
+                if (done + cmaes.populationSize() > searchRenders)
+                    break;
+            }
+        }
+        else
+        {
+        // Pattern search: each setting a step either way, keeping any gain;
+        // when a full pass gains nothing, the steps halve.
+        auto cost = (double) best.distance;
+        std::vector<double> steps (units.size(), 0.15);
+        for (int done = 0; done < searchRenders && ! threadShouldExit();)
+        {
+            bool improved = false;
+            for (size_t k = 0; k < units.size() && done < searchRenders && ! threadShouldExit(); ++k)
+                for (const auto direction : { 1.0, -1.0 })
+                {
+                    auto candidate = units;
+                    candidate[k] = std::clamp (units[k] + direction * steps[k], 0.0, 1.0);
+                    if (candidate[k] == units[k])
+                        continue;
+                    ++done;
+                    if (const auto c = consider (withUnits (base, candidate), candidate.back()); c < cost)
+                    {
+                        units = candidate;
+                        cost = c;
+                        improved = true;
+                        break;
+                    }
+                }
+            if (! improved)
+            {
+                for (auto& s : steps)
+                    s *= 0.5;
+                if (steps[0] < 0.005)
+                    break;
+            }
+        }
+        }
+        if (top.empty())
+            top.push_back (best);
+        finals[(size_t) w] = std::move (top);
+    });
+    if (threadShouldExit())
+        return fail ("Match cancelled");
+
+    // 3. The finalists again at full quality (spectral stage, oversampling), the
+    //    sound the plugin will actually make; the best of those wins.
+    inParallel ([&] (int w)
+    {
+        engines[(size_t) w]->setLightRender (false);
+        for (auto& c : finals[(size_t) w])
+        {
+            c.print = render (*engines[(size_t) w], c.genre, c.type, c.profile, c.playing);
+            c.distance = SoundPrint::distance (c.print, target);
+        }
+    });
+    std::vector<Candidate> all;
+    for (auto& f : finals)
+        for (auto& c : f)
+            all.push_back (std::move (c));
+    if (all.empty())
+        return fail ("Match found nothing");
+    const auto& winner = *std::min_element (all.begin(), all.end(), [] (const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
     result.ok = true;
-    result.profile = best;
-    result.matched = bestPrint;
-    result.genre = genre;
-    result.type = type;
-    result.summary = "MATCHED " + file.getFileNameWithoutExtension().toUpperCase()
-                   + "  -  " + juce::String (juce::roundToInt (100.0f * std::exp (-bestDistance))) + "% CLOSE";
-    // A reference far outside the type's range was played where the type lives, so
-    // say so: a pluck matched as a Bass comes out as a bass.
-    if (type == 0 && target.pitchHz > 260.0f)
-        result.summary << "  -  HIGH FOR A BASS, TRY LEAD OR PLUCK";
-    else if (type != 0 && target.pitchHz > 0.0f && target.pitchHz < 60.0f)
-        result.summary << "  -  LOW, TRY BASS";
+    result.profile = winner.profile;
+    result.genre = winner.genre;
+    result.type = winner.type;
+    result.matched = winner.print;
+    result.distance = winner.distance;
+    // How close, in words: a percentage of a loss means little to a listener.
+    // Calibrated on matchbench (distance against the judge's dB).
+    const auto closeness = winner.distance < closeBelow ? "VERY CLOSE" : winner.distance < closeBelow * 2.0f ? "CLOSE"
+                         : winner.distance < closeBelow * 3.5f ? "ROUGH" : "LOOSE";
+    result.summary = "MATCHED " + file.getFileNameWithoutExtension().toUpperCase() + "  -  " + closeness + "  -  "
+                   + genreNames[winner.genre].toUpperCase() + " " + typeNames[winner.type].toUpperCase();
     progress = 1.0f;
     state = State::done;
+}
+
+//==============================================================================
+MatchEngines::MatchEngines()
+{
+    for (int i = 0; i < juce::jlimit (1, 6, juce::SystemStats::getNumCpus() - 2); ++i)
+    {
+        owned.push_back (std::make_unique<ZeroEngineProcessor>());
+        owned.back()->stopProfileSync();
+    }
+}
+
+MatchEngines::~MatchEngines() = default;
+
+std::vector<ZeroEngineProcessor*> MatchEngines::get() const
+{
+    std::vector<ZeroEngineProcessor*> engines;
+    for (const auto& e : owned)
+        engines.push_back (e.get());
+    return engines;
+}
+
+float ReferenceMatch::score (ZeroEngineProcessor& engine, const SoundPrint& target, int genre, int type, const Profile& profile, bool light)
+{
+    engine.setPlayConfigDetails (0, 2, rate, block);
+    engine.prepareToPlay (rate, block);
+    engine.setLightRender (light);
+    // The hold isn't known from the audio, so the best of a few gates.
+    auto d = 1.0e9f;
+    for (const auto gate : { 0.3f, 0.5f, 0.75f, 0.9f, 1.0f })
+    {
+        auto playing = playingFor (target);
+        playing.gate = gate;
+        d = juce::jmin (d, SoundPrint::distance (render (engine, genre, type, profile, playing), target));
+    }
+    engine.setLightRender (false);
+    return d;
 }

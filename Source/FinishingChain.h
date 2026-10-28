@@ -29,6 +29,11 @@ class FinishingChain
 public:
     void prepare (double sampleRate, int maxBlockSize, int numChannels);
     void reset();
+
+    // Offline search renders (Reference Match): skip the spectral stage and the
+    // saturation's oversampling, several times cheaper and close in sound; the
+    // finalists are re-scored with everything on.
+    void setLight (bool on) noexcept { light = on; }
     // With `sub` (a mono clean sub, one sample per buffer sample), the buffer is
     // high-passed before saturation and the sub skips the chain, joining just
     // before the soft clipper: clean sub, dirty mids.
@@ -54,6 +59,7 @@ public:
     const Meters& getMeters() const noexcept { return meters; }
 
 private:
+    bool light = false;
     // RBJ biquad (high shelf or high-pass), transposed direct form II.
     // Coefficients are plain floats, so updating them on the audio thread is
     // allocation-free.

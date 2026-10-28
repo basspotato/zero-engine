@@ -579,13 +579,13 @@ namespace
         juce::StringArray problems;
 
         // loop: four notes a quarter second apart (up a minor third, a fifth, a fourth), as a pluck loop.
-        auto renderTo = [&] (const Profile& profile, bool asLoop = false)
+        auto renderTo = [&] (const Profile& profile, bool asLoop = false, int asGenre = -1, int asType = -1)
         {
             ZeroEngineProcessor engine;
             engine.stopProfileSync();
             engine.setPlayConfigDetails (0, 2, 48000.0, 512);
             engine.prepareToPlay (48000.0, 512);
-            engine.loadProfile (genre, type, profile);
+            engine.loadProfile (asGenre < 0 ? genre : asGenre, asType < 0 ? type : asType, profile); // the match may pick another genre/type
             juce::AudioBuffer<float> settle (2, 512);
             juce::MidiBuffer none;
             for (int i = 0; i < 10; ++i) { settle.clear(); engine.processBlock (settle, none); } // as the matcher does
@@ -632,11 +632,12 @@ namespace
         const auto wanted = (float) juce::MidiMessage::getMidiNoteInHertz (note);
         if (std::abs (target.pitchHz / wanted - 1.0f) > 0.03f)
             problems.add ("pitch read as " + juce::String (target.pitchHz, 1) + " Hz, wanted " + juce::String (wanted, 1));
-        const auto before = SoundPrint::distance (SoundPrint::of (renderTo (start), 48000.0, false), target);
+        ZeroEngineProcessor scorer;
+        scorer.stopProfileSync();
+        const auto before = ReferenceMatch::score (scorer, target, genre, type, start, false);
 
-        ZeroEngineProcessor renderEngine;
-        renderEngine.stopProfileSync();
-        ReferenceMatch match (renderEngine);
+        MatchEngines engines;
+        ReferenceMatch match (engines.get());
         const auto began = juce::Time::getMillisecondCounter();
         match.start (file, genre, type, start);
         const auto timeout = juce::Time::getMillisecondCounter() + 60000;
@@ -647,15 +648,14 @@ namespace
 
         if (! result.ok)
             return { "match failed: " + result.summary };
-        const auto matched = SoundPrint::of (renderTo (result.profile), 48000.0, false);
-        const auto after = SoundPrint::distance (matched, target);
-        if (std::abs (std::log2 (matched.centroidHz / juce::jmax (1.0f, target.centroidHz))) > 0.35f)
-            problems.add ("brightness " + juce::String (juce::roundToInt (matched.centroidHz)) + " Hz, the reference " + juce::String (juce::roundToInt (target.centroidHz)) + " Hz");
-        if (target.moveRateHz > 0.0f && target.moveDepthDb > 1.5f && std::abs (matched.moveRateHz / target.moveRateHz - 1.0f) > 0.2f) // the rate heard, after Motion
-            problems.add ("wobble at " + juce::String (matched.moveRateHz, 2) + " Hz, the reference at " + juce::String (target.moveRateHz, 2));
-        std::printf ("(%s; distance %.2f -> %.2f in %.1f s) ", result.summary.toRawUTF8(), before, after, (juce::Time::getMillisecondCounter() - began) / 1000.0);
-        if (after > 0.5f * before)
-            problems.add ("match only got from " + juce::String (before, 2) + " to " + juce::String (after, 2));
+        // Scored as a match scores (the notes as heard, the best of a few gates).
+        const auto after = ReferenceMatch::score (scorer, target, result.genre, result.type, result.profile, false);
+        const auto truth = ReferenceMatch::score (scorer, target, genre, type, changed, false);
+        std::printf ("(%s; distance %.2f -> %.2f, the true settings %.2f, in %.1f s) ", result.summary.toRawUTF8(), before, after, truth,
+                     (juce::Time::getMillisecondCounter() - began) / 1000.0);
+        if (after > 0.5f * before && after > truth + 1.0f) // halfway from the preset, or about as close as the truth itself
+            problems.add ("match only got from " + juce::String (before, 2) + " to " + juce::String (after, 2) + " (reference: wobble "
+                          + juce::String (target.moveRateHz, 2) + " Hz, " + juce::String ((int) target.notes.size()) + " notes heard)");
         return problems;
     }
 

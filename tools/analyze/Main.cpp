@@ -21,12 +21,14 @@
 #include "Descriptors.h"
 #include "Freesound.h"
 #include "Tests.h"
+#include "MatchBench.h"
 #include "Library.h"
 #include "Tuner.h"
 #include "Harmonics.h"
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/PluginEditor.h"
 #include "../../Source/Parameters.h"
+#include "../../Source/SoundPrint.h"
 
 namespace
 {
@@ -306,6 +308,7 @@ int main (int argc, char* argv[])
         // folder laid out as <Genre>/<Type>/*.wav. Prints how close each gets and
         // what it chose.
         const auto verbose = args.contains ("-v");
+        ReferenceMatch::debugPrint = verbose;
         args.removeString ("-v");
         const juce::File root (juce::File::getCurrentWorkingDirectory().getChildFile (args[1]));
         struct Job { juce::File file; int genre, type; };
@@ -318,9 +321,8 @@ int main (int argc, char* argv[])
                 jobs.push_back ({ file, indexOf (genreNames, file.getParentDirectory().getParentDirectory().getFileName()),
                                   indexOf (typeNames, file.getParentDirectory().getFileName()) });
 
-        ZeroEngineProcessor engine;
-        engine.stopProfileSync();
-        ReferenceMatch match (engine);
+        MatchEngines engines;
+        ReferenceMatch match (engines.get());
         for (const auto& job : jobs)
         {
             if (job.genre < 0 || job.type < 0)
@@ -353,6 +355,26 @@ int main (int argc, char* argv[])
         }
         return 0;
     }
+
+    if (command == "notes" && args.size() >= 2)
+    {
+        // Reference Match's transcription of a sound: the notes candidates will play.
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File::getCurrentWorkingDirectory().getChildFile (args[1])));
+        if (reader == nullptr)
+            return 1;
+        juce::AudioBuffer<float> audio (2, (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 10.0)));
+        reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
+        const auto print = SoundPrint::of (audio, reader->sampleRate, true);
+        std::printf ("%d notes, %.2f s measured%s\n", (int) print.notes.size(), print.noteSeconds, print.cut ? " (goes on past it)" : "");
+        for (const auto& n : print.notes)
+            std::printf ("  at %.2f s for %.2f s  %6.1f Hz\n", n.start, n.length, n.pitchHz);
+        return 0;
+    }
+
+    if (command == "matchbench")
+        return runMatchBench (args);
 
     if (command == "noise" && args.size() >= 2)
     {

@@ -482,12 +482,11 @@ void ZeroEngineProcessor::startMatch (const juce::File& reference)
 {
     if (matcher == nullptr)
     {
-        matchEngine = std::make_unique<ZeroEngineProcessor>();
-        matchEngine->stopProfileSync();
-        matcher = std::make_unique<ReferenceMatch> (*matchEngine);
+        matchEngines = std::make_unique<MatchEngines>();
+        matcher = std::make_unique<ReferenceMatch> (matchEngines->get());
     }
 
-    // Starts from the current genre/type's designed sound and searches from there.
+    // Searches every genre/type; the current one starts from its designed sound.
     syncProfile();
     const int genre = appliedGenre, type = appliedType;
     matchSummary.clear();

@@ -244,7 +244,8 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
                 juce::FloatVectorOperations::addWithMultiply (chunk.getWritePointer (ch), sub + start, cleanSubGain, n);
 
         // The spectral stage sits after the clean sub joins, so sub and mids share its delay.
-        spectral.process (chunk, n, s.spectral);
+        if (! light)
+            spectral.process (chunk, n, s.spectral);
         clipAndGain (chunk, n);
     }
 
@@ -283,24 +284,42 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
 //==============================================================================
 void FinishingChain::saturate (juce::AudioBuffer<float>& buffer, int numSamples)
 {
-    juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(), (size_t) buffer.getNumChannels(), (size_t) numSamples);
-    auto up = oversampling->processSamplesUp (block);
-
-    for (size_t i = 0; i < up.getNumSamples(); ++i)
+    if (light) // the same curve at the base rate
     {
-        const auto d = drive.getNextValue();
-        const auto b = bias.getNextValue();
-        const auto norm = 1.0f / std::tanh (d);
-        const auto offset = std::tanh (b);
-
-        for (size_t ch = 0; ch < up.getNumChannels(); ++ch)
+        for (int i = 0; i < numSamples; ++i)
         {
-            auto& x = up.getChannelPointer (ch)[i];
-            x = (std::tanh (d * x + b) - offset) * norm;
+            const auto d = drive.getNextValue();
+            const auto b = bias.getNextValue();
+            const auto norm = 1.0f / std::tanh (d);
+            const auto offset = std::tanh (b);
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            {
+                auto& x = buffer.getWritePointer (ch)[i];
+                x = (std::tanh (d * x + b) - offset) * norm;
+            }
         }
     }
+    else
+    {
+        juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(), (size_t) buffer.getNumChannels(), (size_t) numSamples);
+        auto up = oversampling->processSamplesUp (block);
 
-    oversampling->processSamplesDown (block);
+        for (size_t i = 0; i < up.getNumSamples(); ++i)
+        {
+            const auto d = drive.getNextValue();
+            const auto b = bias.getNextValue();
+            const auto norm = 1.0f / std::tanh (d);
+            const auto offset = std::tanh (b);
+
+            for (size_t ch = 0; ch < up.getNumChannels(); ++ch)
+            {
+                auto& x = up.getChannelPointer (ch)[i];
+                x = (std::tanh (d * x + b) - offset) * norm;
+            }
+        }
+
+        oversampling->processSamplesDown (block);
+    }
 
     // DC blocker for the asymmetric curve.
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
