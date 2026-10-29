@@ -108,7 +108,7 @@ public:
     bool isCurrentHearted() const noexcept { return currentHeart >= 0; }
     // The last 10 hearted sounds' names, newest first (the Favourites menu's LIKED
     // section), and recalling one exactly as it was hearted.
-    juce::StringArray getRecentLikes();
+    juce::StringArray getRecentLikes (int type = -1, int count = 10); // newest first; one type, or all (-1)
     bool recallLike (const juce::String& name);
     int getTasteJudgments() const noexcept { return taste.judgments(); }
     TasteModel::Features getTasteWeights() const noexcept { return taste.meanWeights(); }

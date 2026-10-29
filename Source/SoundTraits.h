@@ -38,7 +38,10 @@ struct SoundTraits
     }
 
     // Allocates (FFT buffers): never on the audio thread.
-    static SoundTraits of (const juce::AudioBuffer<float>& audio, double sampleRate);
+    // With the notes' fundamentals (Hz), width and movement count only the
+    // spectrum near their harmonics (and the sub's octaves below, up to 300 Hz):
+    // hiss and wash between them can't pass for width or movement.
+    static SoundTraits of (const juce::AudioBuffer<float>& audio, double sampleRate, const std::vector<float>& fundamentals = {});
     static float clarityOf (const juce::AudioBuffer<float>& audio, double sampleRate, const std::vector<float>& fundamentals);
     static void measureTuning (const juce::AudioBuffer<float>& audio, double sampleRate, float expectedHz, SoundTraits& traits);
 };

@@ -1888,15 +1888,22 @@ void ZeroEngineEditor::refreshFavourites()
 {
     favouritesBox.clear (juce::dontSendNotification);
 
-    // The last 10 hearted sounds first, then the saved favourites.
-    recentLikes = processor.getRecentLikes();
-    if (! recentLikes.isEmpty())
+    // The hearted sounds first, by type (the newest 6 of each), then the saved favourites.
+    recentLikes.clear();
+    for (int type = 0; type < typeNames.size(); ++type)
     {
-        favouritesBox.addSectionHeading ("LIKED");
-        for (int i = 0; i < recentLikes.size(); ++i)
-            favouritesBox.addItem (recentLikes[i], likeIdBase + i);
-        favouritesBox.addSectionHeading ("FAVOURITES");
+        const auto likes = processor.getRecentLikes (type, 6);
+        if (likes.isEmpty())
+            continue;
+        favouritesBox.addSectionHeading ("LIKED " + typeNames[type].toUpperCase());
+        for (const auto& name : likes)
+        {
+            favouritesBox.addItem (name, likeIdBase + recentLikes.size());
+            recentLikes.add (name);
+        }
     }
+    if (! recentLikes.isEmpty())
+        favouritesBox.addSectionHeading ("FAVOURITES");
     const auto names = processor.getFavourites();
     favouritesBox.addItemList (names, 1);
 

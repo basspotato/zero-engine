@@ -2,7 +2,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <vector>
 
-SoundTraits SoundTraits::of (const juce::AudioBuffer<float>& audio, double sampleRate)
+SoundTraits SoundTraits::of (const juce::AudioBuffer<float>& audio, double sampleRate, const std::vector<float>& fundamentals)
 {
     SoundTraits t;
     const auto channels = juce::jmin (2, audio.getNumChannels());
@@ -44,24 +44,62 @@ SoundTraits SoundTraits::of (const juce::AudioBuffer<float>& audio, double sampl
     constexpr int order = 12, size = 1 << order, hop = size / 2;
     constexpr int numBands = 30; // 25 Hz up by thirds of an octave to about 20 kHz
     juce::dsp::FFT fft (order);
-    std::vector<float> frame ((size_t) size * 2);
+    std::vector<float> frame ((size_t) size * 2), sideFrame ((size_t) size * 2);
     std::vector<double> spectrum ((size_t) size / 2, 0.0);
     std::vector<std::array<double, numBands>> bandFrames;
     const auto binHz = sampleRate / size;
     auto bandOf = [] (double hz) { return hz < 25.0 ? -1 : (int) std::floor (3.0 * std::log2 (hz / 25.0)); };
 
+    // The notes' bins: within 3 % (half a semitone, at least 1.5 bins) of a
+    // harmonic up to 10 kHz, or of the sub's octaves below a note up to 300 Hz.
+    std::vector<bool> onNotes;
+    if (! fundamentals.empty())
+    {
+        onNotes.assign ((size_t) size / 2, false);
+        auto mark = [&] (double hz)
+        {
+            const auto reach = juce::jmax (1.5 * binHz, 0.03 * hz);
+            for (auto bin = juce::jmax (1, (int) std::ceil ((hz - reach) / binHz)); bin < size / 2 && bin * binHz <= hz + reach; ++bin)
+                onNotes[(size_t) bin] = true;
+        };
+        for (const auto f : fundamentals)
+        {
+            if (f <= 20.0f)
+                continue;
+            for (double h = f; h <= 10000.0; h += f)
+                mark (h);
+            for (const auto below : { 0.5, 0.25 })
+                for (double h = f * below; h <= 300.0; h += f * below)
+                    mark (h);
+        }
+    }
+    double noteMid = 0.0, noteSide = 0.0;
+
     for (int at = start; at + size <= start + length || bandFrames.empty(); at += hop)
     {
         std::fill (frame.begin(), frame.end(), 0.0f);
+        std::fill (sideFrame.begin(), sideFrame.end(), 0.0f);
         for (int i = 0; i < size && at + i < total; ++i)
-            frame[(size_t) i] = 0.5f * (sample (0, at + i) + sample (1, at + i))
-                              * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size));
+        {
+            const auto window = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size);
+            frame[(size_t) i] = 0.5f * (sample (0, at + i) + sample (1, at + i)) * window;
+            sideFrame[(size_t) i] = 0.5f * (sample (0, at + i) - sample (1, at + i)) * window;
+        }
         fft.performFrequencyOnlyForwardTransform (frame.data());
+        if (! onNotes.empty())
+            fft.performFrequencyOnlyForwardTransform (sideFrame.data());
         std::array<double, numBands> bands {};
         for (int bin = 1; bin < size / 2; ++bin)
         {
             const auto e = (double) frame[(size_t) bin] * frame[(size_t) bin];
             spectrum[(size_t) bin] += e;
+            if (! onNotes.empty() && ! onNotes[(size_t) bin])
+                continue; // movement: the notes' bins only
+            if (! onNotes.empty())
+            {
+                noteMid += e;
+                noteSide += (double) sideFrame[(size_t) bin] * sideFrame[(size_t) bin];
+            }
             if (const auto b = bandOf (bin * binHz); b >= 0 && b < numBands)
                 bands[(size_t) b] += e;
         }
@@ -69,6 +107,8 @@ SoundTraits SoundTraits::of (const juce::AudioBuffer<float>& audio, double sampl
         if (at + size > start + length)
             break;
     }
+    if (! onNotes.empty() && noteMid + noteSide > 0.0) // width: the notes' bins only
+        t.sidePct = (float) (100.0 * noteSide / (noteMid + noteSide));
 
     double energy = 0.0, weighted = 0.0, bass = 0.0, body = 0.0, logSum = 0.0, logSquares = 0.0;
     for (int bin = 1; bin < size / 2; ++bin)
@@ -112,14 +152,19 @@ SoundTraits SoundTraits::of (const juce::AudioBuffer<float>& audio, double sampl
             }
     t.movementDb = changes > 0 ? (float) (change / changes) : 0.0f;
 
-    // Richness: bands from 100 Hz to 10 kHz within 20 dB of the strongest of them.
+    // Richness: bands from 100 Hz to 10 kHz within 20 dB of the strongest of them
+    // (the whole spectrum, notes or not).
+    std::array<double, numBands> whole {};
+    for (int bin = 1; bin < size / 2; ++bin)
+        if (const auto b = bandOf (bin * binHz); b >= 0 && b < numBands)
+            whole[(size_t) b] += spectrum[(size_t) bin];
     const auto from = bandOf (100.0), to = bandOf (10000.0);
     double strongest = 0.0;
     for (int b = from; b <= to; ++b)
-        strongest = juce::jmax (strongest, longTerm[(size_t) b]);
+        strongest = juce::jmax (strongest, whole[(size_t) b]);
     int rich = 0;
     for (int b = from; b <= to; ++b)
-        rich += longTerm[(size_t) b] > strongest * 0.01;
+        rich += whole[(size_t) b] > strongest * 0.01;
     t.richness = (float) rich / (float) (to - from + 1);
     return t;
 }

@@ -505,7 +505,18 @@ int runLibraryTraits (const juce::StringArray& args)
             continue;
         juce::AudioBuffer<float> audio (2, (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 3.0)));
         reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
-        const auto t = SoundTraits::of (audio, reader->sampleRate);
+        // The notes (Reference Match's transcription) of the first moments, so
+        // width and movement are measured on them as Generate measures its own.
+        std::vector<float> fundamentals;
+        for (const auto& n : SoundPrint::of (audio, reader->sampleRate).notes)
+            if (n.start < 1.5f && n.pitchHz > 20.0f)
+            {
+                fundamentals.push_back (n.pitchHz);
+                for (const auto hz : n.also)
+                    if (hz > 20.0f)
+                        fundamentals.push_back (hz);
+            }
+        const auto t = SoundTraits::of (audio, reader->sampleRate, fundamentals);
         if (t.levelDb < -60.0f)
             continue;
         byType[(size_t) type].push_back (t);

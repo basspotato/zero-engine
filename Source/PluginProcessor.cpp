@@ -360,9 +360,11 @@ void ZeroEngineProcessor::heartCurrent()
             heart.features = TasteModel::featuresOf (measureProfile (*checkers[0], heart.genre, heart.type, heart.profile), heart.type);
         }
         hearts.push_back (heart);
-        constexpr size_t kept = 60;
-        if (hearts.size() > kept)
-            hearts.erase (hearts.begin());
+        // Kept per type: the oldest of this type goes past 30, so a run of
+        // liked basses never pushes out the pads.
+        constexpr int keptPerType = 30;
+        if (std::count_if (hearts.begin(), hearts.end(), [&] (const Heart& h) { return h.type == heart.type; }) > keptPerType)
+            hearts.erase (std::find_if (hearts.begin(), hearts.end(), [&] (const Heart& h) { return h.type == heart.type; }));
         currentHeart = (int) hearts.size() - 1;
     }
     heartsChanged();
@@ -389,12 +391,13 @@ void ZeroEngineProcessor::saveHearts() const
     xml.writeTo (heartsFile());
 }
 
-juce::StringArray ZeroEngineProcessor::getRecentLikes()
+juce::StringArray ZeroEngineProcessor::getRecentLikes (int type, int count)
 {
     loadTasteAndHearts();
     juce::StringArray names;
-    for (auto h = hearts.rbegin(); h != hearts.rend() && names.size() < 10; ++h)
-        names.add (h->name);
+    for (auto h = hearts.rbegin(); h != hearts.rend() && names.size() < count; ++h)
+        if (type < 0 || h->type == type)
+            names.add (h->name);
     return names;
 }
 
@@ -494,7 +497,7 @@ ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineP
     std::vector<float> fundamentals;
     for (int i = 0; i < (chord ? 3 : 1); ++i)
         fundamentals.push_back ((float) juce::MidiMessage::getMidiNoteInHertz (root + intervals[i]));
-    auto traits = SoundTraits::of (out, rate);
+    auto traits = SoundTraits::of (out, rate, fundamentals); // width and movement on the notes
     traits.clarity = SoundTraits::clarityOf (out, rate, fundamentals);
     SoundTraits::measureTuning (out, rate, fundamentals.front(), traits);
     return traits;
