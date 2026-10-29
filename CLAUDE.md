@@ -51,8 +51,8 @@ Output goes to `analysis/` by default (git-ignored).
 ## Ground rules
 
 - No cloud, no subscription, no logins. Everything runs locally inside the plugin.
-- Tone comes from a real DSP engine; ML only chooses parameters, or renders transients/textures off the audio thread.
+- Tone comes from a real DSP engine. Since 2026-10-28 the owner allows ML anywhere it helps (e.g. Basic Pitch transcription, learned starting points for Match), and GPL code in the plugin, as it is a personal tool (GPL code means the repo and any build shared from it fall under the GPL).
 - Audio thread is real-time safe: no allocation, locks, file I/O or model inference in `processBlock`/`renderNextBlock`.
 - Training data: the owner's sounds, audio rendered from this engine, and other sources whose licence permits it. Check terms before use; Splice, Loopmasters and NI licences forbid AI training, personal use included.
 - Git: commit locally; push to `github.com/basspotato/zero-engine` only when the owner asks.
-- Keep GPL code (Matchering, DawDreamer, Surge, Vital) out of the shipped plugin; offline tooling only.
+- GPL code (Matchering, DawDreamer, Surge, Vital) is allowed (see above); note where it is used. Model and dataset licences still apply to training data.
