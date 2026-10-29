@@ -44,3 +44,4 @@ Points pulled from the research report ([AI finished sound VST engine](reports/A
 ## Open items
 - Generation mode decision (generate vs. note-on vs. hybrid).
 - Still to verify from the report: Unisynth's current features, licenses for Diff-MST / ST-ITO / synth-proxy / CTAG / model weights.
+- Retune the genre profiles from the owner's new sample packs (C:\samples, C:\Production 2024, D:\Cubase Production\Production 2024; owner OK'd, 2026-10-28): map packs to genres by pack name, `ZeroAnalyze tune` dry run, review the per-genre before/after with the owner, then write. Measurement only, no training on pack audio. After the Reference Match rounds.

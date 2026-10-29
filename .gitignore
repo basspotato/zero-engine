@@ -1,5 +1,6 @@
 build/
 build-*/
+build2/
 out/
 .vs/
 .vscode/
