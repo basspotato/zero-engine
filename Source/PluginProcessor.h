@@ -9,6 +9,7 @@
 #include "Arpeggiator.h"
 #include "ReferenceMatch.h"
 #include "SoundTraits.h"
+#include "Moods.h"
 #include "TasteModel.h"
 #include <optional>
 
@@ -82,7 +83,7 @@ public:
     // mini tesseract): draws from every genre and blends of two instead, and
     // loads as the genre it mostly came from. Switching Genre or Type loads a
     // designed profile as usual.
-    void generate (juce::int64 seed = juce::Time::currentTimeMillis(), bool anyGenreToo = false);
+    void generate (juce::int64 seed = juce::Time::currentTimeMillis(), bool moodMode = false);
 
     // Generate's mode (message thread), saved with the project: Mood (free,
     // creative, each mood picks its own type) or Genre (within the selected
@@ -207,15 +208,20 @@ public:
     // size and interest. Public for tooling.
     static float strayFrom (const SoundTraits& target, const SoundTraits& m, int type, bool free);
     static float sizeAndInterest (const SoundTraits& target, const SoundTraits& m, int type);
+    // Moods score warmth, body, smoothness and calm instead of size: darker than
+    // the owner's sounds of the type, more body and partials, clean (clarity, no
+    // noise), width near theirs, and no fast movement.
+    static float moodScore (const SoundTraits& target, const SoundTraits& m, int type);
 private:
 public:
     static SoundTraits measureForTools (ZeroEngineProcessor& engine, int genre, int type, const Profile& p) { return measureProfile (engine, genre, type, p); }
 private:
     static constexpr int anyGenre = 12; // pickGeneratedProfile: draw from every genre
-    std::pair<Profile, int> pickGeneratedProfile (int genre, int type, juce::Random&); // the profile and its leading genre
+    std::pair<Profile, int> pickGeneratedProfile (int genre, int type, juce::Random&, int mood = -1); // the profile and its leading genre
     std::vector<std::unique_ptr<ZeroEngineProcessor>> checkers; // private engines for the check renders, made on first use
     std::vector<SoundTraits> recentGenerated; // the last few results, so the next one differs
     std::vector<int> recentAnyGenres;         // the last few mini-tesseract results' genres, so the next leads with another
+    int lastMood = -1;                         // so Mood mode never gives the same mood twice running
 
     // Taste: Generate results as shown, how long each was played, and what the
     // owner did next, becoming judgments for the TasteModel (see generate,

@@ -7,6 +7,7 @@
 #include "GenerateTargets.h"
 #include "ArpGrooves.h"
 #include "GenerateNet.h"
+#include "Moods.h"
 #include <thread>
 
 
@@ -118,7 +119,7 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
     loadMacroMap (macroMap, profile);
 }
 
-void ZeroEngineProcessor::generate (juce::int64 seed, bool anyGenreToo)
+void ZeroEngineProcessor::generate (juce::int64 seed, bool moodMode)
 {
     syncProfile(); // a Genre/Type change not yet picked up by the timer
     // The seed scrambled first (splitmix64): clicks a moment apart give nearby
@@ -128,7 +129,20 @@ void ZeroEngineProcessor::generate (juce::int64 seed, bool anyGenreToo)
     mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ull;
     mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebull;
     juce::Random random ((juce::int64) (mixed ^ (mixed >> 31)));
-    const int genre = appliedGenre, type = appliedType;
+    const int genre = appliedGenre;
+    auto type = appliedType.load();
+
+    // Mood mode: a mood (never the last one twice running) picks the type; the
+    // genre box keeps the genre, and the display shows the mood's name.
+    auto mood = -1;
+    if (moodMode)
+    {
+        mood = (lastMood + 1 + random.nextInt (Moods::count - 1)) % Moods::count;
+        if (lastMood < 0)
+            mood = random.nextInt (Moods::count);
+        lastMood = mood;
+        type = Moods::typeOf (mood);
+    }
 
     // Taste: what became of the last result decides a judgment or two.
     loadTasteAndHearts();
@@ -140,11 +154,16 @@ void ZeroEngineProcessor::generate (juce::int64 seed, bool anyGenreToo)
     if (history.empty() || ! history.back().isEquivalentTo (state.state))
         history.push_back (state.copyState());
 
-    // Any genre: candidates from every genre and blends of two; the result
-    // loads as the genre it mostly came from.
+    // In Genre mode the result loads as its genre; a mood keeps the genre box.
+
     lastPickTraits.reset();
-    const auto [profile, source] = pickGeneratedProfile (anyGenreToo ? anyGenre : genre, type, random);
-    loadProfile (source, type, profile);
+    const auto [profile, source] = pickGeneratedProfile (genre, type, random, mood);
+    loadProfile (mood >= 0 ? genre : source, type, profile);
+    if (mood >= 0)
+    {
+        matchSummary = Moods::nameOf (mood);
+        matchSummaryUntil = juce::Time::getMillisecondCounterHiRes() + 3000.0;
+    }
     currentHeart = -1;
     if (lastPickTraits.has_value()) // a measured pick (not a fallback)
     {
@@ -457,7 +476,25 @@ float ZeroEngineProcessor::sizeAndInterest (const SoundTraits& target, const Sou
     return big + interest;
 }
 
-std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random)
+float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTraits& m, int type)
+{
+    // Warm: darker than the target (octaves), more body, partials; clean: the
+    // energy on the notes' harmonics and no noise; width near the target's
+    // (neither narrow nor smeared wide); calm: movement past half a spread over
+    // the target costs. Each part capped as in sizeAndInterest.
+    const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
+    const auto a = m.asArray(), d = target.asArray();
+    auto z = [&] (int k) { return (a[(size_t) k] - d[(size_t) k]) / juce::jmax (1.0e-3f, guide.spread[(size_t) k]); };
+    auto capped = [] (float v) { return juce::jlimit (-2.0f, 1.5f, v); };
+    enum { level, side, centroid, bass, body, spread, crest, movement, richness };
+    const auto warmth = capped (-std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) / 0.8f);
+    const auto clean = capped (4.0f * (m.clarity - 0.85f)) - capped (20.0f * m.flatness);
+    const auto widthNear = -0.5f * std::abs (capped (z (side)));
+    const auto calm = -capped (juce::jmax (0.0f, z (movement) - 0.5f));
+    return warmth + 0.5f * capped (z (body)) + 0.5f * capped (z (richness)) + clean + widthNear + calm;
+}
+
+std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random, int mood)
 {
     // Render-and-check, then pick for size and interest:
     //  1. Many variations, each measured (SoundTraits) on private engines in parallel.
@@ -479,7 +516,8 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         checkers.back()->stopProfileSync();
     }
 
-    const auto free = genre == anyGenre;
+    // Free of a genre's character: any genre (blends led by one genre) or a mood.
+    const auto free = genre == anyGenre || mood >= 0;
     const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
 
     // What a keeper must stay near and what it is scored against: the designed
@@ -559,6 +597,13 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     const auto drawn = useJudge && GenerateNet::builtIn().ready() ? drawWithJudge : candidates; // more when the judge can screen them
     for (int i = offspring; i < drawn; ++i)
     {
+        if (mood >= 0) // a mood's recipe
+        {
+            int base = 0;
+            profiles.push_back (capDetune (Moods::make (mood, random, base), base));
+            sources.push_back (base);
+            continue;
+        }
         if (! free)
         {
             profiles.push_back (capDetune (generateProfile (genre, type, random), genre));
@@ -627,7 +672,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     auto scoreOf = [&] (const SoundTraits& m, bool print = false)
     {
         const auto a = m.asArray(), d = target.asArray();
-        const auto bigAndInteresting = sizeAndInterest (target, m, type);
+        const auto bigAndInteresting = mood >= 0 ? moodScore (target, m, type) : sizeAndInterest (target, m, type);
         auto novelty = 3.0f;
         for (const auto& r : recentGenerated)
         {

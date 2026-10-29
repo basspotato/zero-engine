@@ -297,7 +297,7 @@ private:
     void refreshHistoryButtons();
     void mouseDown (const juce::MouseEvent&) override; // right-click a macro: MIDI learn
     void timerCallback() override;                     // keeps the macro labels' CC text current
-    static constexpr int designWidth = 960, designHeight = 700;
+    static constexpr int designWidth = 960, designHeight = 760;
     float uiScale() const { return (float) getWidth() / (float) designWidth; }
     void renameCurrentFavourite();
     juce::Component::SafePointer<juce::AlertWindow> renameDialog;

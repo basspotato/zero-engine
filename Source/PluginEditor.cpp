@@ -576,8 +576,14 @@ void LevelMeter::paint (juce::Graphics& g)
     auto area = getLocalBounds().reduced (10).toFloat();
 
 
-    // Readouts at the bottom.
-    auto readouts = area.removeFromBottom (76.0f);
+    // Readouts at the bottom, or in a column on the right when the meter is wide
+    // (so the bars keep their height).
+    const auto wide = area.getWidth() > 2.0f * area.getHeight();
+    const auto readoutWidth = area.getWidth() - 130.0f;
+    auto readouts = wide ? area.removeFromRight (readoutWidth).withSizeKeepingCentre (readoutWidth, 76.0f)
+                         : area.removeFromBottom (76.0f);
+    if (wide)
+        area.removeFromRight (12.0f);
     auto corrArea = readouts.removeFromBottom (18.0f);
 
     auto row = [&] (const juce::String& name, const juce::String& value, juce::Colour colour)
@@ -611,7 +617,8 @@ void LevelMeter::paint (juce::Graphics& g)
         g.drawText ("+1", bar.withTrimmedLeft (bar.getWidth() - 14.0f).translated (0.0f, -8.0f), juce::Justification::centredRight);
     }
 
-    area.removeFromBottom (6.0f);
+    if (! wide)
+        area.removeFromBottom (6.0f);
 
     // Clip lights.
     auto lights = area.removeFromTop (10.0f);
@@ -1767,7 +1774,8 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
     section (displaySection, "DISPLAY");
     section (meterSection, "OUTPUT");
     section (generateSection, "GENERATE");
-    section (favouritesSection, "FAVOURITES");
+    if (! favouritesSection.isEmpty())
+        section (favouritesSection, "FAVOURITES");
     section (macroSection, "MACROS");
 }
 
@@ -1800,13 +1808,13 @@ void ZeroEngineEditor::resized()
     genrePrev.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
 
     area.removeFromTop (10);
-    keyboard.setBounds (area.removeFromBottom (64));
+    keyboard.setBounds (area.removeFromBottom (60));
     area.removeFromBottom (10);
 
     // Each panel: a 22 px header strip, then its content inset.
     auto content = [] (juce::Rectangle<int> r) { return r.withTrimmedTop (22).reduced (8); };
 
-    macroSection = area.removeFromBottom (150);
+    macroSection = area.removeFromBottom (140);
     auto knobRow = content (macroSection);
     const auto knobWidth = knobRow.getWidth() / (int) macros.size();
     for (auto& macro : macros)
@@ -1817,47 +1825,43 @@ void ZeroEngineEditor::resized()
     }
     area.removeFromBottom (10);
 
-    // The middle row: the display on the left, Generate (a square tesseract with
-    // MOOD / GENRE under it) in the centre, the meters over Favourites on the right.
-    constexpr int centreWidth = 360;
-    const auto sideWidth = (area.getWidth() - centreWidth - 20) / 2;
-    displaySection = area.removeFromLeft (sideWidth);
-    area.removeFromLeft (10);
-    generateSection = area.removeFromLeft (centreWidth);
-    area.removeFromLeft (10);
-    meterSection = area.removeFromTop (282);
-    area.removeFromTop (10);
-    favouritesSection = area;
+    // Under Generate: the display (wide) and the meters, side by side.
+    auto lower = area.removeFromBottom (150);
+    area.removeFromBottom (10);
+    displaySection = lower.removeFromLeft (560);
+    lower.removeFromLeft (10);
+    meterSection = lower;
 
+    // Generate across the full width: the tesseract on a wide screen, MOOD /
+    // GENRE under it in the middle, Favourites (the heart, the list, SAVE) on
+    // the left of that row.
+    generateSection = area;
+    favouritesSection = {};
     auto generateArea = content (generateSection);
-    auto modes = generateArea.removeFromBottom (26);
+    auto controls = generateArea.removeFromBottom (26);
     generateArea.removeFromBottom (6);
+    generateButton.setBounds (generateArea);
     const auto modeWidth = 96;
-    auto modeRow = modes.withSizeKeepingCentre (2 * modeWidth + 6, 24);
+    auto modeRow = controls.withSizeKeepingCentre (2 * modeWidth + 6, 24);
     moodButton.setBounds (modeRow.removeFromLeft (modeWidth));
     modeRow.removeFromLeft (6);
     genreModeButton.setBounds (modeRow);
-    generateButton.setBounds (generateArea.withSizeKeepingCentre (juce::jmin (generateArea.getWidth(), generateArea.getHeight()),
-                                                                  juce::jmin (generateArea.getWidth(), generateArea.getHeight())));
-    // History arrows sit in the header strip, left of the LED.
-    forwardButton.setBounds (generateSection.getRight() - 26 - 18, generateSection.getY() + 3, 18, 16);
-    backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
-
-    levelMeter.setBounds (content (meterSection));
-
-    auto favouritesArea = content (favouritesSection);
-    auto favouritesRow = favouritesArea.removeFromTop (24);
+    auto favouritesRow = controls.removeFromLeft (300).withSizeKeepingCentre (300, 24);
     heartButton.setBounds (favouritesRow.removeFromLeft (24).withSizeKeepingCentre (22, 20));
     favouritesRow.removeFromLeft (4);
     saveButton.setBounds (favouritesRow.removeFromRight (50));
     favouritesRow.removeFromRight (4);
     favouritesBox.setBounds (favouritesRow);
+    // History arrows sit in the header strip, left of the LED.
+    forwardButton.setBounds (generateSection.getRight() - 26 - 18, generateSection.getY() + 3, 18, 16);
+    backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
 
+    levelMeter.setBounds (content (meterSection));
     display.setBounds (content (displaySection));
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
     matchButton.setBounds (displayMode.getX() - 56, displaySection.getY() + 3, 52, 16);
-    advancedPanel.setBounds (displaySection.getUnion (macroSection).getUnion (meterSection));
+    advancedPanel.setBounds (generateSection.getUnion (macroSection).getUnion (meterSection));
 
     // Scale every child with the window: layout is done at the design size.
     const auto transform = juce::AffineTransform::scale (uiScale());

@@ -38,6 +38,7 @@ target_sources(ZeroEngine
         Source/SoundTraits.cpp
         Source/TasteModel.cpp
         Source/GenerateNet.cpp
+        Source/Moods.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
@@ -94,6 +95,7 @@ target_sources(ZeroAnalyze
         Source/SoundTraits.cpp
         Source/TasteModel.cpp
         Source/GenerateNet.cpp
+        Source/Moods.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
