@@ -13,13 +13,13 @@ namespace Moods
 {
     const char* nameOf (int mood)
     {
-        constexpr const char* names[count] { "LUSH PAD", "AIRY DRONE", "WARM KEYS", "GLASSY BELL", "DARK TEXTURE", "SOFT PLUCK" };
+        constexpr const char* names[count] { "LUSH PAD", "AIRY DRONE", "WARM KEYS", "GLASSY BELL", "DARK TEXTURE", "SOFT PLUCK", "SOARING LEAD", "DEEP BASS" };
         return names[juce::jlimit (0, count - 1, mood)];
     }
 
     int typeOf (int mood)
     {
-        constexpr int types[count] { pad, pad, chord, pluck, fx, pluck };
+        constexpr int types[count] { pad, pad, chord, pluck, fx, pluck, lead, bass };
         return types[juce::jlimit (0, count - 1, mood)];
     }
 
@@ -35,6 +35,7 @@ namespace Moods
         const auto type = typeOf (mood);
         baseGenre = mood == darkTexture ? pick ({ techno, dubstep, dnb })
                   : mood == warmKeys    ? pick ({ house, pop, synthwave })
+                  : mood == deepBass    ? pick ({ house, techHouse, synthwave, dnb })
                                         : pick ({ synthwave, trance, futureBass, pop });
         auto p = makeProfile (baseGenre, type);
 
@@ -194,6 +195,65 @@ namespace Moods
                 p.air = between (0.1f, 0.4f);
                 p.motion = between (0.4f, 0.8f);
                 p.tilt = between (-4.0f, -1.0f);
+                break;
+
+            case soaringLead:
+                p.waveTable = (float) pick ({ jupiter, analog, basic, pwm });
+                p.waveTableB = (float) pick ({ jupiter, analog, choir });
+                p.tableMix = between (0.1f, 0.4f);
+                p.wavePos = between (0.2f, 0.7f);
+                p.unison = (float) (3 + random.nextInt (4));
+                p.detune = between (0.1f, 0.25f);
+                p.ampAttack = logBetween (0.005f, 0.06f);
+                p.ampDecay = between (0.6f, 1.5f);
+                p.ampSustain = between (0.7f, 0.95f);
+                p.ampRelease = between (0.4f, 1.2f);
+                p.filterMode = 0.0f;
+                p.filterCutoff = logBetween (1800.0f, 5500.0f);
+                p.filterRes = between (0.05f, 0.25f);
+                p.filterEnv = between (0.3f, 1.2f);
+                p.modDecay = between (0.2f, 0.6f);
+                p.lfoRate = logBetween (0.2f, 0.8f);
+                p.lfoToPos = between (0.05f, 0.25f);
+                p.lfoToCutoff = between (0.0f, 0.3f);
+                p.reverbMix = between (0.25f, 0.45f);
+                p.reverbSize = between (0.6f, 0.9f);
+                p.delayMix = between (0.15f, 0.35f);
+                p.delayFeedback = between (0.25f, 0.45f);
+                p.width = between (0.4f, 0.7f);
+                p.grit = between (0.0f, 0.15f);
+                p.air = between (0.3f, 0.6f);
+                p.motion = between (0.2f, 0.4f);
+                p.tilt = between (-2.0f, 0.5f);
+                break;
+
+            case deepBass: // round and warm: little reverb, no delay, narrow
+                p.waveTable = (float) pick ({ analog, jupiter, basic, organ });
+                p.waveTableB = (float) pick ({ basic, analog });
+                p.tableMix = between (0.0f, 0.3f);
+                p.wavePos = between (0.1f, 0.5f);
+                p.unison = (float) (1 + random.nextInt (2));
+                p.detune = between (0.0f, 0.1f);
+                p.ampAttack = logBetween (0.001f, 0.008f);
+                p.ampDecay = between (0.3f, 0.9f);
+                p.ampSustain = between (0.6f, 0.9f);
+                p.ampRelease = between (0.1f, 0.3f);
+                p.filterMode = 0.0f;
+                p.filterCutoff = logBetween (250.0f, 1200.0f);
+                p.filterRes = between (0.1f, 0.35f);
+                p.filterEnv = between (0.5f, 2.0f);
+                p.modDecay = between (0.08f, 0.35f);
+                p.lfoRate = logBetween (0.1f, 0.5f);
+                p.lfoToPos = between (0.0f, 0.1f);
+                p.lfoToCutoff = between (0.0f, 0.15f);
+                p.reverbMix = between (0.0f, 0.1f);
+                p.reverbSize = between (0.3f, 0.5f);
+                p.delayMix = 0.0f;
+                p.width = between (0.0f, 0.2f);
+                p.grit = between (0.05f, 0.3f);
+                p.air = between (0.0f, 0.2f);
+                p.motion = between (0.1f, 0.3f);
+                p.tilt = between (-3.0f, -0.5f);
                 break;
 
             default: // softPluck

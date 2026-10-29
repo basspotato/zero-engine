@@ -10,7 +10,7 @@
 // (the finishing chain, the clean-sub rules), from genres that suit the mood.
 namespace Moods
 {
-    enum { lushPad, airyDrone, warmKeys, glassyBell, darkTexture, softPluck, count };
+    enum { lushPad, airyDrone, warmKeys, glassyBell, darkTexture, softPluck, soaringLead, deepBass, count };
 
     const char* nameOf (int mood);  // "LUSH PAD"...
     int typeOf (int mood);          // the type it loads as (Bass, Lead, Chord, Pad, Pluck, FX = 0..5)

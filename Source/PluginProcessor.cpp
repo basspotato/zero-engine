@@ -673,15 +673,21 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     const auto drawn = useJudge && GenerateNet::builtIn().ready() ? drawWithJudge : candidates; // more when the judge can screen them
     for (int i = offspring; i < drawn; ++i)
     {
-        if (parent != nullptr) // Mutate: four of its searched settings nudged a little
+        if (parent != nullptr) // Mutate: five of its searched settings moved (+-25 %; the owner heard +-5 % as nothing)
         {
             auto units = ReferenceMatch::unitsOf (*parent);
-            for (int n = 0; n < 4; ++n)
+            for (int n = 0; n < 5; ++n)
             {
                 auto& u = units[(size_t) random.nextInt (ReferenceMatch::numSearched)];
-                u = juce::jlimit (0.0f, 1.0f, u + 0.05f * (random.nextFloat() * 2.0f - 1.0f));
+                u = juce::jlimit (0.0f, 1.0f, u + 0.25f * (random.nextFloat() * 2.0f - 1.0f));
             }
-            profiles.push_back (capDetune (ReferenceMatch::withUnitsOf (*parent, units), genre));
+            auto p = ReferenceMatch::withUnitsOf (*parent, units);
+            if (random.nextFloat() < 0.33f) // a third: another second wavetable blended in, the most audible change that keeps the family
+            {
+                p.waveTableB = (float) random.nextInt (WavetableBank::numBanks - 1); // not Sample (Match's)
+                p.tableMix = juce::jlimit (0.0f, 1.0f, p.tableMix + 0.15f + 0.2f * random.nextFloat());
+            }
+            profiles.push_back (capDetune (p, genre));
             sources.push_back (genre);
             continue;
         }
@@ -794,14 +800,16 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
                          bigAndInteresting, novelty, a[side], d[side], a[movement], d[movement], a[richness], d[richness], a[crest], d[crest], a[body], d[body]);
         if (parent != nullptr)
         {
-            // Mutate stays near its sound: closeness to it (the same distance as
-            // novelty, in the owner's spreads) counts, size a little, taste fully.
+            // Mutate stays in its sound's family but must be heard: the distance
+            // from it (as novelty measures it, in the owner's spreads) aims at 1
+            // (a fresh click lands about 1.3 away; nearer read as no change); size
+            // counts a little, taste fully.
             float sum = 0.0f;
             for (int k = 0; k < SoundTraits::count; ++k)
                 if (k != centroid && k != level)
                     sum += juce::square ((a[(size_t) k] - d[(size_t) k]) / spreadOf (k));
             sum += juce::square (std::log2 (juce::jmax (20.0f, a[centroid]) / juce::jmax (20.0f, d[centroid])) / 0.8f);
-            return 0.3f * bigAndInteresting - 1.5f * std::sqrt (sum) + 1.5f * tasteOf (m);
+            return 0.3f * bigAndInteresting - 1.5f * std::abs (std::sqrt (sum) - 1.0f) + 1.5f * tasteOf (m);
         }
         return bigAndInteresting + 0.7f * novelty + 1.5f * tasteOf (m);
     };
