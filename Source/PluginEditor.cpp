@@ -2,6 +2,9 @@
 #include "Parameters.h"
 #include "Wavetable.h"
 #include "BinaryData.h"
+#if ZERO_SPACE_IMAGES
+ #include "SpaceImages.h"
+#endif
 
 namespace Palette
 {
@@ -448,6 +451,21 @@ void TesseractButton::timerCallback()
         repaint();
 }
 
+#if ZERO_SPACE_IMAGES
+// A picture from Resources/Space by its file name (empty if it isn't there).
+static juce::Image spaceImage (const char* fileName)
+{
+    for (int i = 0; i < SpaceImages::namedResourceListSize; ++i)
+        if (juce::String (SpaceImages::originalFilenames[i]) == fileName)
+        {
+            int size = 0;
+            if (const auto* data = SpaceImages::getNamedResource (SpaceImages::namedResourceList[i], size))
+                return juce::ImageCache::getFromMemory (data, size);
+        }
+    return {};
+}
+#endif
+
 void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> screen)
 {
     // Kept faint, so the tesseract stays the thing to look at.
@@ -462,6 +480,18 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     const auto t = (float) spaceTime;
     juce::Graphics::ScopedSaveState saved (g);
     g.reduceClipRegion (screen.toNearestInt());
+
+   #if ZERO_SPACE_IMAGES
+    // The owner's nebula, stretched over the whole screen and almost
+    // transparent: everything else plays in front of it.
+    const auto background = spaceImage ("background.jpg"); // ImageCache keeps it decoded
+    if (background.isValid())
+    {
+        g.setOpacity (0.16f);
+        g.drawImage (background, screen, juce::RectanglePlacement::stretchToFit);
+        g.setOpacity (1.0f);
+    }
+   #endif
 
     // Stars, each twinkling at its own slow rate.
     for (const auto& s : stars)
