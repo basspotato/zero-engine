@@ -541,7 +541,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         sources.push_back (free ? parent.genre : genre);
     }
 
-    const auto drawn = useJudge && GenerateNet::builtIn().ready() ? 96 : candidates; // more when the judge can screen them
+    const auto drawn = useJudge && GenerateNet::builtIn().ready() ? drawWithJudge : candidates; // more when the judge can screen them
     for (int i = offspring; i < drawn; ++i)
     {
         if (! free)
@@ -631,7 +631,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     };
 
     // Screen (the neural judge, GenerateNet, when trained): it predicts what each
-    // of the 96 drawn would measure, from its settings alone; the 20 it rates
+    // of the drawn (drawWithJudge, 400) would measure, from its settings alone; the 20 it rates
     // best by the same fit and score (and 4 more at random, so a judge's blind
     // spots still get heard) go on to be rendered, with any bred from hearts.
     // About 2 ms; on the judge's tests its picks scored far above random ones.

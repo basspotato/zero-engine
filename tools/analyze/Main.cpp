@@ -642,19 +642,24 @@ int main (int argc, char* argv[])
     }
 
     if (command == "genjudgeab")
+        for (const auto& a : args)
+            if (a.startsWith ("draw="))
+                ZeroEngineProcessor::drawWithJudge = a.fromFirstOccurrenceOf ("=", false, false).getIntValue();
+    if (command == "genjudgeab")
     {
         // Generate's final picks with the neural judge's screen and without, on
         // the same seeds: their size + interest against the designed sound
         // (Generate's own score, without novelty and taste), every profile, 3 clicks.
         ZeroEngineProcessor measurer;
         measurer.stopProfileSync();
-        double sums[2] {};
+        double sums[2] {}, variety[2] {};
         int wins = 0, losses = 0, count = 0;
         for (int g = 0; g < genreNames.size(); ++g)
             for (int t = 0; t < typeNames.size(); ++t)
             {
                 const auto designed = ZeroEngineProcessor::measureForTools (measurer, g, t, makeProfile (g, t));
                 double profileSums[2] {};
+                std::vector<TasteModel::Features> pickedTraits[2];
                 for (int on = 0; on < 2; ++on)
                 {
                     ZeroEngineProcessor::useJudge = on == 1;
@@ -668,8 +673,24 @@ int main (int argc, char* argv[])
                     {
                         engine.generate (s * 7919 + g * 31 + t);
                         if (const auto picked = engine.getLastPickTraits())
+                        {
                             profileSums[on] += ZeroEngineProcessor::sizeAndInterest (designed, *picked, t) / 3.0;
+                            pickedTraits[on].push_back (TasteModel::featuresOf (*picked, t));
+                        }
                     }
+                }
+                // Variety: the mean distance between the 3 picks, in the owner's spreads.
+                for (int on = 0; on < 2; ++on)
+                {
+                    const auto& p = pickedTraits[on];
+                    for (size_t i = 0; i < p.size(); ++i)
+                        for (size_t j = i + 1; j < p.size(); ++j)
+                        {
+                            double d = 0.0;
+                            for (int k = 0; k < TasteModel::numFeatures; ++k)
+                                d += juce::square ((double) p[i][(size_t) k] - p[j][(size_t) k]);
+                            variety[on] += std::sqrt (d) / 3.0;
+                        }
                 }
                 sums[0] += profileSums[0];
                 sums[1] += profileSums[1];
@@ -678,6 +699,7 @@ int main (int argc, char* argv[])
                 ++count;
             }
         ZeroEngineProcessor::useJudge = true;
+        std::printf ("variety (mean distance between a profile's picks): without the judge %.2f, with it %.2f\n", variety[0] / count, variety[1] / count);
         std::printf ("size + interest of Generate's picks: without the judge %+.2f, with it %+.2f (per profile: %d better, %d worse of %d)\n",
                      sums[0] / count, sums[1] / count, wins, losses, count);
         return 0;

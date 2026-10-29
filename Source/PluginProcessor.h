@@ -123,6 +123,7 @@ public:
     static inline bool debugGenerate = false; // tooling: print every candidate's scores
     static inline bool measureLight = true;    // Generate's check renders light (tooling can compare full quality)
     static inline bool useJudge = true;        // Generate screens with the neural judge when trained (tooling can switch it off)
+    static inline int drawWithJudge = 400;     // candidates drawn for the judge to screen down to the 24 rendered (400: +0.80 vs 96: +0.69)
     std::optional<SoundTraits> getLastPickTraits() const { return lastPickTraits; }
 
     // Message thread: step back (-1) or forward (+1) through generated sounds.
