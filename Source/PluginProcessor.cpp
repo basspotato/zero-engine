@@ -6,6 +6,7 @@
 #include "Profiles.h"
 #include "GenerateTargets.h"
 #include "ArpGrooves.h"
+#include "GenerateNet.h"
 #include <thread>
 
 namespace
@@ -409,6 +410,51 @@ ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineP
     return traits;
 }
 
+float ZeroEngineProcessor::strayFrom (const SoundTraits& target, const SoundTraits& m, int type, bool free)
+{
+    // How far a sound strays from the genre/type's character (1 at the edge of
+    // "still the same kind of sound"), or a huge value when it is near silent or
+    // fails a tuning gate. In any genre (free) the bounds are looser (twice the
+    // owner's spread, a wider brightness range) and loudness is left to the
+    // profile's own trim.
+    const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
+    if (free ? m.levelDb < -45.0f : m.levelDb < target.levelDb - 20.0f)
+        return std::numeric_limits<float>::max();
+    const auto loudness = free ? 0.0f : std::abs (m.levelDb - target.levelDb) / 6.0f;
+    const auto brightness = std::abs (std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz))) / (free ? 1.3f : 0.8f);
+    const auto bassShare = std::abs (m.bassPct - target.bassPct) / (free ? juce::jmax (20.0f, 2.0f * guide.spread[3]) : 20.0f);
+    const auto widthOff = std::abs (m.sidePct - target.sidePct) / (free ? juce::jmax (20.0f, 2.0f * guide.spread[1]) : 20.0f);
+    // Tuning gates (not FX, which may be anything): the pitch more than 15
+    // cents from where the designed sound sits, more wobble than it has (by
+    // 12 cents; 25 in any genre, where a supersaw may meet a plain lead), or
+    // a noisier spectrum: out of tune, smeared or hiss, whatever it scores.
+    if (type != 5 && (std::abs (m.pitchOffsetCents - target.pitchOffsetCents) > 15.0f
+                      || m.pitchSpreadCents > target.pitchSpreadCents + (free ? 25.0f : 12.0f)
+                      || m.flatness > target.flatness + 0.05f))
+        return std::numeric_limits<float>::max();
+    return juce::jmax (juce::jmax (loudness, brightness), juce::jmax (bassShare, widthOff));
+}
+
+float ZeroEngineProcessor::sizeAndInterest (const SoundTraits& target, const SoundTraits& m, int type)
+{
+    // Each trait's gain over the target (the designed sound, or the owner's
+    // sounds in any genre), in spreads of the owner's sounds of this type,
+    // capped at 1.5 (no reward for extremes) and -2. Size: wider, more body,
+    // denser; interest: more movement (half weight: wobble and beating earn it
+    // too easily) and more partials.
+    const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
+    const auto a = m.asArray(), d = target.asArray();
+    auto gain = [&] (int k, bool lowerIsMore)
+    {
+        const auto z = (a[(size_t) k] - d[(size_t) k]) / juce::jmax (1.0e-3f, guide.spread[(size_t) k]);
+        return juce::jlimit (-2.0f, 1.5f, lowerIsMore ? -z : z);
+    };
+    enum { level, side, centroid, bass, body, spread, crest, movement, richness };
+    const auto big = gain (side, false) + 0.5f * gain (body, false) + 0.5f * gain (crest, true);
+    const auto interest = 0.5f * gain (movement, false) + gain (richness, false);
+    return big + interest;
+}
+
 std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random)
 {
     // Render-and-check, then pick for size and interest:
@@ -495,7 +541,8 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         sources.push_back (free ? parent.genre : genre);
     }
 
-    for (int i = offspring; i < candidates; ++i)
+    const auto drawn = useJudge && GenerateNet::builtIn().ready() ? 96 : candidates; // more when the judge can screen them
+    for (int i = offspring; i < drawn; ++i)
     {
         if (! free)
         {
@@ -524,18 +571,6 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         profiles.push_back (capDetune (p, source));
         sources.push_back (source);
     }
-    std::vector<SoundTraits> traits ((size_t) candidates);
-    {
-        std::vector<std::thread> pool;
-        for (int e = 0; e < engines; ++e)
-            pool.emplace_back ([&, e]
-            {
-                for (int i = e; i < candidates; i += engines)
-                    traits[(size_t) i] = measureProfile (*checkers[(size_t) e], sources[(size_t) i], type, profiles[(size_t) i]);
-            });
-        for (auto& t : pool)
-            t.join();
-    }
 
     auto spreadOf = [&] (int k) { return juce::jmax (1.0e-3f, guide.spread[(size_t) k]); };
     // A trait's gain over the designed sound, in the owner's spreads, capped.
@@ -550,24 +585,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     // "still the same kind of sound"), or a large value when it is near silent.
     // In Free the bounds are looser (twice the owner's spread, a wider brightness
     // range) and loudness is left to the profile's own trim.
-    auto strayOf = [&] (const SoundTraits& m)
-    {
-        if (free ? m.levelDb < -45.0f : m.levelDb < target.levelDb - 20.0f)
-            return std::numeric_limits<float>::max();
-        const auto loudness = free ? 0.0f : std::abs (m.levelDb - target.levelDb) / 6.0f;
-        const auto brightness = std::abs (std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz))) / (free ? 1.3f : 0.8f);
-        const auto bassShare = std::abs (m.bassPct - target.bassPct) / (free ? juce::jmax (20.0f, 2.0f * guide.spread[3]) : 20.0f);
-        const auto widthOff = std::abs (m.sidePct - target.sidePct) / (free ? juce::jmax (20.0f, 2.0f * guide.spread[1]) : 20.0f);
-        // Tuning gates (not FX, which may be anything): the pitch more than 15
-        // cents from where the designed sound sits, more wobble than it has (by
-        // 12 cents; 25 in any genre, where a supersaw may meet a plain lead), or
-        // a noisier spectrum: out of tune, smeared or hiss, whatever it scores.
-        if (type != 5 && (std::abs (m.pitchOffsetCents - target.pitchOffsetCents) > 15.0f
-                          || m.pitchSpreadCents > target.pitchSpreadCents + (free ? 25.0f : 12.0f)
-                          || m.flatness > target.flatness + 0.05f))
-            return std::numeric_limits<float>::max();
-        return juce::jmax (juce::jmax (loudness, brightness), juce::jmax (bassShare, widthOff));
-    };
+    auto strayOf = [&] (const SoundTraits& m) { return strayFrom (target, m, type, free); };
     // Size + interest + novelty (see above).
     // The owner's taste (TasteModel), once it has a few judgments: one draw of
     // it per click (Thompson sampling: unsure early, so clicks explore), capped,
@@ -594,10 +612,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     auto scoreOf = [&] (const SoundTraits& m, bool print = false)
     {
         const auto a = m.asArray(), d = target.asArray();
-        const auto big = gain (side, a[side], d[side], false) + 0.5f * gain (body, a[body], d[body], false)
-                       + 0.5f * gain (crest, a[crest], d[crest], true);
-        // Movement at half weight: wobble and beating earn it too easily.
-        const auto interest = 0.5f * gain (movement, a[movement], d[movement], false) + gain (richness, a[richness], d[richness], false);
+        const auto bigAndInteresting = sizeAndInterest (target, m, type);
         auto novelty = 3.0f;
         for (const auto& r : recentGenerated)
         {
@@ -610,10 +625,56 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             novelty = juce::jmin (novelty, std::sqrt (sum));
         }
         if (print && debugGenerate)
-            std::printf ("    big %+5.2f  interest %+5.2f  novelty %4.2f  side %5.1f (designed %5.1f)  move %4.1f (%4.1f)  rich %.2f (%.2f)  crest %4.1f (%4.1f)  body %4.1f (%4.1f)\n",
-                         big, interest, novelty, a[side], d[side], a[movement], d[movement], a[richness], d[richness], a[crest], d[crest], a[body], d[body]);
-        return big + interest + 0.7f * novelty + 1.5f * tasteOf (m);
+            std::printf ("    size+interest %+5.2f  novelty %4.2f  side %5.1f (designed %5.1f)  move %4.1f (%4.1f)  rich %.2f (%.2f)  crest %4.1f (%4.1f)  body %4.1f (%4.1f)\n",
+                         bigAndInteresting, novelty, a[side], d[side], a[movement], d[movement], a[richness], d[richness], a[crest], d[crest], a[body], d[body]);
+        return bigAndInteresting + 0.7f * novelty + 1.5f * tasteOf (m);
     };
+
+    // Screen (the neural judge, GenerateNet, when trained): it predicts what each
+    // of the 96 drawn would measure, from its settings alone; the 20 it rates
+    // best by the same fit and score (and 4 more at random, so a judge's blind
+    // spots still get heard) go on to be rendered, with any bred from hearts.
+    // About 2 ms; on the judge's tests its picks scored far above random ones.
+    if (const auto& judge = GenerateNet::builtIn(); useJudge && judge.ready() && (int) profiles.size() > candidates)
+    {
+        std::vector<std::pair<float, int>> ranked;
+        for (int i = offspring; i < (int) profiles.size(); ++i)
+        {
+            const auto predicted = GenerateNet::traitsOf (judge.run (GenerateNet::featuresOf (profiles[(size_t) i], sources[(size_t) i], type)), type);
+            ranked.push_back ({ (strayOf (predicted) <= 1.0f ? 0.0f : -100.0f) + scoreOf (predicted), i });
+        }
+        std::sort (ranked.begin(), ranked.end(), [] (const auto& a, const auto& b) { return a.first > b.first; });
+        const auto picked = candidates - offspring, explore = juce::jmin (4, picked);
+        std::vector<int> keep;
+        for (int i = 0; i < offspring; ++i)
+            keep.push_back (i);
+        for (int i = 0; i < picked - explore; ++i)
+            keep.push_back (ranked[(size_t) i].second);
+        for (int i = 0; i < explore; ++i)
+            keep.push_back (ranked[(size_t) (picked - explore + random.nextInt ((int) ranked.size() - (picked - explore)))].second);
+        std::vector<Profile> screened;
+        std::vector<int> screenedSources;
+        for (const auto i : keep)
+        {
+            screened.push_back (profiles[(size_t) i]);
+            screenedSources.push_back (sources[(size_t) i]);
+        }
+        profiles = std::move (screened);
+        sources = std::move (screenedSources);
+    }
+
+    std::vector<SoundTraits> traits ((size_t) candidates);
+    {
+        std::vector<std::thread> pool;
+        for (int e = 0; e < engines; ++e)
+            pool.emplace_back ([&, e]
+            {
+                for (int i = e; i < candidates; i += engines)
+                    traits[(size_t) i] = measureProfile (*checkers[(size_t) e], sources[(size_t) i], type, profiles[(size_t) i]);
+            });
+        for (auto& t : pool)
+            t.join();
+    }
 
     struct Keeper { int index; float score; };
     std::vector<Keeper> keepers;

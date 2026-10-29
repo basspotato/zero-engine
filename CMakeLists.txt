@@ -37,6 +37,7 @@ target_sources(ZeroEngine
         Source/MatchNet.cpp
         Source/SoundTraits.cpp
         Source/TasteModel.cpp
+        Source/GenerateNet.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
@@ -79,6 +80,7 @@ target_sources(ZeroAnalyze
         tools/analyze/MatchLibrary.cpp
         tools/analyze/MatchJudge.cpp
         tools/analyze/MatchNetTrain.cpp
+        tools/analyze/GenerateNetTrain.cpp
         tools/analyze/Library.cpp
         tools/analyze/Tuner.cpp
         tools/analyze/Harmonics.cpp
@@ -91,6 +93,7 @@ target_sources(ZeroAnalyze
         Source/MatchNet.cpp
         Source/SoundTraits.cpp
         Source/TasteModel.cpp
+        Source/GenerateNet.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp

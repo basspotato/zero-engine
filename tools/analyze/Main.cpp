@@ -24,6 +24,7 @@
 #include "MatchBench.h"
 #include "MatchLibrary.h"
 #include "MatchNetTrain.h"
+#include "GenerateNetTrain.h"
 #include "Library.h"
 #include "Tuner.h"
 #include "Harmonics.h"
@@ -427,6 +428,12 @@ int main (int argc, char* argv[])
 
     if (command == "library")
         return runLibrary (args);
+    if (command == "gennetdata")
+        return runGenerateNetData (args);
+    if (command == "gennettrain")
+        return runGenerateNetTrain (args);
+    if (command == "gennetscreen")
+        return runGenerateNetScreen (args);
     if (command == "netdata")
         return runNetData (args);
     if (command == "nettrain")
@@ -631,6 +638,48 @@ int main (int argc, char* argv[])
                 }
                 std::printf ("%-24s %8.2f %8.2f %8.2f %8d\n", (genreNames[g] + " " + typeNames[t]).toRawUTF8(), designed, lowest, sum / 24.0f, worse);
             }
+        return 0;
+    }
+
+    if (command == "genjudgeab")
+    {
+        // Generate's final picks with the neural judge's screen and without, on
+        // the same seeds: their size + interest against the designed sound
+        // (Generate's own score, without novelty and taste), every profile, 3 clicks.
+        ZeroEngineProcessor measurer;
+        measurer.stopProfileSync();
+        double sums[2] {};
+        int wins = 0, losses = 0, count = 0;
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+            {
+                const auto designed = ZeroEngineProcessor::measureForTools (measurer, g, t, makeProfile (g, t));
+                double profileSums[2] {};
+                for (int on = 0; on < 2; ++on)
+                {
+                    ZeroEngineProcessor::useJudge = on == 1;
+                    ZeroEngineProcessor engine;
+                    auto* genre = engine.state.getParameter (ParamIDs::genre);
+                    auto* type = engine.state.getParameter (ParamIDs::type);
+                    genre->setValueNotifyingHost (genre->convertTo0to1 ((float) g));
+                    type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
+                    engine.syncProfile();
+                    for (int s = 1; s <= 3; ++s)
+                    {
+                        engine.generate (s * 7919 + g * 31 + t);
+                        if (const auto picked = engine.getLastPickTraits())
+                            profileSums[on] += ZeroEngineProcessor::sizeAndInterest (designed, *picked, t) / 3.0;
+                    }
+                }
+                sums[0] += profileSums[0];
+                sums[1] += profileSums[1];
+                wins += profileSums[1] > profileSums[0] + 0.1;
+                losses += profileSums[1] < profileSums[0] - 0.1;
+                ++count;
+            }
+        ZeroEngineProcessor::useJudge = true;
+        std::printf ("size + interest of Generate's picks: without the judge %+.2f, with it %+.2f (per profile: %d better, %d worse of %d)\n",
+                     sums[0] / count, sums[1] / count, wins, losses, count);
         return 0;
     }
 

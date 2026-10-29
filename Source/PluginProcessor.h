@@ -122,6 +122,8 @@ public:
     int getOctaveFailures() const noexcept { return lastOctaveFailures; }
     static inline bool debugGenerate = false; // tooling: print every candidate's scores
     static inline bool measureLight = true;    // Generate's check renders light (tooling can compare full quality)
+    static inline bool useJudge = true;        // Generate screens with the neural judge when trained (tooling can switch it off)
+    std::optional<SoundTraits> getLastPickTraits() const { return lastPickTraits; }
 
     // Message thread: step back (-1) or forward (+1) through generated sounds.
     // Returns false at either end.
@@ -187,6 +189,14 @@ private:
     // private engines in parallel, see pickGeneratedProfile.
     using SoundCheck = SoundTraits;
     static SoundCheck measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile&, int transpose = 0);
+public:
+    // Generate's judgments of a measured sound against a target (the designed
+    // sound, or in any genre the owner's sounds): how far it strays from the
+    // character (above 1: out; huge: silent or failing a tuning gate), and its
+    // size and interest. Public for tooling.
+    static float strayFrom (const SoundTraits& target, const SoundTraits& m, int type, bool free);
+    static float sizeAndInterest (const SoundTraits& target, const SoundTraits& m, int type);
+private:
 public:
     static SoundTraits measureForTools (ZeroEngineProcessor& engine, int genre, int type, const Profile& p) { return measureProfile (engine, genre, type, p); }
 private:
