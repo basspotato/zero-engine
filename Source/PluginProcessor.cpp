@@ -363,7 +363,7 @@ bool ZeroEngineProcessor::stepHistory (int direction)
     return true;
 }
 
-ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile& profile)
+ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile& profile, int transpose)
 {
     // Three quarters of a second of a note (or a triad for chords and pads)
     // through a private engine, light (no spectral stage or oversampling: the
@@ -383,7 +383,7 @@ ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineP
 
     juce::AudioBuffer<float> out (2, length), chunk (2, block);
     juce::MidiBuffer midi;
-    const auto root = type == 0 ? 36 : type == 4 || type == 1 ? 72 : 60; // bass C2, lead/pluck C5, else C4
+    const auto root = (type == 0 ? 36 : type == 4 || type == 1 ? 72 : 60) + transpose; // bass C2, lead/pluck C5, else C4
     const auto chord = type == 2 || type == 3;
     constexpr int intervals[] { 0, 4, 7 };
 
@@ -652,7 +652,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             }
     }
     auto best = profiles[(size_t) chosen];
-    const auto source = sources[(size_t) chosen];
+    auto source = sources[(size_t) chosen];
     auto bestTraits = traits[(size_t) chosen];
     auto bestScore = scoreOf (bestTraits, true);
 
@@ -696,6 +696,50 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             if (debugGenerate)
                 std::printf ("    pushed to %.2f\n", bestScore);
         }
+    }
+
+    // Octave check: a sound is played across the keyboard, not on one note. The
+    // pick again an octave down and up (basses: a fifth and an octave up, as an
+    // octave below C2 is mostly sub), each against itself at the test note:
+    // still sounding, as much in tune, no more wobble or noise. If it falls
+    // apart, the next best keepers (two at most) in its place.
+    auto holdsUp = [&] (const Profile& p, int src, const SoundTraits& atRoot)
+    {
+        const int shifts[2] { type == 0 ? 7 : -12, 12 };
+        SoundTraits heard[2];
+        std::thread other ([&] { heard[1] = measureProfile (*checkers[1], src, type, p, shifts[1]); });
+        heard[0] = measureProfile (*checkers[0], src, type, p, shifts[0]);
+        other.join();
+        for (const auto& m : heard)
+            if (m.levelDb < atRoot.levelDb - 20.0f
+                || (type != 5 && (std::abs (m.pitchOffsetCents - atRoot.pitchOffsetCents) > 15.0f
+                                  || m.pitchSpreadCents > atRoot.pitchSpreadCents + 12.0f
+                                  || m.flatness > atRoot.flatness + 0.05f)))
+                return false;
+        return true;
+    };
+    if (! holdsUp (best, source, bestTraits))
+    {
+        auto ranked = keepers;
+        std::sort (ranked.begin(), ranked.end(), [] (const Keeper& x, const Keeper& y) { return x.score > y.score; });
+        auto tries = 0;
+        for (const auto& k : ranked)
+        {
+            if (k.index == chosen)
+                continue;
+            if (tries++ >= 2)
+                break;
+            if (holdsUp (profiles[(size_t) k.index], sources[(size_t) k.index], traits[(size_t) k.index]))
+            {
+                best = profiles[(size_t) k.index];
+                source = sources[(size_t) k.index];
+                bestTraits = traits[(size_t) k.index];
+                if (debugGenerate)
+                    std::printf ("    octave check: replaced by candidate %d\n", k.index);
+                break;
+            }
+        }
+        lastOctaveFailures++;
     }
 
     recentGenerated.push_back (bestTraits);

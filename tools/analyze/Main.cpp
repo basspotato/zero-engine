@@ -819,7 +819,7 @@ int main (int argc, char* argv[])
         // candidates still fit the genre/type, 3 clicks per profile.
         std::printf ("%-24s %8s %s\n", "profile", "ms/click", "fits of 24");
         double totalMs = 0.0;
-        int totalFits = 0, clicks = 0;
+        int totalFits = 0, clicks = 0, totalOctave = 0;
         for (int g = 0; g < genreNames.size(); ++g)
             for (int t = 0; t < typeNames.size(); ++t)
             {
@@ -841,9 +841,11 @@ int main (int argc, char* argv[])
                 const auto ms = (juce::Time::getMillisecondCounterHiRes() - start) / 3.0;
                 totalMs += ms * 3.0;
                 clicks += 3;
-                std::printf ("%-24s %8.0f %s\n", (genreNames[g] + " " + typeNames[t]).toRawUTF8(), ms, fits.toRawUTF8());
+                std::printf ("%-24s %8.0f %s  octave failures %d\n", (genreNames[g] + " " + typeNames[t]).toRawUTF8(), ms, fits.toRawUTF8(), engine.getOctaveFailures());
+                totalOctave += engine.getOctaveFailures();
             }
-        std::printf ("\nAverage %.0f ms per click; %.1f of 24 candidates fit on average.\n", totalMs / clicks, (double) totalFits / clicks);
+        std::printf ("\nAverage %.0f ms per click; %.1f of 24 candidates fit on average; %d of %d picks failed the octave check.\n",
+                     totalMs / clicks, (double) totalFits / clicks, totalOctave, clicks);
         return 0;
     }
 

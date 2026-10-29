@@ -119,6 +119,7 @@ public:
 
     // How many of the last Generate's candidates passed the check (out of 6), for tests and tuning.
     int getLastGenerateFits() const noexcept { return lastGenerateFits; }
+    int getOctaveFailures() const noexcept { return lastOctaveFailures; }
     static inline bool debugGenerate = false; // tooling: print every candidate's scores
     static inline bool measureLight = true;    // Generate's check renders light (tooling can compare full quality)
 
@@ -185,7 +186,7 @@ private:
     // Generate's render-and-check (message thread): many variations measured on
     // private engines in parallel, see pickGeneratedProfile.
     using SoundCheck = SoundTraits;
-    static SoundCheck measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile&);
+    static SoundCheck measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile&, int transpose = 0);
 public:
     static SoundTraits measureForTools (ZeroEngineProcessor& engine, int genre, int type, const Profile& p) { return measureProfile (engine, genre, type, p); }
 private:
@@ -214,6 +215,7 @@ private:
     juce::File heartsFile() const { return favouritesFolder.getParentDirectory().getChildFile ("Hearts.xml"); }
     void loadTasteAndHearts();
     int lastGenerateFits = 0;
+    int lastOctaveFailures = 0; // tooling: picks that failed the octave check, since construction
     std::array<std::optional<SoundCheck>, 12 * 6> designedChecks; // genre * 6 + type
 
     juce::File favouritesFolder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
