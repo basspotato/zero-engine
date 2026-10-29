@@ -1446,18 +1446,25 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
 
     generateButton.onClick = [this]
     {
-        processor.generate();
+        processor.generate (juce::Time::currentTimeMillis(), processor.isMoodMode());
         refreshHistoryButtons();
         generateButton.fold();
     };
     addAndMakeVisible (generateButton);
 
-    anyGenreButton.onClick = [this]
+    // Under the tesseract: MOOD (free, creative: pads, drones, keys... each mood
+    // picks its own type) or GENRE (stays in the selected genre and type).
+    for (auto* b : { &moodButton, &genreModeButton })
     {
-        processor.generate (juce::Time::currentTimeMillis(), true);
-        refreshHistoryButtons();
-        anyGenreButton.fold();
-    };
+        b->setClickingTogglesState (false);
+        addAndMakeVisible (*b);
+    }
+    moodButton.onClick = [this] { processor.setMoodMode (true); refreshGenerateMode(); };
+    genreModeButton.onClick = [this] { processor.setMoodMode (false); refreshGenerateMode(); };
+    moodButton.setTooltip ("Generate from moods: lush pads, airy drones, warm keys and more, free of the genres.");
+    genreModeButton.setTooltip ("Generate within the genre and type you have selected.");
+    refreshGenerateMode();
+
 
     heartButton.onClick = [this]
     {
@@ -1521,7 +1528,6 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     mainButton.onClick = [this] { showAdvanced (false); };
     addAndMakeVisible (mainButton);
     addAndMakeVisible (advancedButton);
-    addAndMakeVisible (anyGenreButton); // over the display
     addAndMakeVisible (heartButton);
     addChildComponent (advancedPanel); // last, so it sits over the panels
     showAdvanced (false);
@@ -1624,6 +1630,7 @@ void ZeroEngineEditor::timerCallback()
     undoButton.setEnabled (processor.canUndo());
     redoButton.setEnabled (processor.canRedo());
     heartButton.setFilled (processor.isCurrentHearted());
+    refreshGenerateMode(); // a session or favourite may bring its own
 
     for (size_t m = 0; m < macros.size(); ++m)
     {
@@ -1760,6 +1767,7 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
     section (displaySection, "DISPLAY");
     section (meterSection, "OUTPUT");
     section (generateSection, "GENERATE");
+    section (favouritesSection, "FAVOURITES");
     section (macroSection, "MACROS");
 }
 
@@ -1792,13 +1800,13 @@ void ZeroEngineEditor::resized()
     genrePrev.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
 
     area.removeFromTop (10);
-    keyboard.setBounds (area.removeFromBottom (72));
+    keyboard.setBounds (area.removeFromBottom (64));
     area.removeFromBottom (10);
 
     // Each panel: a 22 px header strip, then its content inset.
     auto content = [] (juce::Rectangle<int> r) { return r.withTrimmedTop (22).reduced (8); };
 
-    macroSection = area.removeFromBottom (168);
+    macroSection = area.removeFromBottom (150);
     auto knobRow = content (macroSection);
     const auto knobWidth = knobRow.getWidth() / (int) macros.size();
     for (auto& macro : macros)
@@ -1807,36 +1815,60 @@ void ZeroEngineEditor::resized()
         macro.label.setBounds (cell.removeFromBottom (18));
         macro.knob.setBounds (cell.reduced (4));
     }
-
     area.removeFromBottom (10);
-    generateSection = area.removeFromRight (170);
-    area.removeFromRight (10);
-    meterSection = area.removeFromRight (190);
-    area.removeFromRight (10);
-    displaySection = area;
+
+    // The middle row: the display on the left, Generate (a square tesseract with
+    // MOOD / GENRE under it) in the centre, the meters over Favourites on the right.
+    constexpr int centreWidth = 360;
+    const auto sideWidth = (area.getWidth() - centreWidth - 20) / 2;
+    displaySection = area.removeFromLeft (sideWidth);
+    area.removeFromLeft (10);
+    generateSection = area.removeFromLeft (centreWidth);
+    area.removeFromLeft (10);
+    meterSection = area.removeFromTop (282);
+    area.removeFromTop (10);
+    favouritesSection = area;
 
     auto generateArea = content (generateSection);
-    auto favouritesRow = generateArea.removeFromBottom (20);
+    auto modes = generateArea.removeFromBottom (26);
     generateArea.removeFromBottom (6);
-    saveButton.setBounds (favouritesRow.removeFromRight (44));
-    favouritesRow.removeFromRight (4);
-    favouritesBox.setBounds (favouritesRow);
-    generateButton.setBounds (generateArea);
+    const auto modeWidth = 96;
+    auto modeRow = modes.withSizeKeepingCentre (2 * modeWidth + 6, 24);
+    moodButton.setBounds (modeRow.removeFromLeft (modeWidth));
+    modeRow.removeFromLeft (6);
+    genreModeButton.setBounds (modeRow);
+    generateButton.setBounds (generateArea.withSizeKeepingCentre (juce::jmin (generateArea.getWidth(), generateArea.getHeight()),
+                                                                  juce::jmin (generateArea.getWidth(), generateArea.getHeight())));
     // History arrows sit in the header strip, left of the LED.
     forwardButton.setBounds (generateSection.getRight() - 26 - 18, generateSection.getY() + 3, 18, 16);
     backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
+
     levelMeter.setBounds (content (meterSection));
+
+    auto favouritesArea = content (favouritesSection);
+    auto favouritesRow = favouritesArea.removeFromTop (24);
+    heartButton.setBounds (favouritesRow.removeFromLeft (24).withSizeKeepingCentre (22, 20));
+    favouritesRow.removeFromLeft (4);
+    saveButton.setBounds (favouritesRow.removeFromRight (50));
+    favouritesRow.removeFromRight (4);
+    favouritesBox.setBounds (favouritesRow);
+
     display.setBounds (content (displaySection));
-    anyGenreButton.setBounds (display.getRight() - 69, display.getBottom() - 69, 55, 55); // over the display's corner, 14 px in
-    heartButton.setBounds (anyGenreButton.getX() - 24, anyGenreButton.getBottom() - 19, 22, 20); // its lower left
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
     matchButton.setBounds (displayMode.getX() - 56, displaySection.getY() + 3, 52, 16);
-    advancedPanel.setBounds (displaySection.getUnion (macroSection).getUnion (generateSection));
+    advancedPanel.setBounds (displaySection.getUnion (macroSection).getUnion (meterSection));
 
-    // Scale every child with the window: layout is done at the 900 x 600 design size.
+    // Scale every child with the window: layout is done at the design size.
     const auto transform = juce::AffineTransform::scale (uiScale());
     for (auto* child : getChildren())
         if (dynamic_cast<juce::ResizableCornerComponent*> (child) == nullptr) // the resize handle stays put
             child->setTransform (transform);
+}
+
+void ZeroEngineEditor::refreshGenerateMode()
+{
+    const auto mood = processor.isMoodMode();
+    moodButton.setToggleState (mood, juce::dontSendNotification);
+    genreModeButton.setToggleState (! mood, juce::dontSendNotification);
 }

@@ -265,8 +265,9 @@ private:
     juce::ComboBox displayMode; // in the DISPLAY header strip
     LevelMeter levelMeter;
     TesseractButton generateButton;
-    TesseractButton anyGenreButton { true }; // the mini one in the display's corner: Generate from any genre
-    HeartButton heartButton; // left of the mini tesseract: like the sound playing
+    juce::TextButton moodButton { "MOOD" }, genreModeButton { "GENRE" }; // under the tesseract: what Generate draws from (lit = active)
+    void refreshGenerateMode();
+    HeartButton heartButton; // in the Favourites panel: like the sound playing
     juce::ComboBox favouritesBox;            // recall a saved sound
     juce::String currentFavourite;           // the last one saved or recalled, which Rename and Delete act on
     juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite
@@ -296,7 +297,7 @@ private:
     void refreshHistoryButtons();
     void mouseDown (const juce::MouseEvent&) override; // right-click a macro: MIDI learn
     void timerCallback() override;                     // keeps the macro labels' CC text current
-    static constexpr int designWidth = 900, designHeight = 600;
+    static constexpr int designWidth = 960, designHeight = 700;
     float uiScale() const { return (float) getWidth() / (float) designWidth; }
     void renameCurrentFavourite();
     juce::Component::SafePointer<juce::AlertWindow> renameDialog;
@@ -305,7 +306,7 @@ private:
     juce::StringArray recentLikes;                            // as listed in it
 
     // Panel areas, set in resized() and drawn in paint() behind the components.
-    juce::Rectangle<int> displaySection, meterSection, generateSection, macroSection;
+    juce::Rectangle<int> displaySection, meterSection, generateSection, favouritesSection, macroSection;
     juce::TooltipWindow tooltips { this };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ZeroEngineEditor)

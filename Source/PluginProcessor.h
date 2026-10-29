@@ -84,6 +84,12 @@ public:
     // designed profile as usual.
     void generate (juce::int64 seed = juce::Time::currentTimeMillis(), bool anyGenreToo = false);
 
+    // Generate's mode (message thread), saved with the project: Mood (free,
+    // creative, each mood picks its own type) or Genre (within the selected
+    // genre and type).
+    bool isMoodMode() const { return (bool) state.state.getProperty ("moodMode", false); }
+    void setMoodMode (bool mood) { state.state.setProperty ("moodMode", mood, nullptr); }
+
     // The heart (message thread): marks the sound playing now as liked, or
     // unmarks it. A heart is the strongest taste judgment (it beats the results
     // shown before it), and Generate breeds some candidates from hearted sounds
