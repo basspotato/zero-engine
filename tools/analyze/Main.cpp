@@ -172,7 +172,7 @@ namespace
         std::printf ("Wrote %s\n", outDir.getChildFile ("compare.csv").getFullPathName().toRawUTF8());
     }
 
-    // CPU check: all 16 voices held on a profile, timed per block against the
+    // CPU check: every voice held on a profile, timed per block against the
     // block's real-time budget. Single core, Release build.
     void bench (int genre, int type)
     {
@@ -191,8 +191,8 @@ namespace
 
         juce::AudioBuffer<float> block (2, renderBlock);
         juce::MidiBuffer midi;
-        for (int v = 0; v < 16; ++v)
-            midi.addEvent (juce::MidiMessage::noteOn (1, 40 + v * 2, (juce::uint8) 100), 0);
+        for (int v = 0; v < ZeroEngineProcessor::numVoices; ++v)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 36 + v * 2, (juce::uint8) 100), 0);
 
         const auto blocks = (int) (10.0 * renderRate / renderBlock);
         const auto budget = renderBlock / renderRate;
@@ -289,7 +289,7 @@ int main (int argc, char* argv[])
 
     if (command == "bench")
     {
-        std::printf ("16 voices held, 48 kHz, %d-sample blocks:\n", renderBlock);
+        std::printf ("%d voices held, 48 kHz, %d-sample blocks:\n", ZeroEngineProcessor::numVoices, renderBlock);
         for (const auto& [g, t] : { std::pair { "Trance", "Chord" }, { "EDM", "Pad" }, { "Dubstep", "Bass" },
                                     { "Drum & Bass", "Bass" }, { "Trap", "Bass" }, { "Hardstyle", "Lead" } })
             bench (genreNames.indexOf (g), typeNames.indexOf (t));

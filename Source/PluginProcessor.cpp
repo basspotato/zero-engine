@@ -9,10 +9,6 @@
 #include "GenerateNet.h"
 #include <thread>
 
-namespace
-{
-    constexpr int numVoices = 16;
-}
 
 ZeroEngineProcessor::ZeroEngineProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),

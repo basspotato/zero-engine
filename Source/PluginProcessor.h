@@ -16,6 +16,10 @@ class ZeroEngineProcessor : public juce::AudioProcessor,
                             private juce::Timer
 {
 public:
+    // Notes that can sound at once (24: long pad releases over chord changes need
+    // the room; each voice stacks up to 7 unison oscillators).
+    static constexpr int numVoices = 24;
+
     ZeroEngineProcessor();
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
