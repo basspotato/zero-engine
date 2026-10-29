@@ -353,7 +353,8 @@ int runLibrary (const juce::StringArray& args)
 
 int runLibraryBench (const juce::StringArray& args)
 {
-    // Options: a sample size, a seed, and source= / type= filters.
+    // Options: a sample size, a seed, source= / type= filters, and budget= / second=
+    // (the search renders per worker in the first and second rounds).
     int count = 40;
     unsigned seed = 1;
     juce::String onlySource, onlyType;
@@ -361,6 +362,8 @@ int runLibraryBench (const juce::StringArray& args)
     {
         if (args[i].startsWith ("source=")) onlySource = args[i].fromFirstOccurrenceOf ("=", false, false);
         else if (args[i].startsWith ("type=")) onlyType = args[i].fromFirstOccurrenceOf ("=", false, false);
+        else if (args[i].startsWith ("budget=")) ReferenceMatch::searchBudget = args[i].fromFirstOccurrenceOf ("=", false, false).getIntValue();
+        else if (args[i].startsWith ("second=")) ReferenceMatch::secondBudget = args[i].fromFirstOccurrenceOf ("=", false, false).getIntValue();
         else if (i == 1) count = args[i].getIntValue();
         else if (i == 2) seed = (unsigned) args[i].getIntValue();
     }
