@@ -1,5 +1,6 @@
 #include "MatchLibrary.h"
 #include "MatchBench.h"
+#include "MatchJudge.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <map>
 #include <random>
@@ -375,7 +376,8 @@ int runLibraryBench (const juce::StringArray& args)
     // one from each group in turn.
     std::map<juce::String, std::vector<Entry>> groups;
     for (const auto& e : entries)
-        if ((onlySource.isEmpty() || e.source == onlySource) && (onlyType.isEmpty() || e.type.equalsIgnoreCase (onlyType)))
+        if ((onlySource.isEmpty() || juce::StringArray::fromTokens (onlySource, ",", "").contains (e.source))
+            && (onlyType.isEmpty() || e.type.equalsIgnoreCase (onlyType)))
             groups[e.source + "/" + e.type].push_back (e);
     std::mt19937 rng (seed);
     for (auto& [name, group] : groups)
@@ -410,10 +412,10 @@ int runLibraryBench (const juce::StringArray& args)
         row.seconds = (float) (juce::Time::getMillisecondCounter() - began) / 1000.0f;
         if (result.ok)
         {
-            const auto words = juce::StringArray::fromTokens (result.summary, "-", "");
-            row.word = words.size() > 1 ? words[words.size() - 2].trim() : juce::String();
+            // Scored by the frozen judge, so no round can pass by going easy on itself.
+            row.distance = frozenJudge (result.target, result.matched);
+            row.word = frozenJudgeWord (row.distance);
             row.chosen = genreNames[result.genre] + " " + typeNames[result.type];
-            row.distance = result.distance;
             if (e.source == "engine") // known notes: replay them and judge as matchbench does
             {
                 juce::Random random (e.seed);

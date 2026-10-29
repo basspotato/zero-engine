@@ -11,7 +11,7 @@
 //   ZeroAnalyze library engine <n>     render n engine sounds (Generate variations,
 //                                      notes and arp loops) into analysis/library/engine,
 //                                      with the seed that remakes their settings
-//   ZeroAnalyze libbench [n] [seed] [source=...] [type=...]
+//   ZeroAnalyze libbench [n] [seed] [source=a,b,...] [type=...]
 //                                      match a sample of n files spread evenly over
 //                                      sources and types; per-category results, and a
 //                                      CSV in analysis/library/runs
