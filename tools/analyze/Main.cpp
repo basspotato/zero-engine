@@ -641,6 +641,31 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "anycheck" && args.size() >= 2)
+    {
+        // The mini tesseract's genres: n any-genre clicks for a type, with the
+        // judge on and off; which genre each loaded as.
+        const auto t = typeNames.indexOf (args[1]);
+        const auto n = args.size() > 2 ? args[2].getIntValue() : 12;
+        for (int on = 1; on >= 0; --on)
+        {
+            ZeroEngineProcessor::useJudge = on == 1;
+            ZeroEngineProcessor engine;
+            auto* type = engine.state.getParameter (ParamIDs::type);
+            type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
+            engine.syncProfile();
+            juce::StringArray genres;
+            for (int i = 0; i < n; ++i)
+            {
+                engine.generate (100 + i, true);
+                genres.add (genreNames[(int) engine.state.getRawParameterValue (ParamIDs::genre)->load()]);
+            }
+            std::printf ("judge %s: %s\n", on ? "on " : "off", genres.joinIntoString (", ").toRawUTF8());
+        }
+        ZeroEngineProcessor::useJudge = true;
+        return 0;
+    }
+
     if (command == "genjudgeab")
         for (const auto& a : args)
             if (a.startsWith ("draw="))

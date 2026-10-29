@@ -205,6 +205,7 @@ private:
     std::pair<Profile, int> pickGeneratedProfile (int genre, int type, juce::Random&); // the profile and its leading genre
     std::vector<std::unique_ptr<ZeroEngineProcessor>> checkers; // private engines for the check renders, made on first use
     std::vector<SoundTraits> recentGenerated; // the last few results, so the next one differs
+    std::vector<int> recentAnyGenres;         // the last few mini-tesseract results' genres, so the next leads with another
 
     // Taste: Generate results as shown, how long each was played, and what the
     // owner did next, becoming judgments for the TasteModel (see generate,

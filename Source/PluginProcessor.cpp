@@ -125,7 +125,13 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
 void ZeroEngineProcessor::generate (juce::int64 seed, bool anyGenreToo)
 {
     syncProfile(); // a Genre/Type change not yet picked up by the timer
-    juce::Random random (seed);
+    // The seed scrambled first (splitmix64): clicks a moment apart give nearby
+    // seeds, and nearby seeds give a plain random generator near-identical
+    // first draws (the same genres and variations click after click).
+    auto mixed = (juce::uint64) seed + 0x9e3779b97f4a7c15ull;
+    mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ull;
+    mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebull;
+    juce::Random random ((juce::int64) (mixed ^ (mixed >> 31)));
     const int genre = appliedGenre, type = appliedType;
 
     // Taste: what became of the last result decides a judgment or two.
@@ -515,6 +521,19 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         p.detune = juce::jmin (p.detune, juce::jmax (makeProfile (source, type).detune, 0.4f) + 0.1f);
         return p;
     };
+    // Any genre: one lead genre per click, at random but not one of the last
+    // two mini clicks' (left to itself the judge favours the genres whose
+    // sounds score biggest, trance leads and dubstep basses, click after click).
+    auto leadGenre = genre;
+    if (free)
+    {
+        std::vector<int> allowed;
+        for (int g = 0; g < anyGenre; ++g)
+            if (std::find (recentAnyGenres.begin(), recentAnyGenres.end(), g) == recentAnyGenres.end())
+                allowed.push_back (g);
+        leadGenre = allowed[(size_t) random.nextInt ((int) allowed.size())];
+    }
+
     std::vector<const Heart*> parents;
     for (const auto& h : hearts)
         if (h.type == type)
@@ -550,23 +569,23 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             sources.push_back (genre);
             continue;
         }
-        const auto a = random.nextInt (anyGenre);
-        auto p = generateProfile (a, type, random);
-        auto source = a;
+        // The click's lead genre (chosen once, below) leads every candidate;
+        // more than half blend in another genre as the smaller part (25-45 %),
+        // with its wavetable a third of the time.
+        auto p = generateProfile (leadGenre, type, random);
+        const auto source = leadGenre;
         if (random.nextFloat() < 0.6f)
         {
-            const auto b = (a + 1 + random.nextInt (anyGenre - 1)) % anyGenre;
+            const auto b = (leadGenre + 1 + random.nextInt (anyGenre - 1)) % anyGenre;
             const auto other = generateProfile (b, type, random);
-            const auto mix = 0.25f + 0.5f * random.nextFloat();
+            const auto mix = 0.25f + 0.2f * random.nextFloat();
             auto units = ReferenceMatch::unitsOf (p);
             const auto otherUnits = ReferenceMatch::unitsOf (other);
             for (size_t k = 0; k < units.size(); ++k)
                 units[k] += mix * (otherUnits[k] - units[k]);
-            auto lead = mix > 0.5f ? other : p;
-            const auto table = random.nextBool() ? other.waveTable : p.waveTable;
-            p = ReferenceMatch::withUnitsOf (lead, units);
+            const auto table = random.nextFloat() < 0.33f ? other.waveTable : p.waveTable;
+            p = ReferenceMatch::withUnitsOf (p, units);
             p.waveTable = table;
-            source = mix > 0.5f ? b : a;
         }
         profiles.push_back (capDetune (p, source));
         sources.push_back (source);
@@ -807,6 +826,12 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     if (recentGenerated.size() > 6)
         recentGenerated.erase (recentGenerated.begin());
     lastPickTraits = bestTraits;
+    if (free)
+    {
+        recentAnyGenres.push_back (source);
+        if (recentAnyGenres.size() > 2)
+            recentAnyGenres.erase (recentAnyGenres.begin());
+    }
     return { best, source };
 }
 
