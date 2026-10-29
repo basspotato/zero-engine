@@ -144,6 +144,8 @@ public:
     static inline bool measureLight = true;    // Generate's check renders light (tooling can compare full quality)
     static inline bool useJudge = true;        // Generate screens with the neural judge when trained (tooling can switch it off)
     static inline int drawWithJudge = 400;     // candidates drawn for the judge to screen down to the 24 rendered (400: +0.80 vs 96: +0.69)
+    static inline bool useSettingsTaste = true; // Generate leans on the taste in settings too (tooling can switch it off)
+    int getSettingsTasteJudgments() const noexcept { return settingsTaste.judgments(); }
     std::optional<SoundTraits> getLastPickTraits() const { return lastPickTraits; }
 
     // Message thread: step back (-1) or forward (+1) through generated sounds.
@@ -235,13 +237,19 @@ private:
     // Taste: Generate results as shown, how long each was played, and what the
     // owner did next, becoming judgments for the TasteModel (see generate,
     // timerCallback, saveFavourite).
-    struct Shown { TasteModel::Features features {}; double shownAt = 0.0; float playedSeconds = 0.0f; int label = 0; }; // label: 2 favourite, 1 kept, -1 skipped
+    struct Shown { TasteModel::Features features {}; double shownAt = 0.0; float playedSeconds = 0.0f; int label = 0;
+                   SettingsTaste::Features settings; }; // label: 2 favourite, 1 kept, -1 skipped
     std::vector<Shown> shown;
     bool showingLatest = false; // the sound is still the last Generate result (not stepped back from, nor replaced)
     TasteModel taste;
+    SettingsTaste settingsTaste;
 
     juce::File tasteFile() const { return favouritesFolder.getParentDirectory().getChildFile ("Taste.xml"); }
+    juce::File settingsTasteFile() const { return favouritesFolder.getParentDirectory().getChildFile ("TasteSettings.xml"); }
     void judgeLastShown();
+    void addJudgment (const Shown& winner, const Shown& loser); // to both taste models
+    void saveTaste() const;
+    void heartsChanged(); // the settings taste's heart wins follow the hearts
     struct Heart { Profile profile {}; juce::ValueTree state; juce::String name; int genre = 0, type = 0; TasteModel::Features features {}; };
     juce::String randomName() const; // two random words not used by a favourite or a heart
     void saveHearts() const;

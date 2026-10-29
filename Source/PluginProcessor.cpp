@@ -7,6 +7,7 @@
 #include "GenerateTargets.h"
 #include "ArpGrooves.h"
 #include "GenerateNet.h"
+#include <numeric>
 #include "Moods.h"
 #include <thread>
 
@@ -168,7 +169,8 @@ void ZeroEngineProcessor::applyGenerate (GeneratePlan& plan, const Profile& prof
     currentHeart = -1;
     if (lastPickTraits.has_value()) // a measured pick (not a fallback)
     {
-        shown.push_back ({ TasteModel::featuresOf (*lastPickTraits, plan.type), juce::Time::getMillisecondCounterHiRes() / 1000.0 });
+        shown.push_back ({ TasteModel::featuresOf (*lastPickTraits, plan.type), juce::Time::getMillisecondCounterHiRes() / 1000.0, 0.0f, 0,
+                          GenerateNet::featuresOf (profile, source, plan.type) });
         if (shown.size() > 12)
             shown.erase (shown.begin());
         showingLatest = true;
@@ -221,6 +223,7 @@ void ZeroEngineProcessor::loadTasteAndHearts()
         return;
     heartsLoaded = true;
     taste.load (tasteFile());
+    settingsTaste.load (settingsTasteFile());
 
     // Hearts are stored as whole states (the sound exactly as hearted, arp and
     // all); the profile Generate breeds from is read back through a private
@@ -248,6 +251,7 @@ void ZeroEngineProcessor::loadTasteAndHearts()
     for (auto& h : hearts) // hearts from before they had names
         if (h.name.isEmpty())
             h.name = randomName();
+    heartsChanged();
 }
 
 void ZeroEngineProcessor::judgeLastShown()
@@ -271,17 +275,45 @@ void ZeroEngineProcessor::judgeLastShown()
     {
         const auto& other = shown[i];
         if (last.label == 1 && other.label < 0) // a kept one beats the skipped and the disliked
-            taste.addWin (last.features, other.features);
+            addJudgment (last, other);
         else if (last.label == -1 && other.label >= 1)
-            taste.addWin (other.features, last.features);
+            addJudgment (other, last);
         else
             continue;
         added = true;
     }
     if (added)
-        taste.save (tasteFile());
+        saveTaste();
 }
 
+
+void ZeroEngineProcessor::addJudgment (const Shown& winner, const Shown& loser)
+{
+    taste.addWin (winner.features, loser.features);
+    settingsTaste.addWin (winner.settings, loser.settings);
+}
+
+void ZeroEngineProcessor::saveTaste() const
+{
+    taste.save (tasteFile());
+    settingsTaste.save (settingsTasteFile());
+}
+
+void ZeroEngineProcessor::heartsChanged()
+{
+    // Each heart beats three plain draws of its own genre and type (the same
+    // draws every time, seeded by its name), so the settings taste starts from
+    // the hearts already there.
+    std::vector<std::pair<SettingsTaste::Features, SettingsTaste::Features>> wins;
+    for (const auto& h : hearts)
+    {
+        const auto liked = GenerateNet::featuresOf (h.profile, h.genre, h.type);
+        juce::Random random (h.name.hashCode64());
+        for (int i = 0; i < 3; ++i)
+            wins.push_back ({ liked, GenerateNet::featuresOf (generateProfile (h.genre, h.type, random), h.genre, h.type) });
+    }
+    settingsTaste.setHeartWins (std::move (wins));
+}
 
 void ZeroEngineProcessor::heartCurrent()
 {
@@ -312,10 +344,10 @@ void ZeroEngineProcessor::heartCurrent()
             for (size_t i = shown.size() - 1, beaten = 0; i-- > 0 && beaten < 6;)
                 if (shown[i].label < 1)
                 {
-                    taste.addWin (latest.features, shown[i].features);
+                    addJudgment (latest, shown[i]);
                     ++beaten;
                 }
-            taste.save (tasteFile());
+            saveTaste();
         }
         else
         {
@@ -332,6 +364,7 @@ void ZeroEngineProcessor::heartCurrent()
             hearts.erase (hearts.begin());
         currentHeart = (int) hearts.size() - 1;
     }
+    heartsChanged();
     saveHearts();
 }
 
@@ -707,10 +740,27 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     // results never settle into one style.
     std::optional<TasteModel::Features> tasteWeights;
     auto tasteStrength = 0.0f;
-    if (taste.judgments() >= 4 && random.nextFloat() >= 0.2f)
+    const auto ignoreTaste = random.nextFloat() < 0.2f;
+    if (taste.judgments() >= 4 && ! ignoreTaste)
     {
         tasteWeights = taste.sampleWeights (random);
         tasteStrength = juce::jmin (1.0f, (float) taste.judgments() / 40.0f);
+    }
+    // The taste in settings (SettingsTaste: the hearts and judgments on the
+    // judge's inputs), per candidate, from its settings alone: centred on the
+    // click's candidates, capped, at full strength from 100 judgments (it has
+    // 99 inputs to learn, so it waits for more than the traits' taste). It helps
+    // choose both the 24 rendered and the pick among them.
+    std::vector<float> liking (profiles.size(), 0.0f);
+    if (useSettingsTaste && ! ignoreTaste && settingsTaste.judgments() >= 6)
+    {
+        settingsTaste.refit();
+        const auto strength = juce::jmin (1.0f, (float) settingsTaste.judgments() / 100.0f);
+        for (size_t i = 0; i < profiles.size(); ++i)
+            liking[i] = settingsTaste.scoreOf (GenerateNet::featuresOf (profiles[i], sources[i], type));
+        const auto centre = std::accumulate (liking.begin(), liking.end(), 0.0f) / (float) juce::jmax ((size_t) 1, liking.size());
+        for (auto& l : liking)
+            l = strength * juce::jlimit (-1.5f, 1.5f, l - centre);
     }
     auto tasteOf = [&] (const SoundTraits& m)
     {
@@ -766,7 +816,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         for (int i = offspring; i < (int) profiles.size(); ++i)
         {
             const auto predicted = GenerateNet::traitsOf (judge.run (GenerateNet::featuresOf (profiles[(size_t) i], sources[(size_t) i], type)), type);
-            ranked.push_back ({ (strayOf (predicted) <= 1.0f ? 0.0f : -100.0f) + scoreOf (predicted), i });
+            ranked.push_back ({ (strayOf (predicted) <= 1.0f ? 0.0f : -100.0f) + scoreOf (predicted) + liking[(size_t) i], i });
         }
         std::sort (ranked.begin(), ranked.end(), [] (const auto& a, const auto& b) { return a.first > b.first; });
         const auto picked = candidates - offspring, explore = juce::jmin (4, picked);
@@ -779,13 +829,16 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             keep.push_back (ranked[(size_t) (picked - explore + random.nextInt ((int) ranked.size() - (picked - explore)))].second);
         std::vector<Profile> screened;
         std::vector<int> screenedSources;
+        std::vector<float> screenedLiking;
         for (const auto i : keep)
         {
             screened.push_back (profiles[(size_t) i]);
             screenedSources.push_back (sources[(size_t) i]);
+            screenedLiking.push_back (liking[(size_t) i]);
         }
         profiles = std::move (screened);
         sources = std::move (screenedSources);
+        liking = std::move (screenedLiking);
     }
 
     std::vector<SoundTraits> traits ((size_t) candidates);
@@ -814,7 +867,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             closestDistance = stray;
         }
         if (stray <= 1.0f)
-            keepers.push_back ({ i, scoreOf (traits[(size_t) i]) });
+            keepers.push_back ({ i, scoreOf (traits[(size_t) i]) + liking[(size_t) i] });
     }
 
     lastGenerateFits = (int) keepers.size();
@@ -1477,10 +1530,10 @@ void ZeroEngineProcessor::dislikeCurrent()
     for (size_t i = shown.size() - 1, beaten = 0; i-- > 0 && beaten < 6;)
         if (shown[i].label > -2)
         {
-            taste.addWin (shown[i].features, latest.features);
+            addJudgment (shown[i], latest);
             ++beaten;
         }
-    taste.save (tasteFile());
+    saveTaste();
     if (currentHeart >= 0)
         heartCurrent(); // un-heart
 }

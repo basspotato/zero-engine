@@ -819,6 +819,44 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "tastesim" && args.size() > 1 && args[1] == "settings")
+    {
+        // Does the settings taste learn what traits can't show? A simulated
+        // listener who likes two wavetables (Analog, Jupiter) and nothing else
+        // clicks Generate (EDM lead) 80 times: keeps what uses them, skips the
+        // rest, hearts every third liked one. Run with the settings taste on
+        // and off; prints how often the last 30 clicks gave a liked wavetable.
+        const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_tastesim");
+        const auto analog = (float) waveTableNames.indexOf ("Analog"), jupiter = (float) waveTableNames.indexOf ("Jupiter");
+        for (const auto on : { false, true })
+        {
+            folder.deleteRecursively();
+            ZeroEngineProcessor::useSettingsTaste = on;
+            ZeroEngineProcessor engine;
+            engine.setUserFolder (folder);
+            auto* type = engine.state.getParameter (ParamIDs::type);
+            type->setValueNotifyingHost (type->convertTo0to1 (1.0f)); // Lead
+            engine.syncProfile();
+            int liked = 0, early = 0, late = 0;
+            for (int click = 0; click < 80; ++click)
+            {
+                engine.generate (4242 + click);
+                const auto table = engine.state.getRawParameterValue (ParamIDs::waveTable)->load();
+                const auto likes = table == analog || table == jupiter;
+                if (likes && click < 30) ++early;
+                if (likes && click >= 50) ++late;
+                if (likes && ++liked % 3 == 0)
+                    engine.heartCurrent();
+                engine.simulateListening (likes ? 8.0f : 0.0f);
+            }
+            std::printf ("settings taste %-3s: liked wavetable in %2d of the first 30 clicks, %2d of the last 30 (judgments: %d, settings %d)\n",
+                         on ? "on" : "off", early, late, engine.getTasteJudgments(), engine.getSettingsTasteJudgments());
+        }
+        ZeroEngineProcessor::useSettingsTaste = true;
+        folder.deleteRecursively();
+        return 0;
+    }
+
     if (command == "tastesim")
     {
         // Does the taste model learn? A simulated listener who likes wide,
@@ -829,6 +867,7 @@ int main (int argc, char* argv[])
         const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_tastesim");
         folder.deleteRecursively();
         ZeroEngineProcessor engine;
+        ZeroEngineProcessor::useSettingsTaste = ! args.contains ("nosettings");
         engine.setUserFolder (folder);
         auto* type = engine.state.getParameter (ParamIDs::type);
         type->setValueNotifyingHost (type->convertTo0to1 (1.0f)); // Lead

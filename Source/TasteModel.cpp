@@ -180,3 +180,149 @@ void TasteModel::save (const juce::File& file) const
     file.getParentDirectory().createDirectory();
     xml.writeTo (file);
 }
+
+void SettingsTaste::addWin (const Features& winner, const Features& loser)
+{
+    if (winner.empty() || winner.size() != loser.size())
+        return;
+    pairs.push_back ({ winner, loser });
+    constexpr size_t kept = 400;
+    if (pairs.size() > kept)
+        pairs.erase (pairs.begin(), pairs.begin() + (std::ptrdiff_t) (pairs.size() - kept));
+    stale = true;
+}
+
+void SettingsTaste::setHeartWins (std::vector<std::pair<Features, Features>> wins)
+{
+    heartWins = std::move (wins);
+    stale = true;
+}
+
+float SettingsTaste::scoreOf (const Features& f) const noexcept
+{
+    if (w.size() != f.size())
+        return 0.0f;
+    float sum = 0.0f;
+    for (size_t i = 0; i < f.size(); ++i)
+        sum += w[i] * f[i];
+    return sum;
+}
+
+void SettingsTaste::refit()
+{
+    if (! stale)
+        return;
+    stale = false;
+    std::vector<const std::pair<Features, Features>*> all;
+    for (const auto* list : { &pairs, &heartWins })
+        for (const auto& p : *list)
+            all.push_back (&p);
+    if (all.empty())
+    {
+        w.clear();
+        return;
+    }
+
+    // MAP under a unit Gaussian prior, Newton steps from the last fit (a few
+    // are enough when only a judgment or two is new).
+    const auto dims = all[0]->first.size();
+    std::vector<double> weights (dims, 0.0);
+    if (w.size() == dims)
+        for (size_t i = 0; i < dims; ++i)
+            weights[i] = w[i];
+    std::vector<double> gradient (dims), hessian (dims * dims), d (dims), lower (dims * dims);
+    for (int iteration = 0; iteration < 6; ++iteration)
+    {
+        for (size_t i = 0; i < dims; ++i)
+        {
+            gradient[i] = -weights[i];
+            for (size_t j = 0; j < dims; ++j)
+                hessian[i * dims + j] = i == j ? 1.0 : 0.0;
+        }
+        for (const auto* pair : all)
+        {
+            if (pair->first.size() != dims || pair->second.size() != dims)
+                continue;
+            double margin = 0.0;
+            for (size_t i = 0; i < dims; ++i)
+            {
+                d[i] = (double) pair->first[i] - pair->second[i];
+                margin += weights[i] * d[i];
+            }
+            const auto p = 1.0 / (1.0 + std::exp (-margin));
+            for (size_t i = 0; i < dims; ++i)
+            {
+                if (d[i] == 0.0)
+                    continue;
+                gradient[i] += (1.0 - p) * d[i];
+                for (size_t j = 0; j < dims; ++j)
+                    hessian[i * dims + j] += p * (1.0 - p) * d[i] * d[j];
+            }
+        }
+        // Solve hessian . step = gradient (Cholesky; the prior keeps it positive definite).
+        for (size_t i = 0; i < dims; ++i)
+            for (size_t j = 0; j <= i; ++j)
+            {
+                auto sum = hessian[i * dims + j];
+                for (size_t k = 0; k < j; ++k)
+                    sum -= lower[i * dims + k] * lower[j * dims + k];
+                lower[i * dims + j] = i == j ? std::sqrt (juce::jmax (1.0e-12, sum)) : sum / lower[j * dims + j];
+            }
+        auto step = gradient;
+        for (size_t i = 0; i < dims; ++i)
+        {
+            for (size_t k = 0; k < i; ++k)
+                step[i] -= lower[i * dims + k] * step[k];
+            step[i] /= lower[i * dims + i];
+        }
+        for (size_t i = dims; i-- > 0;)
+        {
+            for (size_t k = i + 1; k < dims; ++k)
+                step[i] -= lower[k * dims + i] * step[k];
+            step[i] /= lower[i * dims + i];
+        }
+        for (size_t i = 0; i < dims; ++i)
+            weights[i] += step[i];
+    }
+    w.assign (weights.begin(), weights.end());
+}
+
+void SettingsTaste::load (const juce::File& file)
+{
+    pairs.clear();
+    if (const auto xml = juce::XmlDocument::parse (file))
+        for (const auto* pair : xml->getChildIterator())
+        {
+            auto read = [] (const juce::String& text)
+            {
+                Features f;
+                for (const auto& v : juce::StringArray::fromTokens (text, ",", ""))
+                    f.push_back (v.getFloatValue());
+                return f;
+            };
+            auto a = read (pair->getStringAttribute ("winner")), b = read (pair->getStringAttribute ("loser"));
+            if (! a.empty() && a.size() == b.size())
+                pairs.push_back ({ std::move (a), std::move (b) });
+        }
+    stale = true;
+}
+
+void SettingsTaste::save (const juce::File& file) const
+{
+    juce::XmlElement xml ("SettingsTaste");
+    auto join = [] (const Features& f)
+    {
+        juce::StringArray parts;
+        for (const auto v : f)
+            parts.add (juce::String (v, 3));
+        return parts.joinIntoString (",");
+    };
+    for (const auto& [a, b] : pairs)
+    {
+        auto* pair = xml.createNewChildElement ("Pick");
+        pair->setAttribute ("winner", join (a));
+        pair->setAttribute ("loser", join (b));
+    }
+    file.getParentDirectory().createDirectory();
+    xml.writeTo (file);
+}
