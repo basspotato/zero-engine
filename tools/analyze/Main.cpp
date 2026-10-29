@@ -638,6 +638,11 @@ int main (int argc, char* argv[])
         for (int k = 0; k < TasteModel::numFeatures; ++k)
             std::printf ("  %-7s %+5.2f  (%+.1f)\n", names[k], w[(size_t) k], liking[(size_t) k]);
         std::printf ("listener's liking of results: first 20 clicks %.2f, last 20 %.2f\n", early / 20.0, late / 20.0);
+        const auto likes = engine.getRecentLikes();
+        std::printf ("recent likes (%d): %s\n", likes.size(), likes.joinIntoString (", ").toRawUTF8());
+        if (! likes.isEmpty())
+            std::printf ("recall \"%s\": %s, hearted %s\n", likes[0].toRawUTF8(), engine.recallLike (likes[0]) ? "ok" : "FAILED",
+                         engine.isCurrentHearted() ? "yes" : "no");
         folder.deleteRecursively();
         return 0;
     }

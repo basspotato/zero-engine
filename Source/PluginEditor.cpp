@@ -1442,16 +1442,15 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
         refreshHistoryButtons();
         anyGenreButton.fold();
     };
-    anyGenreButton.setTooltip ("Generate from any genre: big sounds drawn from all twelve genres and blends of two. "
-                               "The result loads as the genre it mostly came from.");
 
     heartButton.onClick = [this]
     {
         processor.heartCurrent();
         heartButton.setFilled (processor.isCurrentHearted());
+        refreshFavourites(); // the LIKED section
     };
     heartButton.setTooltip ("Heart this sound: both Generate buttons learn what you like from your hearts "
-                            "(and from what you play or skip), and breed new sounds from hearted ones.");
+                            "(and from what you play or skip), and breed new sounds from hearted ones. Your last 10 likes are in the Favourites menu.");
 
     backButton.onClick = [this] { processor.stepHistory (-1); refreshHistoryButtons(); };
     forwardButton.onClick = [this] { processor.stepHistory (1); refreshHistoryButtons(); };
@@ -1473,7 +1472,15 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     favouritesBox.onChange = [this]
     {
         const auto id = favouritesBox.getSelectedId();
-        if (id == renameId)
+        if (id >= likeIdBase && id < likeIdBase + recentLikes.size())
+        {
+            const auto name = recentLikes[id - likeIdBase];
+            processor.recallLike (name);
+            currentFavourite.clear();
+            refreshFavourites();
+            favouritesBox.setSelectedId (likeIdBase + recentLikes.indexOf (name), juce::dontSendNotification);
+        }
+        else if (id == renameId)
             renameCurrentFavourite();
         else if (id == deleteId)
         {
@@ -1625,6 +1632,16 @@ void ZeroEngineEditor::refreshHistoryButtons()
 void ZeroEngineEditor::refreshFavourites()
 {
     favouritesBox.clear (juce::dontSendNotification);
+
+    // The last 10 hearted sounds first, then the saved favourites.
+    recentLikes = processor.getRecentLikes();
+    if (! recentLikes.isEmpty())
+    {
+        favouritesBox.addSectionHeading ("LIKED");
+        for (int i = 0; i < recentLikes.size(); ++i)
+            favouritesBox.addItem (recentLikes[i], likeIdBase + i);
+        favouritesBox.addSectionHeading ("FAVOURITES");
+    }
     const auto names = processor.getFavourites();
     favouritesBox.addItemList (names, 1);
 
@@ -1794,7 +1811,7 @@ void ZeroEngineEditor::resized()
     backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
     levelMeter.setBounds (content (meterSection));
     display.setBounds (content (displaySection));
-    anyGenreButton.setBounds (display.getRight() - 40, display.getBottom() - 40, 36, 36); // over the display's corner
+    anyGenreButton.setBounds (display.getRight() - 75, display.getBottom() - 75, 61, 61); // over the display's corner, 14 px in
     heartButton.setBounds (anyGenreButton.getX() - 24, anyGenreButton.getBottom() - 22, 22, 20); // its lower left
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);

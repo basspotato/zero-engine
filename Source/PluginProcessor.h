@@ -85,7 +85,11 @@ public:
     // shown before it), and Generate breeds some candidates from hearted sounds
     // of the type. Saved in %APPDATA%/Zero Engine/Hearts.xml.
     void heartCurrent();
-    bool isCurrentHearted() const noexcept { return currentHearted; }
+    bool isCurrentHearted() const noexcept { return currentHeart >= 0; }
+    // The last 10 hearted sounds' names, newest first (the Favourites menu's LIKED
+    // section), and recalling one exactly as it was hearted.
+    juce::StringArray getRecentLikes();
+    bool recallLike (const juce::String& name);
     int getTasteJudgments() const noexcept { return taste.judgments(); }
     TasteModel::Features getTasteWeights() const noexcept { return taste.meanWeights(); }
 
@@ -162,7 +166,7 @@ private:
     bool restoreState (const juce::XmlElement&);
     void adoptCurrentGenreAndType();
     void checkpoint(); // record an undo step if the sound changed since the last one
-    void generatePattern (juce::Random&, int genre); // a step pattern from the genre's grooves
+    int generatePattern (juce::Random&, int genre); // a step pattern from the genre's grooves; returns its suggested rate
     void generateArp (int type, juce::Random&); // Generate's roll of the arp: on or off, its settings, a new pattern
     bool arpFromGenerate = false;                // the arp is on because Generate switched it on
     std::vector<juce::ValueTree> undoStack, redoStack;
@@ -196,9 +200,12 @@ private:
 
     juce::File tasteFile() const { return favouritesFolder.getParentDirectory().getChildFile ("Taste.xml"); }
     void judgeLastShown();
-    struct Heart { Profile profile {}; int genre = 0, type = 0; TasteModel::Features features {}; };
+    struct Heart { Profile profile {}; juce::ValueTree state; juce::String name; int genre = 0, type = 0; TasteModel::Features features {}; };
+    juce::String randomName() const; // two random words not used by a favourite or a heart
+    void saveHearts() const;
     std::vector<Heart> hearts;
-    bool heartsLoaded = false, currentHearted = false;
+    bool heartsLoaded = false;
+    int currentHeart = -1; // which heart the sound playing is, -1 none
     std::optional<SoundTraits> lastPickTraits; // set by pickGeneratedProfile when its pick was measured
     juce::File heartsFile() const { return favouritesFolder.getParentDirectory().getChildFile ("Hearts.xml"); }
     void loadTasteAndHearts();

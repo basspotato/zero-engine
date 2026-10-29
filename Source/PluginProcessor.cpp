@@ -5,6 +5,7 @@
 #include "Wavetable.h"
 #include "Profiles.h"
 #include "GenerateTargets.h"
+#include "ArpGrooves.h"
 #include <thread>
 
 namespace
@@ -100,7 +101,8 @@ void ZeroEngineProcessor::syncProfile()
         return;
 
     loadProfile (genre, type, makeProfile (genre, type));
-    showingLatest = currentHearted = false; // a designed sound now, not the last Generate result
+    showingLatest = false;
+    currentHeart = -1; // a designed sound now, not the last Generate result
 }
 
 void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profile)
@@ -140,7 +142,7 @@ void ZeroEngineProcessor::generate (juce::int64 seed, bool anyGenreToo)
     lastPickTraits.reset();
     const auto [profile, source] = pickGeneratedProfile (anyGenreToo ? anyGenre : genre, type, random);
     loadProfile (source, type, profile);
-    currentHearted = false;
+    currentHeart = -1;
     if (lastPickTraits.has_value()) // a measured pick (not a fallback)
     {
         shown.push_back ({ TasteModel::featuresOf (*lastPickTraits, type), juce::Time::getMillisecondCounterHiRes() / 1000.0 });
@@ -165,8 +167,9 @@ void ZeroEngineProcessor::loadTasteAndHearts()
     heartsLoaded = true;
     taste.load (tasteFile());
 
-    // Hearts are stored as whole parameter states; read back into profiles
-    // through a private engine's parameters.
+    // Hearts are stored as whole states (the sound exactly as hearted, arp and
+    // all); the profile Generate breeds from is read back through a private
+    // engine's parameters.
     if (const auto xml = juce::XmlDocument::parse (heartsFile()))
     {
         ZeroEngineProcessor reader;
@@ -177,14 +180,19 @@ void ZeroEngineProcessor::loadTasteAndHearts()
                 Heart heart;
                 heart.genre = juce::jlimit (0, anyGenre - 1, h->getIntAttribute ("genre"));
                 heart.type = juce::jlimit (0, 5, h->getIntAttribute ("type"));
-                reader.state.replaceState (juce::ValueTree::fromXml (*params));
+                heart.state = juce::ValueTree::fromXml (*params);
+                reader.state.replaceState (heart.state.createCopy());
                 heart.profile = readProfile (reader.state, heart.genre, heart.type);
                 const auto values = juce::StringArray::fromTokens (h->getStringAttribute ("features"), ",", "");
                 for (int k = 0; k < juce::jmin (values.size(), TasteModel::numFeatures); ++k)
                     heart.features[(size_t) k] = values[k].getFloatValue();
+                heart.name = h->getStringAttribute ("name");
                 hearts.push_back (heart);
             }
     }
+    for (auto& h : hearts) // hearts from before they had names
+        if (h.name.isEmpty())
+            h.name = randomName();
 }
 
 void ZeroEngineProcessor::judgeLastShown()
@@ -219,20 +227,23 @@ void ZeroEngineProcessor::judgeLastShown()
         taste.save (tasteFile());
 }
 
+
 void ZeroEngineProcessor::heartCurrent()
 {
     loadTasteAndHearts();
-    if (currentHearted) // un-heart: the latest heart is this sound
+    if (currentHeart >= 0) // un-heart this sound
     {
-        if (! hearts.empty())
-            hearts.pop_back();
-        currentHearted = false;
+        if (currentHeart < (int) hearts.size())
+            hearts.erase (hearts.begin() + currentHeart);
+        currentHeart = -1;
     }
     else
     {
         Heart heart;
         heart.genre = appliedGenre;
         heart.type = appliedType;
+        heart.state = state.copyState();
+        heart.name = randomName();
         heart.profile = readProfile (state, heart.genre, heart.type); // with any tweaks
         if (showingLatest && ! shown.empty())
         {
@@ -262,29 +273,84 @@ void ZeroEngineProcessor::heartCurrent()
         constexpr size_t kept = 60;
         if (hearts.size() > kept)
             hearts.erase (hearts.begin());
-        currentHearted = true;
+        currentHeart = (int) hearts.size() - 1;
     }
+    saveHearts();
+}
 
-    // Saved as whole parameter states (the profile is read back from them).
+void ZeroEngineProcessor::saveHearts() const
+{
     juce::XmlElement xml ("Hearts");
-    ZeroEngineProcessor writer;
-    writer.stopProfileSync();
     for (const auto& h : hearts)
     {
         auto* e = xml.createNewChildElement ("Heart");
+        e->setAttribute ("name", h.name);
         e->setAttribute ("genre", h.genre);
         e->setAttribute ("type", h.type);
         juce::StringArray values;
         for (const auto v : h.features)
             values.add (juce::String (v, 3));
         e->setAttribute ("features", values.joinIntoString (","));
-        applyProfile (writer.state, h.profile);
-        if (auto params = writer.state.copyState().createXml())
+        if (auto params = h.state.createXml())
             e->addChildElement (params.release());
     }
     heartsFile().getParentDirectory().createDirectory();
     xml.writeTo (heartsFile());
 }
+
+juce::StringArray ZeroEngineProcessor::getRecentLikes()
+{
+    loadTasteAndHearts();
+    juce::StringArray names;
+    for (auto h = hearts.rbegin(); h != hearts.rend() && names.size() < 10; ++h)
+        names.add (h->name);
+    return names;
+}
+
+bool ZeroEngineProcessor::recallLike (const juce::String& name)
+{
+    loadTasteAndHearts();
+    for (size_t i = 0; i < hearts.size(); ++i)
+        if (hearts[i].name == name && hearts[i].state.isValid())
+        {
+            restoreTree (hearts[i].state);
+            currentHeart = (int) i; // after restoreTree, which clears it
+            return true;
+        }
+    return false;
+}
+
+juce::String ZeroEngineProcessor::randomName() const
+{
+    // Two words, one of each list, at random; a number after if every try is taken.
+    static const juce::StringArray first { "Neon", "Chrome", "Velvet", "Static", "Hollow", "Molten", "Glass", "Solar", "Feral", "Ghost",
+                                           "Iron", "Liquid", "Midnight", "Electric", "Frozen", "Golden", "Acid", "Silent", "Burning", "Cosmic",
+                                           "Rogue", "Crystal", "Shadow", "Toxic", "Hyper", "Lunar", "Savage", "Digital", "Wild", "Phantom" };
+    static const juce::StringArray second { "Viper", "Tide", "Engine", "Bloom", "Pulse", "Signal", "Comet", "Ember", "Circuit", "Storm",
+                                            "Prism", "Echo", "Drift", "Monolith", "Halo", "Serpent", "Vortex", "Orbit", "Lantern", "Rift",
+                                            "Wolf", "Mirage", "Spire", "Nova", "Reactor", "Canyon", "Siren", "Glacier", "Furnace", "Horizon" };
+    auto taken = [this] (const juce::String& name)
+    {
+        if (favouritesFolder.getChildFile (name + ".xml").exists())
+            return true;
+        for (const auto& h : hearts)
+            if (h.name == name)
+                return true;
+        return false;
+    };
+    juce::Random random;
+    juce::String name;
+    for (int attempt = 0; attempt < 50; ++attempt)
+    {
+        name = first[random.nextInt (first.size())] + " " + second[random.nextInt (second.size())];
+        if (attempt == 49)
+            name << " " << juce::String (random.nextInt ({ 2, 1000 }));
+        if (! taken (name))
+            break;
+    }
+    return name;
+}
+
 
 bool ZeroEngineProcessor::stepHistory (int direction)
 {
@@ -877,29 +943,16 @@ void ZeroEngineProcessor::generateArp (int type, juce::Random& random)
                     : type == 3 ? 0.7f + 0.3f * random.nextFloat()           // pads: long
                                 : 0.4f + 0.45f * random.nextFloat();
     set (ParamIDs::arpGate, gate);
-    generatePattern (random, appliedGenre);
+    // The groove's own rate most of the time; the type's pick otherwise.
+    const auto grooveRate = generatePattern (random, appliedGenre);
+    if (random.nextFloat() < 0.7f)
+        set (ParamIDs::arpRate, (float) juce::jlimit (0, (int) arpRateNames.size() - 1, grooveRate));
 }
 
 namespace
 {
-    // Step-pattern templates for Generate's arp roll (x plays, A plays accented,
-    // . rests), and which genres each suits, in genreNames order.
-    struct Groove { const char* steps; std::array<bool, 12> genres; };
-    //                                                            EDM Dub Tech TH  Trap SW  DnB Pop House Trance FB Hard
-    const Groove grooves[] {
-        { "AxxxAxxxAxxxAxxx", /* rolling 16ths */                { 1,  0,  1,   0,  0,   1,  1,  0,  0,    1,     0,  1 } },
-        { "Ax.xx.xx.Ax.x.xx", /* trance gate */                  { 1,  0,  0,   0,  0,   0,  0,  0,  0,    1,     0,  0 } },
-        { "..A...x...A...x.", /* offbeat stabs */                { 0,  0,  1,   1,  0,   0,  0,  1,  1,    0,     0,  1 } },
-        { "A..x..x.A..x..x.", /* tresillo 3-3-2 */               { 1,  1,  0,   1,  0,   0,  1,  1,  1,    0,     1,  0 } },
-        { "Ax.xAx.xAx.xAx.x", /* gallop */                       { 1,  0,  1,   0,  0,   1,  0,  0,  0,    1,     0,  1 } },
-        { "A.......A...x...", /* halftime */                     { 0,  1,  0,   0,  1,   0,  0,  0,  0,    0,     1,  0 } },
-        { "A.x.xxA.x.x.Axxx", /* trap roll */                    { 0,  1,  0,   0,  1,   0,  1,  0,  0,    0,     1,  0 } },
-        { "A..x..A...x..x..", /* syncopated pluck */             { 1,  1,  0,   1,  1,   0,  1,  1,  1,    0,     1,  0 } },
-        { "AxAxAxAxAxAxAxAx", /* octave bounce (pitch below) */  { 1,  0,  0,   0,  0,   1,  0,  1,  0,    1,     1,  0 } },
-    };
-    constexpr int octaveBounce = 8;
-
-    // Note steps per genre: mostly the root, then the intervals the style leans on.
+    // Note steps per genre, for re-rolling a groove's pitch line now and then:
+    // mostly the root, then the intervals the style leans on.
     const std::array<std::vector<int>, 12> genrePitches {{
         { 0, 0, 0, 12, 7, 12, 5 },        // EDM
         { 0, 0, 0, -12, 12, 7, 3 },       // Dubstep
@@ -916,18 +969,20 @@ namespace
     }};
 }
 
-void ZeroEngineProcessor::generatePattern (juce::Random& random, int genre)
+int ZeroEngineProcessor::generatePattern (juce::Random& random, int genre)
 {
-    // A groove that suits the genre (see grooves), with a step or two flipped
-    // so no two are alike; the downbeat always plays. Note steps from the
-    // genre's intervals (the octave bounce alternates root and octave).
+    // A groove that suits the genre (ArpGrooves.h, about a hundred), with a step
+    // or two flipped so no two are alike (the downbeat always plays); its own
+    // pitch line, or one time in four the genre's intervals at random. Returns
+    // the groove's suggested rate.
     genre = juce::jlimit (0, 11, genre);
     std::vector<int> suits;
-    for (int g = 0; g < (int) std::size (grooves); ++g)
-        if (grooves[g].genres[(size_t) genre])
+    for (int g = 0; g < (int) std::size (ArpGrooves::all); ++g)
+        if (ArpGrooves::all[g].genres[(size_t) genre])
             suits.push_back (g);
-    const auto chosen = suits.empty() ? random.nextInt ((int) std::size (grooves)) : suits[(size_t) random.nextInt ((int) suits.size())];
-    juce::String steps (grooves[chosen].steps);
+    const auto& groove = ArpGrooves::all[suits.empty() ? random.nextInt ((int) std::size (ArpGrooves::all))
+                                                       : suits[(size_t) random.nextInt ((int) suits.size())]];
+    juce::String steps (groove.steps);
     for (int flips = random.nextInt (3); --flips >= 0;)
     {
         const auto at = 1 + random.nextInt (Arpeggiator::maxSteps - 1);
@@ -939,15 +994,16 @@ void ZeroEngineProcessor::generatePattern (juce::Random& random, int genre)
         auto* param = state.getParameter (id);
         param->setValueNotifyingHost (param->convertTo0to1 (value));
     };
+    const auto reroll = random.nextFloat() < 0.25f;
     const auto& pitches = genrePitches[(size_t) genre];
     for (int step = 0; step < Arpeggiator::maxSteps; ++step)
     {
         const auto c = steps[step];
         set (SeqIDs::on (step), step == 0 || c != '.' ? 1.0f : 0.0f);
         set (SeqIDs::accent (step), c == 'A' ? 1.0f : 0.0f);
-        const auto pitch = chosen == octaveBounce ? (step % 2 == 0 ? 0 : 12) : pitches[(size_t) random.nextInt ((int) pitches.size())];
-        set (SeqIDs::pitch (step), (float) pitch);
+        set (SeqIDs::pitch (step), (float) (reroll ? pitches[(size_t) random.nextInt ((int) pitches.size())] : groove.pitches[(size_t) step]));
     }
+    return groove.rate;
 }
 
 void ZeroEngineProcessor::setSampleHarmonics (const WavetableBank::Harmonics& harmonics)
@@ -1051,7 +1107,8 @@ void ZeroEngineProcessor::restoreTree (const juce::ValueTree& tree)
     state.replaceState (tree.createCopy());
 
     adoptCurrentGenreAndType(); // the saved values already include any tweaks; keep them
-    showingLatest = currentHearted = false; // history, a favourite, a session: not the last Generate result
+    showingLatest = false;
+    currentHeart = -1; // history, a favourite, a session: not the last Generate result
 }
 
 juce::String ZeroEngineProcessor::saveFavourite()
@@ -1072,25 +1129,9 @@ juce::String ZeroEngineProcessor::saveFavourite()
 
 juce::String ZeroEngineProcessor::quickSave()
 {
-    // Two words, one of each list, at random; with a number after if every
-    // try is taken.
-    static const juce::StringArray first { "Neon", "Chrome", "Velvet", "Static", "Hollow", "Molten", "Glass", "Solar", "Feral", "Ghost",
-                                           "Iron", "Liquid", "Midnight", "Electric", "Frozen", "Golden", "Acid", "Silent", "Burning", "Cosmic",
-                                           "Rogue", "Crystal", "Shadow", "Toxic", "Hyper", "Lunar", "Savage", "Digital", "Wild", "Phantom" };
-    static const juce::StringArray second { "Viper", "Tide", "Engine", "Bloom", "Pulse", "Signal", "Comet", "Ember", "Circuit", "Storm",
-                                            "Prism", "Echo", "Drift", "Monolith", "Halo", "Serpent", "Vortex", "Orbit", "Lantern", "Rift",
-                                            "Wolf", "Mirage", "Spire", "Nova", "Reactor", "Canyon", "Siren", "Glacier", "Furnace", "Horizon" };
+    loadTasteAndHearts(); // so a name never repeats a heart's
     favouritesFolder.createDirectory();
-    juce::Random random;
-    juce::String name;
-    for (int attempt = 0; attempt < 50; ++attempt)
-    {
-        name = first[random.nextInt (first.size())] + " " + second[random.nextInt (second.size())];
-        if (attempt == 49)
-            name << " " << juce::String (random.nextInt ({ 2, 1000 }));
-        if (! favouritesFolder.getChildFile (name + ".xml").exists())
-            break;
-    }
+    const auto name = randomName();
     if (auto xml = state.copyState().createXml())
         if (xml->writeTo (favouritesFolder.getChildFile (name + ".xml")))
         {

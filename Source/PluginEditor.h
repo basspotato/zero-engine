@@ -300,6 +300,8 @@ private:
     void renameCurrentFavourite();
     juce::Component::SafePointer<juce::AlertWindow> renameDialog;
     static constexpr int renameId = 10001, deleteId = 10002; // Favourites menu actions
+    static constexpr int likeIdBase = 20001;                  // the LIKED section's items
+    juce::StringArray recentLikes;                            // as listed in it
 
     // Panel areas, set in resized() and drawn in paint() behind the components.
     juce::Rectangle<int> displaySection, meterSection, generateSection, macroSection;
