@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "MacroMap.h"
 #include "Envelope.h"
+#include "Wavetable.h"
 
 struct ZeroSound : public juce::SynthesiserSound
 {
@@ -20,6 +21,7 @@ public:
     // index seeds the voice's randomness (unison start phases, S&H), so a
     // fresh engine renders identically; phases still vary from note to note.
     ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& macroMap, const std::atomic<float>& hostBpm,
+               const std::atomic<const WavetableBank*>& sampleTable,
                std::atomic<float>& livePosition, int index);
     void reseed() { random.setSeed (seed); } // back to a fresh engine's phases (offline renders)
 
@@ -118,6 +120,7 @@ private:
     const MacroMap& macroMap;
     const std::atomic<float>& hostBpm; // set by the processor each block
     std::atomic<float>& livePosition;  // written for the display
+    const std::atomic<const WavetableBank*>& sampleTable; // this instance's Sample bank (null: the shared saw)
 
     void updateEnvelopes();
     float nextLfo (float increment);

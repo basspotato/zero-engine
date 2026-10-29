@@ -18,8 +18,9 @@ namespace
 }
 
 ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map, const std::atomic<float>& bpm,
+                      const std::atomic<const WavetableBank*>& sample,
                       std::atomic<float>& position, int index)
-    : macroMap (map), hostBpm (bpm), livePosition (position), seed (0x5eed + index), random (seed)
+    : macroMap (map), hostBpm (bpm), livePosition (position), sampleTable (sample), seed (0x5eed + index), random (seed)
 {
     auto get = [&] (const char* id) { return state.getRawParameterValue (id); };
 
@@ -230,6 +231,9 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto mipLevel = WavetableBank::levelFor (maxFreq, sampleRate);
     const auto table = juce::jlimit (0, WavetableBank::numBanks - 1, (int) p.waveTable->load());
     const auto tableB = juce::jlimit (0, WavetableBank::numBanks - 1, (int) p.waveTableB->load());
+    const auto* sample = sampleTable.load (std::memory_order_acquire);
+    const auto& bankA = table == WavetableBank::sampleBank && sample != nullptr ? *sample : bank;
+    const auto& bankB = tableB == WavetableBank::sampleBank && sample != nullptr ? *sample : bank;
     const auto tableMix = juce::jlimit (0.0f, 1.0f, p.tableMix->load() + macroMap.offset (MacroTarget::tableMix));
     const auto blendTables = tableMix > 1.0e-3f && tableB != table;
 
@@ -261,9 +265,9 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         float l = 0.0f, r = 0.0f;
         for (int v = 0; v < voices; ++v)
         {
-            auto s = bank.lookup (table, mipLevel, pos, phases[v]);
+            auto s = bankA.lookup (table, mipLevel, pos, phases[v]);
             if (blendTables)
-                s += tableMix * (bank.lookup (tableB, mipLevel, pos, phases[v]) - s);
+                s += tableMix * (bankB.lookup (tableB, mipLevel, pos, phases[v]) - s);
             l += s * gainL[v];
             r += s * gainR[v];
 

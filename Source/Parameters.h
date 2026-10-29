@@ -104,7 +104,8 @@ inline constexpr double arpRateBeats[]       { 1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 
 inline constexpr float lfoSyncBeats[]       { 0.0f, 4.0f, 2.0f, 1.0f, 2.0f / 3.0f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f }; // one LFO cycle, in beats
 // Append only: saved sessions store the index.
 inline const juce::StringArray waveTableNames  { "Basic", "Growl", "Digital", "Organ", "FM", "Wavefold",
-                                                 "PWM", "Neuro", "Bell", "Choir", "Harsh", "Analog", "Jupiter" };
+                                                 "PWM", "Neuro", "Bell", "Choir", "Harsh", "Analog", "Jupiter",
+                                                 "Sample" }; // Sample: cut from a sound by Reference Match (a saw until then)
 inline const juce::StringArray filterModeNames { "Low 12", "Low 24", "Band", "High" };
 inline const juce::StringArray delayTimeNames  { "1/16", "1/8", "1/8 Dotted", "1/4", "1/4 Dotted", "1/2" };
 inline constexpr float delayTimeBeats[]        { 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };

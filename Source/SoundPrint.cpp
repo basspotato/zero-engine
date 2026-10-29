@@ -342,7 +342,7 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     const auto overall = *std::max_element (energy.begin(), energy.end());
     if (overall <= 1.0e-12)
         return print; // silent: nothing to measure
-    const auto onset = (int) (std::find_if (energy.begin(), energy.end(), [&] (double e) { return e > overall * 1.0e-3; }) - energy.begin());
+    auto onset = (int) (std::find_if (energy.begin(), energy.end(), [&] (double e) { return e > overall * 1.0e-3; }) - energy.begin());
     // A loop or phrase is split into notes (references only; an engine render
     // is always taken whole). A note starts where the spectrum gains energy all
     // of a sudden (positive spectral flux, a peak well over its neighbourhood,
@@ -445,34 +445,69 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
                         best = juce::jmax (best, arrived[(size_t) b]);
                 return best;
             };
-            double bestScore = 0.0, bestHz = 0.0;
-            for (double hz = 50.0; hz <= 1000.0; hz *= std::exp2 (1.0 / 48.0))
+            auto strongest = [&] (double& bestHz)
             {
-                double score = 0.0, weight = 1.0;
-                for (int h = 1; h <= 8 && h * hz < 0.45 * sampleRate; ++h, weight *= 0.8)
-                    score += weight * energyNear (h * hz);
-                if (score > bestScore)
+                double bestScore = 0.0;
+                for (double hz = 50.0; hz <= 1000.0; hz *= std::exp2 (1.0 / 48.0))
                 {
-                    bestScore = score;
-                    bestHz = hz;
+                    double score = 0.0, weight = 1.0;
+                    for (int h = 1; h <= 8 && h * hz < 0.45 * sampleRate; ++h, weight *= 0.8)
+                        score += weight * energyNear (h * hz);
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestHz = hz;
+                    }
                 }
+                return bestScore;
+            };
+            double bestHz = 0.0;
+            const auto bestScore = strongest (bestHz);
+
+            // A chord: take the found note's harmonics out and look again; a
+            // pitch that still carries half as much is another note of it.
+            std::vector<float> also;
+            auto removeHarmonics = [&] (double hz)
+            {
+                for (int h = 1; h <= 16 && h * hz < 0.45 * sampleRate; ++h)
+                    for (int b = (int) std::round (h * hz / binHz) - 2; b <= (int) std::round (h * hz / binHz) + 2; ++b)
+                        if (b > 0 && b < (int) arrived.size())
+                            arrived[(size_t) b] = 0.0f;
+            };
+            removeHarmonics (bestHz);
+            for (int tries = 0; tries < 6 && also.size() < 3 && bestScore > 0.0; ++tries)
+            {
+                double hz = 0.0;
+                if (strongest (hz) < 0.5 * bestScore)
+                    break;
+                removeHarmonics (hz);
+                // Under 1.5 semitones from a found note: its detuned unison, not a note.
+                auto apart = std::abs (12.0 * std::log2 (hz / bestHz)) >= 1.5;
+                for (const auto other : also)
+                    apart = apart && std::abs (12.0 * std::log2 (hz / other)) >= 1.5;
+                if (apart)
+                    also.push_back ((float) hz);
             }
 
             std::vector<float> readings;
             for (int b = beginBlock + 2; b <= beginBlock + juce::jmax (3, (int) (0.6 * (endBlock - beginBlock))) && b < endBlock; b += 2)
                 if (const auto p = pitchAt (b); p > 0.0f && std::abs (12.0 * std::log2 (p / bestHz)) < 1.0)
                     readings.push_back (p);
-            if (readings.empty())
-                return (float) bestHz;
-            std::nth_element (readings.begin(), readings.begin() + (long) readings.size() / 2, readings.end());
-            return readings[readings.size() / 2];
+            auto pitch = (float) bestHz;
+            if (! readings.empty())
+            {
+                std::nth_element (readings.begin(), readings.begin() + (long) readings.size() / 2, readings.end());
+                pitch = readings[readings.size() / 2];
+            }
+            return std::make_pair (pitch, also);
         };
 
         std::vector<std::vector<float>> shapes; // per note, for telling echoes from notes
         for (size_t i = 0; i < starts.size() && i < 24; ++i)
         {
             const auto begin = starts[i], end = i + 1 < starts.size() ? starts[i + 1] : limit;
-            print.notes.push_back ({ 0.01f * (float) (begin - onset), 0.01f * (float) (end - begin), newNotePitch (begin, end) });
+            const auto [pitch, also] = newNotePitch (begin, end);
+            print.notes.push_back ({ 0.01f * (float) (begin - onset), 0.01f * (float) (end - begin), pitch, also });
             auto shape = spectrumAt (begin * block + block); // the note just after it starts, up to 5 kHz, unit length
             shape.resize ((size_t) (5000.0 / (sampleRate / pitchSize)));
             const auto norm = std::sqrt (std::inner_product (shape.begin(), shape.end(), shape.begin(), 0.0));
@@ -535,17 +570,31 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
             else
                 ++i;
         }
+        // A loop that opens quietly (the last bar's tail wrapped round, a
+        // pickup) starts at its first real note: over 9 dB under the loudest note
+        // is not one, and candidates can't play it quietly enough.
+        while (print.notes.size() > 1 && loudestIn (print.notes.front()) < loudestNote / 8.0)
+        {
+            const auto skip = print.notes[1].start;
+            print.notes.erase (print.notes.begin());
+            shapes.erase (shapes.begin());
+            for (auto& n : print.notes)
+                n.start -= skip;
+            onset += juce::roundToInt (skip * 100.0f);
+        }
         starts.clear();
         for (const auto& n : print.notes)
             starts.push_back (onset + juce::roundToInt (n.start * 100.0f));
 
         notePitch = print.notes.front().pitchHz;
+        last = juce::jmin ((int) energy.size(), onset + (int) (span * 100.0)); // the onset may have moved
         if (starts.size() > 1)
         {
             last = starts[1];
             cut = true;
         }
     }
+    last = juce::jmax (last, juce::jmin ((int) energy.size(), onset + 1));
     const auto peakBlock = (int) (std::max_element (energy.begin() + onset, energy.begin() + last) - energy.begin());
     const auto peakEnergy = juce::jmax (1.0e-12, energy[(size_t) peakBlock]);
 
@@ -662,6 +711,52 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
                 break;
             }
         }
+    }
+
+    // The first note's harmonics, at the pitch it is played back at, 30 ms to
+    // 500 ms in (within the note): each harmonic's peak within 3 % of where it
+    // should be, 4096-point frames, scaled to the frame's loudest.
+    if (findPitch && ! print.notes.empty() && print.notes.front().pitchHz > 0.0f)
+    {
+        const auto f0 = (double) print.notes.front().pitchHz;
+        constexpr int order = 12, size = 1 << order;
+        juce::dsp::FFT harmonicFft (order);
+        std::vector<float> cycle ((size_t) size * 2);
+        const auto noteFrom = onset * block, noteTo = juce::jmin (total, last * block);
+        constexpr double moments[WavetableBank::numFrames] { 0.03, 0.1, 0.2, 0.35, 0.5 };
+        WavetableBank::Harmonics h {};
+        auto found = false;
+        for (int m = 0; m < WavetableBank::numFrames; ++m)
+        {
+            const auto at = juce::jmax (0, juce::jmin (noteFrom + (int) (moments[m] * sampleRate), noteTo - size));
+            std::fill (cycle.begin(), cycle.end(), 0.0f);
+            for (int i = 0; i < size && at + i < total; ++i)
+                cycle[(size_t) i] = 0.5f * (sample (0, at + i) + sample (1, at + i))
+                                  * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size));
+            harmonicFft.performFrequencyOnlyForwardTransform (cycle.data());
+            const auto binHz = sampleRate / size;
+            float strongest = 0.0f;
+            for (int n = 1; n <= WavetableBank::numSampleHarmonics && n * f0 < 0.45 * sampleRate && n * f0 < print.maxHz; ++n)
+            {
+                const auto centre = n * f0 / binHz, reach = juce::jmax (1.0, 0.03 * centre);
+                float peak = 0.0f;
+                for (auto b = (int) std::floor (centre - reach); b <= (int) std::ceil (centre + reach); ++b)
+                    if (b > 0 && b < size / 2)
+                        peak = juce::jmax (peak, cycle[(size_t) b]);
+                h[(size_t) m][(size_t) n - 1] = peak;
+                strongest = juce::jmax (strongest, peak);
+            }
+            if (strongest > 0.0f)
+            {
+                found = true;
+                for (auto& a : h[(size_t) m])
+                    a = a / strongest > 1.0e-3f ? a / strongest : 0.0f; // under -60 dB: nothing
+            }
+            else if (m > 0)
+                h[(size_t) m] = h[(size_t) m - 1]; // the note has gone quiet: hold the last shape
+        }
+        if (found)
+            print.harmonics = h;
     }
     return print;
 }

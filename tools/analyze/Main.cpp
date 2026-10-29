@@ -413,7 +413,12 @@ int main (int argc, char* argv[])
         const auto print = SoundPrint::of (audio, reader->sampleRate, true);
         std::printf ("%d notes, %.2f s measured%s\n", (int) print.notes.size(), print.noteSeconds, print.cut ? " (goes on past it)" : "");
         for (const auto& n : print.notes)
-            std::printf ("  at %.2f s for %.2f s  %6.1f Hz\n", n.start, n.length, n.pitchHz);
+        {
+            std::printf ("  at %.2f s for %.2f s  %6.1f Hz", n.start, n.length, n.pitchHz);
+            for (const auto hz : n.also)
+                std::printf (" + %.1f", hz);
+            std::printf ("\n");
+        }
         return 0;
     }
 

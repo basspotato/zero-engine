@@ -107,6 +107,17 @@ public:
     bool isMatching() const noexcept { return matcher != nullptr && matcher->getState() == ReferenceMatch::State::running; }
     juce::String getMatchStatus() const; // for the display; empty when there is nothing to say
 
+    // The Sample wavetable bank (message or worker thread, never the audio
+    // thread): built from measured harmonics, picked up by the voices on their
+    // next block, saved with the project. Reference Match sets it.
+    void setSampleHarmonics (const WavetableBank::Harmonics&);
+    const std::optional<WavetableBank::Harmonics>& getSampleHarmonics() const noexcept { return sampleHarmonics; }
+    const WavetableBank& bankFor (int table) const noexcept // the bank a table index plays from (for the display)
+    {
+        const auto* sample = sampleTable.load (std::memory_order_acquire);
+        return table == WavetableBank::sampleBank && sample != nullptr ? *sample : WavetableBank::get();
+    }
+
     // For engines used offline (Reference Match renders): no timer reloading profiles.
     void stopProfileSync() { stopTimer(); }
 
@@ -145,6 +156,9 @@ private:
     MacroMap macroMap;
     std::atomic<float> hostBpm { 120.0f }; // for tempo-synced LFOs; 120 when the host gives none
     std::atomic<float> livePosition { -1.0f }; // a playing voice's wavetable position, -1 when silent (display only)
+    std::atomic<const WavetableBank*> sampleTable { nullptr }; // the voices' Sample bank, null until set
+    std::vector<std::unique_ptr<WavetableBank>> sampleTables;   // the current one last; a few before it kept, as a voice may still read one
+    std::optional<WavetableBank::Harmonics> sampleHarmonics;
     std::array<float, scopeSize> scope {};
     std::atomic<int> scopeWrite { 0 };
     ZeroSynth synth;

@@ -813,13 +813,14 @@ void ScopeView::drawWavetable (juce::Graphics& g, juce::Rectangle<float> area)
     const auto bankB = juce::jlimit (0, WavetableBank::numBanks - 1, (int) param (ParamIDs::waveTableB));
     const auto mix = bankB != bankA ? juce::jlimit (0.0f, 1.0f, param (ParamIDs::tableMix)) : 0.0f;
     const auto position = juce::jlimit (0.0f, 1.0f, shownPosition);
-    const auto& tables = WavetableBank::get();
+    const auto& tablesA = processor.bankFor (bankA);
+    const auto& tablesB = processor.bankFor (bankB);
 
     // The voice's own blend of table A and B, so the picture is what plays.
     auto sample = [&] (float pos, double phase)
     {
-        const auto a = tables.lookup (bankA, 0, pos, phase);
-        return mix > 0.0f ? a + mix * (tables.lookup (bankB, 0, pos, phase) - a) : a;
+        const auto a = tablesA.lookup (bankA, 0, pos, phase);
+        return mix > 0.0f ? a + mix * (tablesB.lookup (bankB, 0, pos, phase) - a) : a;
     };
 
     auto title = area.removeFromTop (16.0f);

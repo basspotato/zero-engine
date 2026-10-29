@@ -162,12 +162,23 @@ namespace
 }
 
 WavetableBank::WavetableBank()
-    : data ((size_t) (numBanks * numFrames * numLevels * (tableSize + 1)))
+    : banksHeld (numBanks), data ((size_t) (numBanks * numFrames * numLevels * (tableSize + 1)))
+{
+    for (int bank = 0; bank < numBanks; ++bank)
+        build (bank, nullptr);
+}
+
+WavetableBank::WavetableBank (const Harmonics& harmonics)
+    : banksHeld (1), data ((size_t) (numFrames * numLevels * (tableSize + 1)))
+{
+    build (sampleBank, &harmonics);
+}
+
+void WavetableBank::build (int bank, const Harmonics* measured)
 {
     juce::dsp::FFT fft (fftOrder);
     std::vector<float> spectrum ((size_t) tableSize * 2), work ((size_t) tableSize * 2);
 
-    for (int bank = 0; bank < numBanks; ++bank)
     {
         for (int frame = 0; frame < numFrames; ++frame)
         {
@@ -179,6 +190,14 @@ WavetableBank::WavetableBank()
                     spectrum[(size_t) i] = timeDomainSample (bank, frame, (float) i / (float) tableSize);
                 fft.performRealOnlyForwardTransform (spectrum.data());
                 spectrum[0] = spectrum[1] = 0.0f; // no DC
+            }
+            else if (bank == sampleBank) // measured harmonics, saw-phased; a plain saw when none
+            {
+                for (int n = 1; n <= numSampleHarmonics; ++n)
+                    spectrum[(size_t) (2 * n + 1)] = -(measured != nullptr ? (*measured)[(size_t) frame][(size_t) n - 1] : 1.0f / (float) n) * sawSign (n);
+                if (measured == nullptr)
+                    for (int n = numSampleHarmonics + 1; n < tableSize / 2; ++n)
+                        spectrum[(size_t) (2 * n + 1)] = -sawSign (n) / (float) n;
             }
             else
             {
@@ -207,7 +226,7 @@ WavetableBank::WavetableBank()
                         peak = juce::jmax (peak, std::abs (t[i]));
 
                 for (int i = 0; i <= tableSize; ++i)
-                    t[i] /= peak;
+                    t[i] /= juce::jmax (1.0e-9f, peak);
             }
         }
     }

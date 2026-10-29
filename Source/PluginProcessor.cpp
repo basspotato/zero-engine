@@ -37,7 +37,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
     WavetableBank::get(); // build tables here, never on the audio thread
 
     for (int i = 0; i < numVoices; ++i)
-        synth.addVoice (new ZeroVoice (state, macroMap, hostBpm, livePosition, i));
+        synth.addVoice (new ZeroVoice (state, macroMap, hostBpm, sampleTable, livePosition, i));
 
     synth.addSound (new ZeroSound());
 
@@ -67,7 +67,11 @@ void ZeroEngineProcessor::timerCallback()
     {
         const auto result = matcher->take();
         if (result.ok)
+        {
+            if (result.target.harmonics.has_value()) // the matched sound may use the reference's own wavetable
+                setSampleHarmonics (*result.target.harmonics);
             loadProfile (result.genre, result.type, result.profile);
+        }
         matchSummary = result.summary;
         matchSummaryUntil = juce::Time::getMillisecondCounterHiRes() + 6000.0;
     }
@@ -442,6 +446,14 @@ void ZeroEngineProcessor::getStateInformation (juce::MemoryBlock& destData)
         for (const auto& cc : macroCC)
             ccs.add (juce::String (cc.load()));
         xml->setAttribute ("macroCCs", ccs.joinIntoString (","));
+        if (sampleHarmonics.has_value()) // the Sample wavetable: frame by frame, harmonic by harmonic
+        {
+            juce::StringArray values;
+            for (const auto& frame : *sampleHarmonics)
+                for (const auto a : frame)
+                    values.add (juce::String (a, 5));
+            xml->setAttribute ("sampleTable", values.joinIntoString (","));
+        }
         copyXmlToBinary (*xml, destData);
     }
 }
@@ -454,6 +466,14 @@ void ZeroEngineProcessor::setStateInformation (const void* data, int sizeInBytes
         const auto ccs = juce::StringArray::fromTokens (xml->getStringAttribute ("macroCCs"), ",", {});
         for (size_t m = 0; m < macroCC.size(); ++m)
             macroCC[m] = m < (size_t) ccs.size() ? ccs[(int) m].getIntValue() : -1;
+        const auto values = juce::StringArray::fromTokens (xml->getStringAttribute ("sampleTable"), ",", {});
+        if (values.size() == WavetableBank::numFrames * WavetableBank::numSampleHarmonics)
+        {
+            WavetableBank::Harmonics harmonics {};
+            for (int i = 0; i < values.size(); ++i)
+                harmonics[(size_t) (i / WavetableBank::numSampleHarmonics)][(size_t) (i % WavetableBank::numSampleHarmonics)] = values[i].getFloatValue();
+            setSampleHarmonics (harmonics);
+        }
     }
 }
 
@@ -476,6 +496,17 @@ void ZeroEngineProcessor::generatePattern (juce::Random& random)
         set (SeqIDs::pitch (step), (float) pitches[random.nextInt ((int) std::size (pitches))]);
         set (SeqIDs::accent (step), random.nextFloat() < (onBeat ? 0.6f : 0.15f) ? 1.0f : 0.0f);
     }
+}
+
+void ZeroEngineProcessor::setSampleHarmonics (const WavetableBank::Harmonics& harmonics)
+{
+    sampleTables.push_back (std::make_unique<WavetableBank> (harmonics)); // built here, off the audio thread
+    sampleTable.store (sampleTables.back().get(), std::memory_order_release);
+    sampleHarmonics = harmonics;
+    // A voice reads the bank for one block at most; one replaced three
+    // matches ago (each takes seconds) is long free.
+    if (sampleTables.size() > 4)
+        sampleTables.erase (sampleTables.begin());
 }
 
 void ZeroEngineProcessor::startMatch (const juce::File& reference)

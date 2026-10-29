@@ -22,6 +22,7 @@ namespace
         std::vector<Event> events;
         int lengthSamples = 0, shift = 0;
         float gate = 0.75f;
+        bool chord = false; // some notes come several at once: played poly, whatever the preset says
         int firstNote() const { return (events.empty() ? 60 : events.front().note) + shift; }
         int hold (const Event& e) const { return juce::jmax (block, (int) (gate * (float) e.span)); }
     };
@@ -29,7 +30,10 @@ namespace
     SoundPrint render (ZeroEngineProcessor& engine, int genre, int type, const Profile& profile, const Playing& playing)
     {
         engine.resetForRender(); // nothing of the last candidate may ring into this one
-        engine.loadProfile (genre, type, profile);
+        auto played = profile;
+        if (playing.chord)
+            played.playMode = 0.0f;
+        engine.loadProfile (genre, type, played);
 
         // A tenth of a second of silence first, so knob smoothing settles.
         juce::AudioBuffer<float> out (2, playing.lengthSamples), chunk (2, block);
@@ -91,6 +95,9 @@ namespace
                             : target.notes.size() > 1 ? seconds (spacing) // a phrase's last note: held like the others
                                                                     : lastSpan (n.start);
             playing.events.push_back ({ seconds (n.start), span, previous });
+            playing.chord = playing.chord || ! n.also.empty();
+            for (const auto hz : n.also) // the rest of a chord
+                playing.events.push_back ({ seconds (n.start), span, toNote (hz, previous) });
         }
         playing.lengthSamples = juce::jmax (4 * block, seconds (target.cut ? target.noteSeconds : target.noteSeconds + 0.3));
         return playing;
@@ -192,6 +199,8 @@ void ReferenceMatch::run()
         engine->setPlayConfigDetails (0, 2, rate, block);
         engine->prepareToPlay (rate, block);
         engine->setLightRender (lightSearch);
+        if (target.harmonics.has_value()) // the Sample wavetable is the reference's own
+            engine->setSampleHarmonics (*target.harmonics);
     }
     const auto searchRenders = searchBudget; // per worker
     const auto numPresets = genreNames.size() * typeNames.size();
@@ -534,6 +543,8 @@ void ReferenceMatch::run()
     const auto& winner = *std::min_element (all.begin(), all.end(), [] (const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
     result.ok = true;
     result.profile = winner.profile;
+    if (playing.chord)
+        result.profile.playMode = 0.0f;
     result.genre = winner.genre;
     result.type = winner.type;
     result.matched = winner.print;
@@ -573,6 +584,8 @@ float ReferenceMatch::score (ZeroEngineProcessor& engine, const SoundPrint& targ
     engine.setPlayConfigDetails (0, 2, rate, block);
     engine.prepareToPlay (rate, block);
     engine.setLightRender (light);
+    if (target.harmonics.has_value())
+        engine.setSampleHarmonics (*target.harmonics);
     // The hold isn't known from the audio, so the best of a few gates.
     auto d = 1.0e9f;
     for (const auto gate : { 0.3f, 0.5f, 0.75f, 0.9f, 1.0f })

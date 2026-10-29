@@ -2,6 +2,8 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
+#include <optional>
+#include "Wavetable.h"
 
 // The fingerprint Reference Match compares: how a sound evolves over its whole
 // phrase (log-mel spectrograms from the onset to where it dies away, up to 2 s),
@@ -28,9 +30,15 @@ struct SoundPrint
 
     // A reference's notes in its first 2 s (seconds from its onset, pitch 0 when
     // unclear): candidates play the same pattern and are compared over all of it.
-    struct Note { float start = 0.0f, length = 0.0f, pitchHz = 0.0f; };
+    // also: the other pitches it brings with it (a chord), loudest first.
+    struct Note { float start = 0.0f, length = 0.0f, pitchHz = 0.0f; std::vector<float> also; };
     std::vector<Note> notes;
     bool cut = false; // still sounding where measuring stopped: compared only that far
+
+    // A pitched reference's first note as harmonics (up to 64) at five moments
+    // over its first half second, each scaled to its loudest: the Sample
+    // wavetable Reference Match can give a candidate.
+    std::optional<WavetableBank::Harmonics> harmonics;
 
     // findPitch: a reference (pitch and notes found); false for engine renders,
     // which are taken whole.
