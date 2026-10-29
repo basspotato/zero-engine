@@ -1257,7 +1257,7 @@ void AdvancedPanel::paint (juce::Graphics& g)
     g.fillRect (strip.withTrimmedTop (8.0f));
     g.setColour (Palette::accent);
     g.setFont (Fonts::ui (11.0f, true));
-    g.drawText ("ADVANCED", strip.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
+    g.drawText ("THE WEEDS", strip.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
 
     for (auto& row : pages[current].rows)
         for (auto& section : row)
@@ -1500,7 +1500,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     refreshFavourites();
     addAndMakeVisible (keyboard);
 
-    // MAIN and ADVANCED switch views; ADVANCED clicked again also goes back to MAIN.
+    // MAIN and THE WEEDS switch views; THE WEEDS clicked again also goes back to MAIN.
     advancedButton.onClick = [this] { showAdvanced (! advancedPanel.isVisible()); };
     mainButton.onClick = [this] { showAdvanced (false); };
     addAndMakeVisible (mainButton);

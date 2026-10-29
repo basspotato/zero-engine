@@ -28,7 +28,7 @@ JUCE 8 is fetched by CMake. Outputs land in `build/ZeroEngine_artefacts/Release/
 - `ZeroAnalyze matchbench [refFolder] [budget=N] [cmaes=1] [light=0] [w=mel,mfcc,centroid,loudness]`: scores Reference Match on 12 engine-made targets (notes and arp loops): the match replays the target's notes and is judged by log-mel dB difference and MFCC timbre. Writes targets and matches to `%TEMP%/zero_matchbench`; with refFolder, matches the owner's references there and writes what it found to `analysis/match_v2`. Use it to judge any change to SoundPrint or ReferenceMatch.
 - `ZeroAnalyze noise <Genre> <Type>|all [id=value...]`: noise between the harmonics of a held C4 (dB under them), to find stages that add hiss.
 - `ZeroAnalyze harmonics <out.h> <5 wavs>`: harmonic spectra of recorded notes as a wavetable bank (made `Source/JupiterHarmonics.h`).
-- `ZeroAnalyze snapshot <png> [size=WxH] [button...] [dialog]`: the editor as an image, after playing a chord; clicks buttons by label (e.g. `ADVANCED MOTION`). Send the owner a preview after GUI changes. `foldstrip <png>`: the tesseract's fold, frame by frame.
+- `ZeroAnalyze snapshot <png> [size=WxH] [button...] [dialog]`: the editor as an image, after playing a chord; clicks buttons by label (e.g. `THE WEEDS` then a tab name). Send the owner a preview after GUI changes. `foldstrip <png>`: the tesseract's fold, frame by frame.
 - `ZeroAnalyze screen` / `fetch`: Freesound CC0 search and download (needs the owner's `FREESOUND_CLIENT_SECRET` / `FREESOUND_CLIENT_ID`).
 
 Output goes to `analysis/` by default (git-ignored).
