@@ -294,6 +294,10 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "screen-match")
+        return screenFreesoundForMatch (argFile (args, 1, "analysis/library/freesound_shortlist.csv"),
+                                        args.size() > 2 ? args[2].getIntValue() : 25);
+
     if (command == "screen")
         return screenFreesound (argFile (args, 1, "analysis/freesound/shortlist.csv"),
                                 args.size() > 2 ? args[2].getIntValue() : 20);

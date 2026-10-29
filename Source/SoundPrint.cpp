@@ -300,6 +300,8 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
         return print;
 
     const auto overall = *std::max_element (energy.begin(), energy.end());
+    if (overall <= 1.0e-12)
+        return print; // silent: nothing to measure
     const auto onset = (int) (std::find_if (energy.begin(), energy.end(), [&] (double e) { return e > overall * 1.0e-3; }) - energy.begin());
     // A loop or phrase is split into notes (references only; an engine render
     // is always taken whole). A note starts where the spectrum gains energy all
@@ -312,7 +314,7 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     {
         std::vector<float> slice ((size_t) pitchFrame);
         for (int i = 0; i < pitchFrame; ++i)
-            slice[(size_t) i] = b * block + i < total ? 0.5f * (sample (0, b * block + i) + sample (1, b * block + i)) : 0.0f;
+            slice[(size_t) i] = b * block + i >= 0 && b * block + i < total ? 0.5f * (sample (0, b * block + i) + sample (1, b * block + i)) : 0.0f;
         return pitchOf (slice, sampleRate);
     };
 

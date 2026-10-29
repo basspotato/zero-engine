@@ -10,6 +10,10 @@
 // Needs only the client secret (API key). Edit the CSV to drop sounds before fetching.
 int screenFreesound (const juce::File& shortlist, int perPair);
 
+// Synth sounds by type (not genre) for testing Reference Match, CC0, no drums or
+// voices; filed by fetch under Match/<Type>.
+int screenFreesoundForMatch (const juce::File& shortlist, int perQuery);
+
 // Downloads every sound in the shortlist at full quality into
 // <outDir>/<Genre>/<Type>/ and writes <outDir>/credits.csv. Opens the browser
 // once so the owner can approve access (OAuth2).

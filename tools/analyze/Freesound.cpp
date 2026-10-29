@@ -201,6 +201,86 @@ int screenFreesound (const juce::File& shortlist, int perPair)
     return 0;
 }
 
+int screenFreesoundForMatch (const juce::File& shortlist, int perQuery)
+{
+    // Synth sounds of every kind for testing Reference Match: by type, not
+    // genre, CC0 only, no drums, percussion or voices. Genre is "Match" so
+    // fetch files them under Match/<Type>.
+    const auto secret = env ("FREESOUND_CLIENT_SECRET");
+    if (secret.isEmpty())
+    {
+        std::printf ("Set FREESOUND_CLIENT_SECRET first (your Freesound API key).\n");
+        return 1;
+    }
+
+    const std::pair<const char*, const char*> queries[] {
+        { "Bass", "synth bass" },       { "Bass", "reese bass" },       { "Bass", "808 bass" },        { "Bass", "sub bass synth" },
+        { "Bass", "wobble bass" },      { "Bass", "acid bass 303" },    { "Bass", "bass one shot" },
+        { "Lead", "synth lead" },       { "Lead", "supersaw" },         { "Lead", "saw lead" },        { "Lead", "square lead synth" },
+        { "Lead", "analog synth lead" },
+        { "Chord", "synth chord" },     { "Chord", "stab chord" },      { "Chord", "chord stab synth" },
+        { "Pad", "synth pad" },         { "Pad", "analog pad" },        { "Pad", "warm pad" },         { "Pad", "string synth" },
+        { "Pluck", "synth pluck" },     { "Pluck", "pluck one shot" },  { "Pluck", "bell synth" },     { "Pluck", "arp loop synth" },
+        { "Pluck", "arpeggio synth" },  { "Pluck", "synth sequence loop" },
+        { "FX", "riser synth" },        { "FX", "synth sweep" },        { "FX", "downlifter" },        { "FX", "laser synth" },
+    };
+
+    juce::String csv ("genre,type,id,name,username,license,duration,downloads,rating,format,url\n");
+    std::set<int> seen;
+    int total = 0;
+    for (const auto& [type, query] : queries)
+    {
+        const auto url = juce::URL (apiRoot + "search/text/")
+                             .withParameter ("query", query)
+                             .withParameter ("filter", "license:\"Creative Commons 0\" duration:[0.2 TO 10] "
+                                                       "-tag:drum -tag:drums -tag:percussion -tag:kick -tag:snare -tag:hihat "
+                                                       "-tag:vocal -tag:voice -tag:speech -tag:field-recording")
+                             .withParameter ("fields", "id,name,username,license,duration,num_downloads,avg_rating,type,url")
+                             .withParameter ("sort", "downloads_desc")
+                             .withParameter ("page_size", juce::String (juce::jlimit (1, 150, perQuery * 2)))
+                             .withParameter ("token", secret);
+
+        int status = 0;
+        const auto json = juce::JSON::parse (get (url, {}, status));
+        if (status != 200)
+        {
+            std::printf ("Search failed (HTTP %d) for \"%s\"; check the API key.\n", status, query);
+            return 1;
+        }
+
+        int kept = 0;
+        if (auto* results = json.getProperty ("results", {}).getArray())
+            for (const auto& r : *results)
+            {
+                if (kept >= perQuery)
+                    break;
+                const auto id = (int) r.getProperty ("id", 0);
+                if (! seen.insert (id).second)
+                    continue;
+                csv << csvField ("Match") << "," << csvField (type) << "," << id << ","
+                    << csvField (r.getProperty ("name", {}).toString()) << ","
+                    << csvField (r.getProperty ("username", {}).toString()) << ","
+                    << csvField (r.getProperty ("license", {}).toString()) << ","
+                    << juce::String ((double) r.getProperty ("duration", 0.0), 2) << ","
+                    << (int) r.getProperty ("num_downloads", 0) << ","
+                    << juce::String ((double) r.getProperty ("avg_rating", 0.0), 1) << ","
+                    << r.getProperty ("type", {}).toString() << ","
+                    << csvField (r.getProperty ("url", {}).toString()) << "\n";
+                ++kept;
+            }
+
+        std::printf ("  %-6s %-22s %3d  (%d CC0 matches)\n", type, query, kept, (int) json.getProperty ("count", 0));
+        total += kept;
+        juce::Thread::sleep (1100); // stay under ~60 requests a minute
+    }
+
+    shortlist.getParentDirectory().createDirectory();
+    shortlist.replaceWithText (csv);
+    std::printf ("Shortlisted %d sounds: %s\nThen: ZeroAnalyze fetch %s analysis/library/freesound\n", total,
+                 shortlist.getFullPathName().toRawUTF8(), shortlist.getFullPathName().toRawUTF8());
+    return 0;
+}
+
 int fetchFreesound (const juce::File& shortlist, const juce::File& outDir, int maxDownloads)
 {
     const auto clientId = env ("FREESOUND_CLIENT_ID");

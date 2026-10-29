@@ -6,6 +6,8 @@
 // (analysis/library/library.csv: file, source, licence, type, use).
 //
 //   ZeroAnalyze library build          index the sources below into the manifest
+//   ZeroAnalyze library scan <folder>  pick the pitched synth notes and loops out of
+//                                      a mixed folder, read in place (test-only)
 //   ZeroAnalyze library engine <n>     render n engine sounds (Generate variations,
 //                                      notes and arp loops) into analysis/library/engine,
 //                                      with the seed that remakes their settings

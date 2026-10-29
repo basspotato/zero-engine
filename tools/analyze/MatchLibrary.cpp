@@ -6,6 +6,7 @@
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/Parameters.h"
 #include "../../Source/ReferenceMatch.h"
+#include "../../Source/SoundPrint.h"
 
 namespace
 {
@@ -95,10 +96,12 @@ namespace
     {
         std::vector<Entry> entries;
 
-        // Freesound: <Genre>/<Type>/*.wav, the licence from credits.csv.
-        const auto freesound = juce::File::getCurrentWorkingDirectory().getChildFile ("analysis/freesound/refs");
-        std::map<juce::String, juce::String> licences;
+        // Freesound: <Genre>/<Type>/*.wav, the licence from credits.csv: the first
+        // fetch (analysis/freesound/refs) and the Match fetch (analysis/library/freesound).
+        for (const auto& freesound : { juce::File::getCurrentWorkingDirectory().getChildFile ("analysis/freesound/refs"),
+                                        libraryFolder().getChildFile ("freesound") })
         {
+            std::map<juce::String, juce::String> licences;
             juce::StringArray lines;
             freesound.getChildFile ("credits.csv").readLines (lines);
             for (int i = 1; i < lines.size(); ++i)
@@ -107,12 +110,12 @@ namespace
                 if (f.size() >= 8)
                     licences[f[7].replace ("\\", "/")] = f[5].contains ("publicdomain") ? "CC0" : "CC-BY";
             }
-        }
-        for (const auto& file : freesound.findChildFiles (juce::File::findFiles, true, "*.wav"))
-        {
-            const auto relative = file.getRelativePathFrom (freesound).replace ("\\", "/");
-            const auto licence = licences.count (relative) > 0 ? licences[relative] : juce::String ("CC0");
-            entries.push_back ({ file.getFullPathName(), "freesound", licence, typeFromFolder (file.getParentDirectory().getFileName()), "test" });
+            for (const auto& file : freesound.findChildFiles (juce::File::findFiles, true, "*.wav"))
+            {
+                const auto relative = file.getRelativePathFrom (freesound).replace ("\\", "/");
+                const auto licence = licences.count (relative) > 0 ? licences[relative] : juce::String ("CC0");
+                entries.push_back ({ file.getFullPathName(), "freesound", licence, typeFromFolder (file.getParentDirectory().getFileName()), "test" });
+            }
         }
 
         // The owner's Jupiter-8 recordings: <genre>/<type>/*.wav.
@@ -134,6 +137,16 @@ namespace
             const auto family = parts.size() > 3 && parts[0] == "synth" ? juce::String ("synth_lead") : parts[0];
             if (const auto type = typeFromNSynth (family); type.isNotEmpty())
                 entries.push_back ({ file.getFullPathName(), "nsynth", "CC-BY", type, "test" });
+        }
+
+        // Scanned folders (library scan), as their kept lists stand.
+        for (const auto& list : libraryFolder().getChildFile ("scans").findChildFiles (juce::File::findFiles, false, "*.csv"))
+        {
+            juce::StringArray lines;
+            list.readLines (lines);
+            for (int i = 1; i < lines.size(); ++i)
+                if (const auto f = parseCsvLine (lines[i]); f.size() >= 8)
+                    entries.push_back ({ f[0], f[1], f[2], f[3], f[4], -1, 0, f[7].getIntValue() != 0 });
         }
 
         // Engine renders, from their index.
@@ -204,7 +217,131 @@ int runLibrary (const juce::StringArray& args)
         return 0;
     }
 
-    std::printf ("usage: library build | library engine <n>\n");
+    if (args.size() >= 3 && args[1] == "scan")
+    {
+        // A folder of mixed samples (the owner's production folder), read in
+        // place and never changed: keeps pitched synth notes and one-instrument
+        // loops, labels each with a likely type, and drops drums, voices,
+        // noise, mixes and anything too short or long. Test-only: commercial
+        // pack licences may forbid AI training, so these never train anything.
+        const juce::File folder (args[2]);
+        if (! folder.isDirectory())
+        {
+            std::printf ("not a folder: %s\n", folder.getFullPathName().toRawUTF8());
+            return 1;
+        }
+        const juce::StringArray skipWords { "kick", "snare", "hat", "clap", "perc", "drum", "cymbal", "crash", "ride", "tom", "shaker",
+                                            "rim", "snap", "vox", "vocal", "voice", "acapella", "speech", "master", "mixdown", "bounce", "stem",
+                                            "guitar", "piano", "sax", "flute", "brass", "trumpet", "violin", "cello", "choir", "acoustic" };
+        const std::pair<const char*, const char*> typeWords[] { { "808", "Bass" }, { "bass", "Bass" }, { "sub", "Bass" }, { "reese", "Bass" },
+                                                                { "lead", "Lead" }, { "pad", "Pad" }, { "atmos", "Pad" }, { "string", "Pad" },
+                                                                { "pluck", "Pluck" }, { "arp", "Pluck" }, { "bell", "Pluck" }, { "chord", "Chord" },
+                                                                { "stab", "Chord" }, { "riser", "FX" }, { "sweep", "FX" }, { "uplifter", "FX" },
+                                                                { "downlifter", "FX" } };
+
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::vector<Entry> kept;
+        std::map<juce::String, int> dropped;
+        const auto verboseScan = args.contains ("-v"); // each file named as it is read
+        const auto files = folder.findChildFiles (juce::File::findFiles, true, "*.wav;*.aif;*.aiff;*.flac");
+        for (int i = 0; i < files.size(); ++i)
+        {
+            if ((i + 1) % 250 == 0)
+                std::printf ("  %d of %d looked at, %d kept\n", i + 1, files.size(), (int) kept.size());
+            const auto& file = files.getReference (i);
+            if (verboseScan)
+                std::printf ("    %s\n", file.getFullPathName().toRawUTF8());
+            std::fflush (stdout); // so a log shows where a scan stopped
+            const auto path = file.getFullPathName().toLowerCase();
+            if (std::any_of (skipWords.begin(), skipWords.end(), [&] (const juce::String& w) { return path.contains (w); }))
+            {
+                ++dropped["named as drums, voice, acoustic or a mix"];
+                continue;
+            }
+            std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+            if (reader == nullptr)
+            {
+                ++dropped["unreadable"];
+                continue;
+            }
+            const auto seconds = (double) reader->lengthInSamples / reader->sampleRate;
+            if (seconds < 0.2 || seconds > 15.0)
+            {
+                ++dropped["shorter than 0.2 s or longer than 15 s"];
+                continue;
+            }
+            juce::AudioBuffer<float> audio (2, (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 4.0)));
+            reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
+            const auto print = SoundPrint::of (audio, reader->sampleRate, true);
+            if (print.levelDb < -60.0f || print.notes.empty() || print.notes.front().pitchHz <= 0.0f)
+            {
+                ++dropped["no clear pitch (drums, noise, chords, mixes)"];
+                continue;
+            }
+            if (print.notes.size() > 16)
+            {
+                ++dropped["too busy for one instrument"];
+                continue;
+            }
+
+            juce::String type;
+            for (const auto& [word, t] : typeWords)
+                if (path.contains (word))
+                {
+                    type = t;
+                    break;
+                }
+            if (type.isEmpty()) // from the sound: register, phrase, and how its loudness moves
+            {
+                // The tone spectrogram's frames (512 samples apart): falling 15 dB
+                // within half a second of its loudest is a pluck; reaching its
+                // loudest after 150 ms is a slow pad swell; otherwise a held lead.
+                std::vector<float> loudness;
+                for (const auto& frame : print.melTone)
+                {
+                    double power = 0.0;
+                    for (auto v : frame)
+                        power += std::pow (10.0, v / 10.0);
+                    loudness.push_back ((float) (10.0 * std::log10 (power + 1.0e-12)));
+                }
+                const auto peakAt = (int) (std::max_element (loudness.begin(), loudness.end()) - loudness.begin());
+                const auto framesPerSecond = reader->sampleRate / 512.0;
+                const auto halfSecondOn = peakAt + (int) (0.5 * framesPerSecond);
+                const auto decays = halfSecondOn >= (int) loudness.size() || loudness[(size_t) halfSecondOn] < loudness[(size_t) peakAt] - 15.0f;
+                type = print.pitchHz < 130.0f ? "Bass" : (print.notes.size() > 1 || decays) ? "Pluck"
+                     : peakAt > (int) (0.15 * framesPerSecond) ? "Pad" : "Lead";
+            }
+            kept.push_back ({ file.getFullPathName(), "owner-library", "owner's packs (test only)", type, "test", -1, 0, print.notes.size() > 1 });
+        }
+
+        const auto scans = libraryFolder().getChildFile ("scans");
+        scans.createDirectory();
+        juce::String out ("file,source,licence,type,use,genre,seed,loop\n");
+        for (const auto& e : kept)
+            out << csvField (e.file) << "," << csvField (e.source) << "," << csvField (e.licence) << "," << csvField (e.type) << ","
+                << csvField (e.use) << ",-1,0," << (e.loop ? 1 : 0) << "\n";
+        const auto list = scans.getChildFile (juce::File::createLegalFileName (folder.getFileName()) + ".csv");
+        list.replaceWithText (out);
+
+        std::map<juce::String, int> byType;
+        int loops = 0;
+        for (const auto& e : kept)
+        {
+            ++byType[e.type];
+            loops += e.loop ? 1 : 0;
+        }
+        std::printf ("\n%d files looked at, %d kept (%d single notes, %d loops):\n", files.size(), (int) kept.size(), (int) kept.size() - loops, loops);
+        for (const auto& [type, n] : byType)
+            std::printf ("  %-6s %d\n", type.toRawUTF8(), n);
+        std::printf ("dropped:\n");
+        for (const auto& [why, n] : dropped)
+            std::printf ("  %-45s %d\n", why.toRawUTF8(), n);
+        std::printf ("kept list: %s (delete lines to leave sounds out), then: ZeroAnalyze library build\n", list.getFullPathName().toRawUTF8());
+        return 0;
+    }
+
+    std::printf ("usage: library build | library engine <n> | library scan <folder>\n");
     return 1;
 }
 
