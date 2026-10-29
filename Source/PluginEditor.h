@@ -248,6 +248,10 @@ private:
     std::vector<Node> nodes;
     struct Wave { double start; float phase; }; // a gravity wave from a collapse: when it starts (spaceTime) and how it wobbles
     std::vector<Wave> waves;
+    // The owner's photos cut out of their black skies (made once; empty when
+    // the pictures weren't built in).
+    juce::Image saturn, moon, nebula;
+    bool picturesCut = false;
     void paintSpace (juce::Graphics&, juce::Rectangle<float> screen);
     bool mini = false;
 };
