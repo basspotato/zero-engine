@@ -1811,7 +1811,7 @@ void ZeroEngineEditor::resized()
     backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
     levelMeter.setBounds (content (meterSection));
     display.setBounds (content (displaySection));
-    anyGenreButton.setBounds (display.getRight() - 75, display.getBottom() - 75, 61, 61); // over the display's corner, 14 px in
+    anyGenreButton.setBounds (display.getRight() - 69, display.getBottom() - 69, 55, 55); // over the display's corner, 14 px in
     heartButton.setBounds (anyGenreButton.getX() - 24, anyGenreButton.getBottom() - 22, 22, 20); // its lower left
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
