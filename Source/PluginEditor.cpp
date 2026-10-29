@@ -432,7 +432,7 @@ void TesseractButton::fold()
 
 void TesseractButton::timerCallback()
 {
-    constexpr double foldMs = 900.0;
+    constexpr double foldMs = 1000.0;
 
     if (foldStart >= 0.0)
     {
@@ -622,10 +622,17 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
         paintSpace (g, bounds.reduced (2.0f));
     }
 
-    // Fold: shrink towards the centre while turning a half turn through w (the
-    // outer cube passes through the inner one), then open out again.
+    // Fold: the black hole swallows it. It falls in, faster and faster, down to
+    // nothing while turning a half turn through w (the outer cube passes through
+    // the inner one), stays gone a moment, then comes back out to full size.
     const auto pulse = std::sin (MathConstants<float>::pi * foldProgress);
-    const auto shrink = 1.0f - 0.7f * pulse - (down ? 0.08f : 0.0f);
+    const auto swallowed = foldProgress < 0.42f ? juce::square (foldProgress / 0.42f) // falling in, faster and faster
+                         : foldProgress < 0.58f ? 1.0f
+                                                : juce::square (1.0f - (foldProgress - 0.58f) / 0.42f); // out quickly, settling at full size
+    const auto shrink = (1.0f - swallowed) * (1.0f - (down ? 0.08f : 0.0f));
+    if (shrink <= 0.0f)
+        return;
+    const auto vanish = juce::jmin (1.0f, shrink * 5.0f); // the last fifth fades as it shrinks to a point
     const auto wTurn = angle + MathConstants<float>::pi * foldProgress;
 
     const auto centre = getLocalBounds().toFloat().getCentre(); // the black hole's centre
@@ -688,8 +695,8 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
                 if (const auto b = a | bit; b != a)
                 {
                     const auto near = juce::jlimit (0.15f, 1.0f, (0.5f + 0.25f * (depth[a] + depth[b]) * 0.5f) * glow + 0.4f * pulse);
-                    g.setColour (colour.withAlpha (pass == 0 ? near * 0.15f : near));
-                    g.drawLine ({ points[a], points[b] }, (pass == 0 ? 5.0f : 1.4f) + 1.2f * pulse);
+                    g.setColour (colour.withAlpha ((pass == 0 ? near * 0.15f : near) * vanish));
+                    g.drawLine ({ points[a], points[b] }, ((pass == 0 ? 5.0f : 1.4f) + 1.2f * pulse) * vanish);
                 }
 }
 
@@ -1104,6 +1111,10 @@ void ScopeView::drawWavetable (juce::Graphics& g, juce::Rectangle<float> area)
 PlayingKeyboard::PlayingKeyboard (ZeroEngineProcessor& p)
     : juce::MidiKeyboardComponent (p.keyboardState, horizontalKeyboard), processor (p)
 {
+    // Played with the mouse only: computer keys belong to the host (in Cubase a
+    // key pressed here and released elsewhere left a note held).
+    setWantsKeyboardFocus (false);
+    clearKeyMappings();
     lights.startTimerHz (30);
 }
 

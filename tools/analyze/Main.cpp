@@ -819,6 +819,58 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "idlecheck")
+    {
+        // Silence with no keys: a fresh engine, after Generate clicks and after
+        // genre/type changes, each followed by 3 s without MIDI; prints the
+        // loudest sample of the last second (anything over -90 dB is a note
+        // that shouldn't be there).
+        constexpr double rate = 48000.0;
+        constexpr int block = 512;
+        ZeroEngineProcessor engine;
+        engine.setUserFolder (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_idlecheck"));
+        engine.setPlayConfigDetails (0, 2, rate, block);
+        engine.prepareToPlay (rate, block);
+        auto idle = [&] (const char* what)
+        {
+            juce::AudioBuffer<float> chunk (2, block);
+            juce::MidiBuffer midi;
+            float peak = 0.0f;
+            for (int pos = 0, end = (int) (3 * rate); pos < end; pos += block)
+            {
+                chunk.clear();
+                engine.processBlock (chunk, midi);
+                if (pos >= end - (int) rate)
+                    peak = juce::jmax (peak, chunk.getMagnitude (0, block));
+            }
+            std::printf ("%-36s last second's peak %6.1f dB%s\n", what, juce::Decibels::gainToDecibels (peak, -200.0f),
+                         peak > 3.0e-5f ? "   <-- SOUNDING" : "");
+        };
+        idle ("fresh engine");
+        auto* genre = engine.state.getParameter (ParamIDs::genre);
+        auto* type = engine.state.getParameter (ParamIDs::type);
+        // An on-screen key left down, then the preset changed: it must let go.
+        engine.keyboardState.noteOn (1, 60, 0.8f);
+        idle ("on-screen key held (should sound)");
+        type->setValueNotifyingHost (type->convertTo0to1 (1.0f));
+        engine.syncProfile();
+        idle ("held, then the type changed (Lead)");
+        for (int i = 0; i < 6; ++i)
+        {
+            engine.generate (900 + i, i % 2 == 1);
+            idle (juce::String ("after Generate " + juce::String (i + 1) + (i % 2 ? " (mood)" : "")).toRawUTF8());
+        }
+        for (int g = 0; g < 12; ++g)
+            for (int t = 0; t < 6; ++t)
+            {
+                genre->setValueNotifyingHost (genre->convertTo0to1 ((float) g));
+                type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
+                engine.syncProfile();
+                idle ((genreNames[g] + " " + typeNames[t]).toRawUTF8());
+            }
+        return 0;
+    }
+
     if (command == "tastesim" && args.size() > 1 && args[1] == "settings")
     {
         // Does the settings taste learn what traits can't show? A simulated

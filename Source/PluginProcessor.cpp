@@ -106,6 +106,7 @@ void ZeroEngineProcessor::syncProfile()
 
 void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profile)
 {
+    releaseHeld.store (true);
     auto setChoice = [this] (const char* id, int index)
     {
         auto* param = state.getParameter (id);
@@ -1021,6 +1022,18 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const auto numSamples = buffer.getNumSamples();
     buffer.clear();
 
+    // A new sound (preset, genre/type, Generate, favourite, undo, a project
+    // loading): every held note lets go with its release, on-screen keys,
+    // latched arp notes and a held sustain pedal included, so nothing carries over.
+    if (releaseHeld.exchange (false))
+    {
+        keyboardState.allNotesOff (0);
+        arp.reset();
+        synth.allNotesOff (0, true);
+        for (auto& word : soundingNotes)
+            word.store (0, std::memory_order_relaxed);
+    }
+
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
     // Controllers: the mod wheel (CC 1) rides on top of Motion; MIDI learn takes
@@ -1426,6 +1439,7 @@ bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml)
 
 void ZeroEngineProcessor::restoreTree (const juce::ValueTree& tree)
 {
+    releaseHeld.store (true);
     state.replaceState (tree.createCopy());
 
     adoptCurrentGenreAndType(); // the saved values already include any tweaks; keep them
