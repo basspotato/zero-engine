@@ -340,7 +340,11 @@ void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
         const auto unitRange = slider.getMinimum() == 0.0 && slider.getMaximum() == 1.0 && unit.isEmpty();
         const auto magnitude = std::abs (value);
         const auto decimals = slider.getInterval() >= 1.0 || magnitude >= 100.0 ? 0 : magnitude >= 10.0 ? 1 : 2;
-        const auto text = unitRange ? juce::String (value * 10.0, 1) : juce::String (value, decimals) + unit;
+        // Times under a second read in milliseconds ("0.00 s" says nothing).
+        const auto millis = unit.trim() == "s" && magnitude < 1.0;
+        const auto text = unitRange ? juce::String (value * 10.0, 1)
+                        : millis   ? juce::String (value * 1000.0, magnitude < 0.01 ? 1 : 0) + " ms"
+                                   : juce::String (value, decimals) + unit;
         g.drawText (text,
                     juce::Rectangle<float> (size * 0.95f, size * 0.12f).withCentre ({ centre.x, centre.y + outer - size * 0.06f }),
                     juce::Justification::centred, false);
@@ -1916,6 +1920,8 @@ void ZeroEngineEditor::setUpMacro (Macro& macro, const char* paramID, const juce
     macro.knob.setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
     addAndMakeVisible (macro.knob);
     addAndMakeVisible (macro.label);
+    if (auto* param = processor.state.getParameter (paramID); param != nullptr && param->getLabel().isNotEmpty())
+        macro.knob.setTextValueSuffix (" " + param->getLabel()); // the readout in its unit, as on THE WEEDS (envelope times in s)
     macro.attachment = std::make_unique<SliderAttachment> (processor.state, paramID, macro.knob);
     if (auto* param = processor.state.getParameter (paramID))
         macro.knob.setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
