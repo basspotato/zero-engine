@@ -83,10 +83,12 @@ public:
     // mini tesseract): draws from every genre and blends of two instead, and
     // loads as the genre it mostly came from. Switching Genre or Type loads a
     // designed profile as usual.
-    void generate (juce::int64 seed = juce::Time::currentTimeMillis(), bool moodMode = false);
+    // mutate: small variations of the sound playing now (tweaks included) that
+    // keep its character, instead of a new sound.
+    void generate (juce::int64 seed = juce::Time::currentTimeMillis(), bool moodMode = false, bool mutate = false);
     // The same off the message thread (the editor's tesseract): returns at once,
     // applies the sound on the message thread when it is ready, then calls done.
-    void generateAsync (bool moodMode, std::function<void()> done);
+    void generateAsync (bool moodMode, bool mutate, std::function<void()> done);
     bool isGenerating() const noexcept { return generating; }
     ~ZeroEngineProcessor() override;
 
@@ -101,6 +103,8 @@ public:
     // shown before it), and Generate breeds some candidates from hearted sounds
     // of the type. Saved in %APPDATA%/Zero Engine/Hearts.xml.
     void heartCurrent();
+    // Thumbs down (message thread): "less like this" for the last Generate result.
+    void dislikeCurrent();
     bool isCurrentHearted() const noexcept { return currentHeart >= 0; }
     // The last 10 hearted sounds' names, newest first (the Favourites menu's LIKED
     // section), and recalling one exactly as it was hearted.
@@ -222,7 +226,7 @@ public:
     static SoundTraits measureForTools (ZeroEngineProcessor& engine, int genre, int type, const Profile& p) { return measureProfile (engine, genre, type, p); }
 private:
     static constexpr int anyGenre = 12; // pickGeneratedProfile: draw from every genre
-    std::pair<Profile, int> pickGeneratedProfile (int genre, int type, juce::Random&, int mood = -1); // the profile and its leading genre
+    std::pair<Profile, int> pickGeneratedProfile (int genre, int type, juce::Random&, int mood = -1, const Profile* parent = nullptr); // the profile and its leading genre; parent: Mutate
     std::vector<std::unique_ptr<ZeroEngineProcessor>> checkers; // private engines for the check renders, made on first use
     std::vector<SoundTraits> recentGenerated; // the last few results, so the next one differs
     std::vector<int> recentAnyGenres;         // the last few mini-tesseract results' genres, so the next leads with another
@@ -312,8 +316,8 @@ private:
 
     // Generate on a worker (generateAsync): last, so it is destroyed (and any
     // job finished) before the engines and state it uses.
-    struct GeneratePlan { juce::Random random; int genre, type, mood; };
-    GeneratePlan prepareGenerate (juce::int64 seed, bool moodMode);
+    struct GeneratePlan { juce::Random random; int genre, type, mood; std::optional<Profile> parent; }; // parent: Mutate
+    GeneratePlan prepareGenerate (juce::int64 seed, bool moodMode, bool mutate);
     void applyGenerate (GeneratePlan&, const Profile&, int source);
     bool generating = false;
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);

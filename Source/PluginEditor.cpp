@@ -348,6 +348,22 @@ void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
 }
 
 //==============================================================================
+void DislikeButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    // A thumb pointing down: the cuff on the left, the fist (a rounded block),
+    // and the thumb hanging down from it; outlined like the heart.
+    const auto r = getLocalBounds().toFloat().reduced (3.0f + (down ? 1.0f : 0.0f));
+    const auto size = juce::jmin (r.getWidth(), r.getHeight());
+    const auto b = r.withSizeKeepingCentre (size, size);
+    const auto x = b.getX(), y = b.getY(), w = b.getWidth(), h = b.getHeight();
+    juce::Path thumb;
+    thumb.addRectangle (x + 0.06f * w, y + 0.06f * h, 0.18f * w, 0.46f * h);                     // the cuff, on the left
+    thumb.addRoundedRectangle (x + 0.28f * w, y + 0.06f * h, 0.64f * w, 0.46f * h, 0.12f * w); // the fist
+    thumb.addRoundedRectangle (x + 0.28f * w, y + 0.44f * h, 0.22f * w, 0.5f * h, 0.11f * w);  // the thumb, pointing down
+    g.setColour (Palette::accent.withAlpha (highlighted ? 1.0f : 0.75f));
+    g.strokePath (thumb, juce::PathStrokeType (1.3f));
+}
+
 void HeartButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     // Two lobes and a point, drawn from cubic curves inside the button's square.
@@ -1605,7 +1621,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
         // Fold at once; the sound is worked out in the background and lands
         // mid-fold.
         generateButton.fold();
-        processor.generateAsync (processor.isMoodMode(), [self = juce::Component::SafePointer<ZeroEngineEditor> (this)]
+        processor.generateAsync (processor.isMoodMode(), false, [self = juce::Component::SafePointer<ZeroEngineEditor> (this)]
         {
             if (self != nullptr)
                 self->refreshHistoryButtons();
@@ -1625,6 +1641,30 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     moodButton.setTooltip ("Generate from moods: lush pads, airy drones, warm keys and more, free of the genres.");
     genreModeButton.setTooltip ("Generate within the genre and type you have selected.");
     refreshGenerateMode();
+
+    // MUTATE: small variations on the sound playing; the thumbs down: less like
+    // this, then the next sound. Both fold the tesseract like a Generate click.
+    auto whenDone = [self = juce::Component::SafePointer<ZeroEngineEditor> (this)]
+    {
+        if (self != nullptr)
+            self->refreshHistoryButtons();
+    };
+    mutateButton.onClick = [this, whenDone]
+    {
+        generateButton.fold();
+        processor.generateAsync (processor.isMoodMode(), true, whenDone);
+    };
+    mutateButton.setTooltip ("Mutate: small variations on the sound playing, keeping its character.");
+    addAndMakeVisible (mutateButton);
+    dislikeButton.onClick = [this, whenDone]
+    {
+        processor.dislikeCurrent();
+        heartButton.setFilled (processor.isCurrentHearted());
+        generateButton.fold();
+        processor.generateAsync (processor.isMoodMode(), false, whenDone);
+    };
+    dislikeButton.setTooltip ("Less like this: Generate learns from it and moves on to the next sound.");
+    addAndMakeVisible (dislikeButton);
 
 
     heartButton.onClick = [this]
@@ -1996,13 +2036,16 @@ void ZeroEngineEditor::resized()
     generateArea.removeFromBottom (6);
     generateButton.setBounds (generateArea);
     const auto modeWidth = 96;
-    auto modeRow = controls.withSizeKeepingCentre (2 * modeWidth + 6, 24);
+    // [MUTATE][MOOD][GENRE] centred, the heart and thumbs down right of GENRE.
+    auto modeRow = controls.withSizeKeepingCentre (3 * modeWidth + 12, 24);
+    mutateButton.setBounds (modeRow.removeFromLeft (modeWidth));
+    modeRow.removeFromLeft (6);
     moodButton.setBounds (modeRow.removeFromLeft (modeWidth));
     modeRow.removeFromLeft (6);
     genreModeButton.setBounds (modeRow);
+    heartButton.setBounds (genreModeButton.getRight() + 8, genreModeButton.getY() + 2, 22, 20);
+    dislikeButton.setBounds (heartButton.getRight() + 4, genreModeButton.getY() + 1, 22, 22);
     auto favouritesRow = controls.removeFromLeft (300).withSizeKeepingCentre (300, 24);
-    heartButton.setBounds (favouritesRow.removeFromLeft (24).withSizeKeepingCentre (22, 20));
-    favouritesRow.removeFromLeft (4);
     saveButton.setBounds (favouritesRow.removeFromRight (50));
     favouritesRow.removeFromRight (4);
     favouritesBox.setBounds (favouritesRow);

@@ -119,7 +119,7 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
     loadMacroMap (macroMap, profile);
 }
 
-ZeroEngineProcessor::GeneratePlan ZeroEngineProcessor::prepareGenerate (juce::int64 seed, bool moodMode)
+ZeroEngineProcessor::GeneratePlan ZeroEngineProcessor::prepareGenerate (juce::int64 seed, bool moodMode, bool mutate)
 {
     syncProfile(); // a Genre/Type change not yet picked up by the timer
     // The seed scrambled first (splitmix64): clicks a moment apart give nearby
@@ -128,11 +128,13 @@ ZeroEngineProcessor::GeneratePlan ZeroEngineProcessor::prepareGenerate (juce::in
     auto mixed = (juce::uint64) seed + 0x9e3779b97f4a7c15ull;
     mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ull;
     mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebull;
-    GeneratePlan plan { juce::Random ((juce::int64) (mixed ^ (mixed >> 31))), appliedGenre, appliedType.load(), -1 };
+    GeneratePlan plan { juce::Random ((juce::int64) (mixed ^ (mixed >> 31))), appliedGenre, appliedType.load(), -1, std::nullopt };
+    if (mutate) // the sound as it plays now, tweaks included
+        plan.parent = readProfile (state, plan.genre, plan.type);
 
     // Mood mode: a mood (never the last one twice running) picks the type; the
     // genre box keeps the genre, and the display shows the mood's name.
-    if (moodMode)
+    if (moodMode && ! mutate)
     {
         plan.mood = (lastMood + 1 + plan.random.nextInt (Moods::count - 1)) % Moods::count;
         if (lastMood < 0)
@@ -172,7 +174,8 @@ void ZeroEngineProcessor::applyGenerate (GeneratePlan& plan, const Profile& prof
         showingLatest = true;
     }
 
-    generateArp (plan.type, plan.random);
+    if (! plan.parent.has_value()) // Mutate keeps the arp as it is
+        generateArp (plan.type, plan.random);
 
     history.push_back (state.copyState());
     constexpr size_t maxHistory = 50;
@@ -181,14 +184,14 @@ void ZeroEngineProcessor::applyGenerate (GeneratePlan& plan, const Profile& prof
     historyPos = (int) history.size() - 1;
 }
 
-void ZeroEngineProcessor::generate (juce::int64 seed, bool moodMode)
+void ZeroEngineProcessor::generate (juce::int64 seed, bool moodMode, bool mutate)
 {
-    auto plan = prepareGenerate (seed, moodMode);
-    const auto [profile, source] = pickGeneratedProfile (plan.genre, plan.type, plan.random, plan.mood);
+    auto plan = prepareGenerate (seed, moodMode, mutate);
+    const auto [profile, source] = pickGeneratedProfile (plan.genre, plan.type, plan.random, plan.mood, plan.parent ? &*plan.parent : nullptr);
     applyGenerate (plan, profile, source);
 }
 
-void ZeroEngineProcessor::generateAsync (bool moodMode, std::function<void()> done)
+void ZeroEngineProcessor::generateAsync (bool moodMode, bool mutate, std::function<void()> done)
 {
     // The renders and checks (about 0.4 s) run on a worker, so the tesseract
     // folds at once and the sound arrives mid-fold; the result is applied back
@@ -196,10 +199,10 @@ void ZeroEngineProcessor::generateAsync (bool moodMode, std::function<void()> do
     if (generating)
         return;
     generating = true;
-    auto plan = prepareGenerate (juce::Time::currentTimeMillis(), moodMode);
+    auto plan = prepareGenerate (juce::Time::currentTimeMillis(), moodMode, mutate);
     generateWorker.addJob ([this, plan, done, alive = alive]() mutable
     {
-        const auto [profile, source] = pickGeneratedProfile (plan.genre, plan.type, plan.random, plan.mood);
+        const auto [profile, source] = pickGeneratedProfile (plan.genre, plan.type, plan.random, plan.mood, plan.parent ? &*plan.parent : nullptr);
         juce::MessageManager::callAsync ([this, plan, profile = profile, source = source, done, alive]() mutable
         {
             if (! alive->load())
@@ -267,7 +270,7 @@ void ZeroEngineProcessor::judgeLastShown()
     for (size_t i = 0; i + 1 < shown.size(); ++i)
     {
         const auto& other = shown[i];
-        if (last.label == 1 && other.label == -1)
+        if (last.label == 1 && other.label < 0) // a kept one beats the skipped and the disliked
             taste.addWin (last.features, other.features);
         else if (last.label == -1 && other.label >= 1)
             taste.addWin (other.features, last.features);
@@ -528,7 +531,7 @@ float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTrai
     return warmth - harsh + 0.5f * capped (z (body)) + 0.5f * capped (z (richness)) + clean + widthNear + calm;
 }
 
-std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random, int mood)
+std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random, int mood, const Profile* parent)
 {
     // Render-and-check, then pick for size and interest:
     //  1. Many variations, each measured (SoundTraits) on private engines in parallel.
@@ -564,6 +567,8 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         target.sidePct = m[1]; target.centroidHz = m[2]; target.bassPct = m[3]; target.bodyPct = m[4];
         target.spreadOct = m[5]; target.crestDb = m[6]; target.movementDb = m[7]; target.richness = m[8];
     }
+    else if (parent != nullptr) // Mutate: stay near the sound being mutated
+        target = measureProfile (*checkers[0], genre, type, *parent);
     else
     {
         auto& cached = designedChecks[(size_t) (genre * 6 + type)];
@@ -606,11 +611,11 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     for (const auto& h : hearts)
         if (h.type == type)
             parents.push_back (&h);
-    const auto offspring = juce::jmin (8, 2 * (int) parents.size());
+    const auto offspring = parent != nullptr ? 0 : juce::jmin (8, 2 * (int) parents.size()); // Mutate breeds only from the sound itself
     for (int i = 0; i < offspring; ++i)
     {
-        const auto& parent = *parents[(size_t) random.nextInt ((int) parents.size())];
-        auto units = ReferenceMatch::unitsOf (parent.profile);
+        const auto& heart = *parents[(size_t) random.nextInt ((int) parents.size())];
+        auto units = ReferenceMatch::unitsOf (heart.profile);
         if (parents.size() > 1 && random.nextFloat() < 0.33f)
         {
             const auto& other = *parents[(size_t) random.nextInt ((int) parents.size())];
@@ -624,13 +629,25 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             auto& u = units[(size_t) random.nextInt (ReferenceMatch::numSearched)];
             u = juce::jlimit (0.0f, 1.0f, u + 0.16f * (random.nextFloat() * 2.0f - 1.0f));
         }
-        profiles.push_back (capDetune (ReferenceMatch::withUnitsOf (parent.profile, units), free ? parent.genre : genre));
-        sources.push_back (free ? parent.genre : genre);
+        profiles.push_back (capDetune (ReferenceMatch::withUnitsOf (heart.profile, units), free ? heart.genre : genre));
+        sources.push_back (free ? heart.genre : genre);
     }
 
     const auto drawn = useJudge && GenerateNet::builtIn().ready() ? drawWithJudge : candidates; // more when the judge can screen them
     for (int i = offspring; i < drawn; ++i)
     {
+        if (parent != nullptr) // Mutate: four of its searched settings nudged a little
+        {
+            auto units = ReferenceMatch::unitsOf (*parent);
+            for (int n = 0; n < 4; ++n)
+            {
+                auto& u = units[(size_t) random.nextInt (ReferenceMatch::numSearched)];
+                u = juce::jlimit (0.0f, 1.0f, u + 0.05f * (random.nextFloat() * 2.0f - 1.0f));
+            }
+            profiles.push_back (capDetune (ReferenceMatch::withUnitsOf (*parent, units), genre));
+            sources.push_back (genre);
+            continue;
+        }
         if (mood >= 0) // a mood's recipe
         {
             int base = 0;
@@ -721,6 +738,17 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         if (print && debugGenerate)
             std::printf ("    size+interest %+5.2f  novelty %4.2f  side %5.1f (designed %5.1f)  move %4.1f (%4.1f)  rich %.2f (%.2f)  crest %4.1f (%4.1f)  body %4.1f (%4.1f)\n",
                          bigAndInteresting, novelty, a[side], d[side], a[movement], d[movement], a[richness], d[richness], a[crest], d[crest], a[body], d[body]);
+        if (parent != nullptr)
+        {
+            // Mutate stays near its sound: closeness to it (the same distance as
+            // novelty, in the owner's spreads) counts, size a little, taste fully.
+            float sum = 0.0f;
+            for (int k = 0; k < SoundTraits::count; ++k)
+                if (k != centroid && k != level)
+                    sum += juce::square ((a[(size_t) k] - d[(size_t) k]) / spreadOf (k));
+            sum += juce::square (std::log2 (juce::jmax (20.0f, a[centroid]) / juce::jmax (20.0f, d[centroid])) / 0.8f);
+            return 0.3f * bigAndInteresting - 1.5f * std::sqrt (sum) + 1.5f * tasteOf (m);
+        }
         return bigAndInteresting + 0.7f * novelty + 1.5f * tasteOf (m);
     };
 
@@ -815,7 +843,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     // Match searches, moved a little); the best nudge that scores higher and
     // still fits replaces it. Picking alone only chooses among what the
     // variations happen to be; this walks the chosen one towards bigger.
-    for (int round = 0; round < 2; ++round)
+    for (int round = 0; round < (parent != nullptr ? 0 : 2); ++round) // Mutate does not push: it stays near
     {
         std::vector<Profile> nudged ((size_t) engines);
         for (auto& p : nudged)
@@ -1431,4 +1459,25 @@ ZeroEngineProcessor::~ZeroEngineProcessor()
 {
     alive->store (false);                   // a result still on its way is dropped
     generateWorker.removeAllJobs (true, 10000); // and a running pick finishes first
+}
+
+void ZeroEngineProcessor::dislikeCurrent()
+{
+    // Thumbs down: the last Generate result loses to every recent one not
+    // disliked itself (up to six), and loses its heart if it had one. The
+    // editor then generates the next sound.
+    if (generating || ! showingLatest || shown.empty())
+        return;
+    loadTasteAndHearts();
+    auto& latest = shown.back();
+    latest.label = -2;
+    for (size_t i = shown.size() - 1, beaten = 0; i-- > 0 && beaten < 6;)
+        if (shown[i].label > -2)
+        {
+            taste.addWin (shown[i].features, latest.features);
+            ++beaten;
+        }
+    taste.save (tasteFile());
+    if (currentHeart >= 0)
+        heartCurrent(); // un-heart
 }

@@ -641,6 +641,36 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "mutatecheck")
+    {
+        // Mutate: how far each mutation lands from the sound it came from (in the
+        // owner's spreads), against how far a fresh Generate click lands.
+        ZeroEngineProcessor engine;
+        auto* type = engine.state.getParameter (ParamIDs::type);
+        type->setValueNotifyingHost (type->convertTo0to1 (1.0f)); // Lead
+        engine.syncProfile();
+        auto distance = [] (const TasteModel::Features& a, const TasteModel::Features& b)
+        {
+            double d = 0.0;
+            for (int k = 0; k < TasteModel::numFeatures; ++k)
+                d += juce::square ((double) a[(size_t) k] - b[(size_t) k]);
+            return std::sqrt (d);
+        };
+        engine.generate (5);
+        auto parent = *engine.getLastShownFeatures();
+        for (int i = 0; i < 4; ++i)
+        {
+            engine.generate (100 + i, false, true);
+            const auto child = *engine.getLastShownFeatures();
+            engine.generate (200 + i);
+            const auto fresh = *engine.getLastShownFeatures();
+            std::printf ("mutation %d: %.2f from its parent; a fresh Generate %.2f from it\n", i + 1, distance (parent, child), distance (parent, fresh));
+            engine.generate (5); // back to the same parent
+            parent = *engine.getLastShownFeatures();
+        }
+        return 0;
+    }
+
     if (command == "pluckcheck")
     {
         // The test's pluck loop (Techno Pluck, C4 Eb G F a quarter second apart),
@@ -690,7 +720,7 @@ int main (int argc, char* argv[])
         {
             auto landed = false;
             const auto start = juce::Time::getMillisecondCounterHiRes();
-            engine.generateAsync (i % 2 == 1, [&] { landed = true; });
+            engine.generateAsync (i % 2 == 1, false, [&] { landed = true; });
             const auto clickMs = juce::Time::getMillisecondCounterHiRes() - start;
             while (! landed && juce::Time::getMillisecondCounterHiRes() - start < 5000.0)
                 juce::MessageManager::getInstance()->runDispatchLoopUntil (5);

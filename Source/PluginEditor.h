@@ -203,6 +203,15 @@ private:
     bool filled = false;
 };
 
+// The thumbs down beside the heart: "less like this"; Generate learns from it
+// and moves on to the next sound.
+class DislikeButton : public juce::Button
+{
+public:
+    DislikeButton() : juce::Button ("Thumbs down") {}
+    void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+};
+
 // The Generate button: a slowly turning tesseract (4D cube) that folds in on
 // itself, turning inside out through the fourth dimension, when clicked.
 class TesseractButton : public juce::Button,
@@ -280,7 +289,9 @@ private:
     TesseractButton generateButton;
     juce::TextButton moodButton { "MOOD" }, genreModeButton { "GENRE" }; // under the tesseract: what Generate draws from (lit = active)
     void refreshGenerateMode();
-    HeartButton heartButton; // in the Favourites panel: like the sound playing
+    HeartButton heartButton; // right of GENRE: like the sound playing
+    DislikeButton dislikeButton; // beside the heart: less like this, and the next sound
+    juce::TextButton mutateButton { "MUTATE" }; // left of MOOD: small variations on the sound playing
     juce::ComboBox favouritesBox;            // recall a saved sound
     juce::String currentFavourite;           // the last one saved or recalled, which Rename and Delete act on
     juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite
