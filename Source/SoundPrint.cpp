@@ -287,6 +287,25 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     if (total <= 0 || channels <= 0)
         return print;
 
+    // Measured at 48 kHz, the rate candidates render at: frames are counted in
+    // samples, so a 44.1 kHz reference's frames would otherwise drift 9 % against
+    // a render's over the phrase. Bands its own rate can't hold stay excluded.
+    constexpr double measureRate = 48000.0;
+    if (std::abs (sampleRate - measureRate) > 1.0)
+    {
+        const auto ratio = sampleRate / measureRate;
+        const auto length = (int) std::floor (total / ratio);
+        juce::AudioBuffer<float> resampled (channels, juce::jmax (1, length));
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            juce::WindowedSincInterpolator interpolator;
+            interpolator.process (ratio, audio.getReadPointer (ch), resampled.getWritePointer (ch), length, total, 0);
+        }
+        auto measured = of (resampled, measureRate, findPitch);
+        measured.maxHz = juce::jmin (measured.maxHz, (float) (0.45 * sampleRate));
+        return measured;
+    }
+
     // DC removed: recordings often carry an offset that would read as deep sub.
     float dc[2] {};
     for (int ch = 0; ch < channels; ++ch)

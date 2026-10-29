@@ -373,6 +373,28 @@ int main (int argc, char* argv[])
                 juce::String terms;
                 SoundPrint::distance (result.matched, t, &terms);
                 std::printf ("    match: distance %.2f = %s\n", result.distance, terms.toRawUTF8());
+                // Loudness (dB under the loudest cell, summed over the mel bands) and
+                // brightness (centroid band) every 8 tone frames, reference / match.
+                auto frameOf = [] (const SoundPrint& s, size_t f, float& centroid)
+                {
+                    double power = 0.0, weighted = 0.0;
+                    if (f < s.melTone.size())
+                        for (int b = 0; b < SoundPrint::melBands; ++b)
+                        {
+                            const auto e = std::pow (10.0, s.melTone[f][(size_t) b] / 10.0);
+                            power += e;
+                            weighted += b * e;
+                        }
+                    centroid = power > 0.0 ? (float) (weighted / power) : 0.0f;
+                    return (float) (10.0 * std::log10 (power + 1.0e-12));
+                };
+                std::printf ("    frame  ref dB  match dB  ref band  match band\n");
+                for (size_t f = 0; f < juce::jmax (t.melTone.size(), result.matched.melTone.size()); f += 8)
+                {
+                    float rc, mc;
+                    const auto r = frameOf (t, f, rc), m = frameOf (result.matched, f, mc);
+                    std::printf ("    %5d  %6.1f  %8.1f  %8.1f  %10.1f\n", (int) f, r, m, rc, mc);
+                }
             }
         }
         return 0;
