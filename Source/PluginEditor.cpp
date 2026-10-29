@@ -464,34 +464,6 @@ static juce::Image spaceImage (const char* fileName)
         }
     return {};
 }
-
-// Cuts the part of a photo inside `area` (0..1 of the picture) out of its
-// black sky: brightness becomes alpha, and the edge of the oval fades, so
-// only the planet is left.
-static juce::Image cutOut (const juce::Image& photo, juce::Rectangle<float> area, int size)
-{
-    if (! photo.isValid())
-        return {};
-    const auto source = area.transformedBy (juce::AffineTransform::scale ((float) photo.getWidth(), (float) photo.getHeight())).toNearestInt();
-    const auto height = juce::jmax (1, juce::roundToInt (size * source.getHeight() / (float) source.getWidth()));
-    juce::Image out (juce::Image::ARGB, size, height, true);
-    {
-        juce::Graphics g (out);
-        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-        g.drawImage (photo, 0, 0, size, height, source.getX(), source.getY(), source.getWidth(), source.getHeight());
-    }
-    for (int y = 0; y < height; ++y)
-        for (int x = 0; x < size; ++x)
-        {
-            const auto c = out.getPixelAt (x, y);
-            const auto brightness = juce::jmax (c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue());
-            const auto dx = 2.0f * (x + 0.5f) / size - 1.0f, dy = 2.0f * (y + 0.5f) / height - 1.0f;
-            const auto edge = juce::jlimit (0.0f, 1.0f, (1.0f - std::sqrt (dx * dx + dy * dy)) / 0.2f);
-            const auto alpha = juce::jlimit (0.0f, 1.0f, (brightness - 0.08f) / 0.3f) * edge;
-            out.setPixelAt (x, y, c.withAlpha (alpha));
-        }
-    return out;
-}
 #endif
 
 void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> screen)
@@ -519,12 +491,6 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.drawImage (background, screen, juce::RectanglePlacement::stretchToFit);
         g.setOpacity (1.0f);
     }
-    if (! picturesCut)
-    {
-        picturesCut = true;
-        saturn = cutOut (spaceImage ("saturn.jpg"), { 0.25f, 0.395f, 0.5f, 0.215f }, 360);
-        moon = cutOut (spaceImage ("moon.jpg"), { 0.284f, 0.325f, 0.425f, 0.34f }, 220);
-    }
    #endif
 
     // Stars, each twinkling at its own slow rate.
@@ -546,25 +512,9 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.setGradientFill (lit);
         g.fillEllipse (centre.x - radius, centre.y - radius, 2.0f * radius, 2.0f * radius);
     };
-    // The owner's photos take their places when built in, drifting the same way.
-    auto photo = [&] (const juce::Image& image, float x, float y, float width, float opacity, float drift)
-    {
-        const auto centre = juce::Point<float> (screen.getX() + (x + 0.01f * std::sin (t * drift)) * screen.getWidth(),
-                                                screen.getY() + (y + 0.008f * std::cos (t * drift * 0.7f)) * screen.getHeight());
-        const auto height = width * image.getHeight() / (float) image.getWidth();
-        g.setOpacity (opacity);
-        g.drawImage (image, juce::Rectangle<float> (width, height).withCentre (centre));
-        g.setOpacity (1.0f);
-    };
     const auto h = screen.getHeight();
-    if (saturn.isValid())
-        photo (saturn, 0.13f, 0.28f, 0.42f * h, 0.8f, 0.031f);
-    else
-        planet (0.13f, 0.28f, 0.075f * h, Palette::accent, 0.031f);
-    if (moon.isValid())
-        photo (moon, 0.86f, 0.70f, 0.24f * h, 0.8f, 0.023f);
-    else
-        planet (0.86f, 0.70f, 0.045f * h, Palette::magenta, 0.023f);
+    planet (0.13f, 0.28f, 0.075f * h, Palette::accent, 0.031f);
+    planet (0.86f, 0.70f, 0.045f * h, Palette::magenta, 0.023f);
 
     // Glowing nodes spread over the whole screen, drifting round the black hole
     // on wide oval orbits (the inner ones faster), each shimmering; faint oval
