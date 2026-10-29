@@ -4,6 +4,7 @@
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/Parameters.h"
 #include "../../Source/ReferenceMatch.h"
+#include "../../Source/Wavetable.h"
 #include <atomic>
 #include <numeric>
 #include <random>
@@ -197,6 +198,21 @@ int runGenerateNetData (const juce::StringArray& args)
                 }
                 else
                     p = candidate (r.genre, r.type, random, source);
+                if (random.nextFloat() < 0.15f) // some as Mutate makes them: five settings +-25 %, a third with another second wavetable
+                {
+                    auto units = ReferenceMatch::unitsOf (p);
+                    for (int n = 0; n < 5; ++n)
+                    {
+                        auto& u = units[(size_t) random.nextInt (ReferenceMatch::numSearched)];
+                        u = juce::jlimit (0.0f, 1.0f, u + 0.25f * (random.nextFloat() * 2.0f - 1.0f));
+                    }
+                    p = ReferenceMatch::withUnitsOf (p, units);
+                    if (random.nextFloat() < 0.33f)
+                    {
+                        p.waveTableB = (float) random.nextInt (WavetableBank::numBanks - 1);
+                        p.tableMix = juce::jlimit (0.0f, 1.0f, p.tableMix + 0.15f + 0.2f * random.nextFloat());
+                    }
+                }
                 r.genre = source;
                 r.features = GenerateNet::featuresOf (p, source, r.type);
                 r.outputs = GenerateNet::outputsOf (ZeroEngineProcessor::measureForTools (engine, source, r.type, p), r.type);
