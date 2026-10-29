@@ -1442,7 +1442,7 @@ void AdvancedPanel::paint (juce::Graphics& g)
     g.fillRect (strip.withTrimmedTop (8.0f));
     g.setColour (Palette::accent);
     g.setFont (Fonts::ui (11.0f, true));
-    g.drawText ("THE WEEDS", strip.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
+    g.drawText ("ADVANCED", strip.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
 
     for (auto& row : pages[current].rows)
         for (auto& section : row)
@@ -1589,7 +1589,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     setWantsKeyboardFocus (true);
 
     setUpMacro (outputKnob, ParamIDs::output, "Output");
-    // Clones of THE WEEDS' amp envelope knobs: the same parameters, on the main page.
+    // Clones of the Advanced page's amp envelope knobs: the same parameters, on the main page.
     {
         const std::pair<const char*, const char*> adsr[] { { ParamIDs::ampAttack, "Attack" }, { ParamIDs::ampDecay, "Decay" },
                                                            { ParamIDs::ampSustain, "Sustain" }, { ParamIDs::ampRelease, "Release" } };
@@ -1728,7 +1728,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     refreshFavourites();
     addAndMakeVisible (keyboard);
 
-    // MAIN and THE WEEDS switch views; THE WEEDS clicked again also goes back to MAIN.
+    // MAIN and ADVANCED switch views; ADVANCED clicked again also goes back to MAIN.
     advancedButton.onClick = [this] { showAdvanced (! advancedPanel.isVisible()); };
     mainButton.onClick = [this] { showAdvanced (false); };
     addAndMakeVisible (mainButton);
@@ -1921,7 +1921,7 @@ void ZeroEngineEditor::setUpMacro (Macro& macro, const char* paramID, const juce
     addAndMakeVisible (macro.knob);
     addAndMakeVisible (macro.label);
     if (auto* param = processor.state.getParameter (paramID); param != nullptr && param->getLabel().isNotEmpty())
-        macro.knob.setTextValueSuffix (" " + param->getLabel()); // the readout in its unit, as on THE WEEDS (envelope times in s)
+        macro.knob.setTextValueSuffix (" " + param->getLabel()); // the readout in its unit, as on the Advanced page (envelope times in s)
     macro.attachment = std::make_unique<SliderAttachment> (processor.state, paramID, macro.knob);
     if (auto* param = processor.state.getParameter (paramID))
         macro.knob.setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
@@ -2060,7 +2060,7 @@ void ZeroEngineEditor::resized()
     backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
 
     levelMeter.setBounds (content (meterSection));
-    // The amp envelope's four knobs, the same parameters THE WEEDS sets.
+    // The amp envelope's four knobs, the same parameters the Advanced page sets.
     {
         auto row = content (meterSection);
         const auto cellWidth = row.getWidth() / (int) envelope.size();

@@ -299,9 +299,9 @@ private:
     ChevronButton genrePrev { true }, genreNext { false }, typePrev { true }, typeNext { false }; // step through the menus
     void stepChoice (const char* paramID, int direction);
 
-    // Every engine parameter, in tabs; THE WEEDS (the advanced page) opens it over the panels.
+    // Every engine parameter, in tabs; ADVANCED opens it over the panels.
     AdvancedPanel advancedPanel;
-    juce::TextButton mainButton { "MAIN" }, advancedButton { "THE WEEDS" }; // lit = the view showing
+    juce::TextButton mainButton { "MAIN" }, advancedButton { "ADVANCED" }; // lit = the view showing
     juce::TextButton quickSaveButton { "QUICK SAVE" }; // the current sound into Favourites under a random name
     juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
     bool keyPressed (const juce::KeyPress&) override; // Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z

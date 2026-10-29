@@ -508,7 +508,10 @@ float ZeroEngineProcessor::sizeAndInterest (const SoundTraits& target, const Sou
     enum { level, side, centroid, bass, body, spread, crest, movement, richness };
     const auto big = gain (side, false) + 0.5f * gain (body, false) + 0.5f * gain (crest, true);
     const auto interest = 0.5f * gain (movement, false) + gain (richness, false);
-    return big + interest;
+    // Harsh: more than half an octave brighter than the target costs (the owner
+    // heard harshness as the main fault in listening tests).
+    const auto harsh = juce::jmin (3.0f, 1.5f * juce::jmax (0.0f, std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) - 0.5f));
+    return big + interest - harsh;
 }
 
 float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTraits& m, int type)
