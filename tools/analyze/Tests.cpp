@@ -507,28 +507,44 @@ namespace
     // seed gives the same pattern.
     juce::StringArray checkGeneratePattern()
     {
-        auto pattern = [] (bool arpOn, juce::int64 seed)
+        // Generate rolls the arp: switched on by hand it stays on and gets a new
+        // pattern; off, Generate may switch it on for a pluck (never for a pad),
+        // and the pattern changes only when it does.
+        struct Result { juce::String steps; bool on; };
+        auto run = [] (const char* type, bool arpOn, juce::int64 seed)
         {
             ZeroEngineProcessor engine;
-            loadProfile (engine, genreNames.indexOf ("Techno"), typeNames.indexOf ("Pluck"));
+            loadProfile (engine, genreNames.indexOf ("Techno"), typeNames.indexOf (type));
             engine.state.getParameter (ParamIDs::arpOn)->setValueNotifyingHost (arpOn ? 1.0f : 0.0f);
             engine.generate (seed);
-            juce::String steps;
+            Result r;
             for (int s = 0; s < Arpeggiator::maxSteps; ++s)
-                steps << (engine.state.getRawParameterValue (SeqIDs::on (s))->load() > 0.5f ? "x" : ".")
-                      << (int) engine.state.getRawParameterValue (SeqIDs::pitch (s))->load() << " ";
-            return steps;
+                r.steps << (engine.state.getRawParameterValue (SeqIDs::on (s))->load() > 0.5f ? "x" : ".")
+                        << (int) engine.state.getRawParameterValue (SeqIDs::pitch (s))->load() << " ";
+            r.on = engine.state.getRawParameterValue (ParamIDs::arpOn)->load() > 0.5f;
+            return r;
         };
 
         juce::StringArray problems;
         juce::String defaults;
         for (int s = 0; s < Arpeggiator::maxSteps; ++s)
             defaults << "x0 ";
-        if (pattern (false, 11) != defaults)
-            problems.add ("Generate changed the pattern with the arp off");
-        if (pattern (true, 11) == defaults)
-            problems.add ("Generate left the pattern alone with the arp on");
-        if (pattern (true, 11) != pattern (true, 11))
+        int switchedOn = 0;
+        for (int seed = 1; seed <= 16; ++seed)
+        {
+            const auto r = run ("Pluck", false, seed);
+            switchedOn += r.on;
+            if (r.on == (r.steps == defaults))
+                problems.add (r.on ? "Generate switched the arp on without a pattern" : "Generate changed the pattern with the arp off");
+            if (run ("Pad", false, seed).on)
+                problems.add ("Generate switched the arp on for a pad");
+        }
+        if (switchedOn == 0 || switchedOn == 16)
+            problems.add ("Generate switched the arp on for " + juce::String (switchedOn) + " of 16 plucks (expected some, not all)");
+        const auto byHand = run ("Pluck", true, 11);
+        if (! byHand.on || byHand.steps == defaults)
+            problems.add ("Generate left the pattern alone, or switched the arp off, with the arp on by hand");
+        if (run ("Pluck", true, 11).steps != byHand.steps)
             problems.add ("same seed, different pattern");
         return problems;
     }
@@ -1012,7 +1028,7 @@ int runTests()
         ++failures;
     }
 
-    std::printf ("Generate writes a pattern with the arp on... ");
+    std::printf ("Generate rolls the arp (by hand stays on; plucks sometimes, pads never)... ");
     if (const auto problems = checkGeneratePattern(); problems.isEmpty())
         std::printf ("ok\n");
     else
