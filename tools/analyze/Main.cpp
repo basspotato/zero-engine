@@ -592,6 +592,56 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "tastesim")
+    {
+        // Does the taste model learn? A simulated listener who likes wide,
+        // moving sounds (and dislikes dense ones) clicks the mini tesseract 80
+        // times: plays what they like (kept), skips what they don't, hearts the
+        // best. Prints what the model learned and whether results drift their
+        // way. Everything under a temporary folder, never the owner's files.
+        const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_tastesim");
+        folder.deleteRecursively();
+        ZeroEngineProcessor engine;
+        engine.setUserFolder (folder);
+        auto* type = engine.state.getParameter (ParamIDs::type);
+        type->setValueNotifyingHost (type->convertTo0to1 (1.0f)); // Lead
+        engine.syncProfile();
+
+        TasteModel::Features liking {};
+        liking[1] = 1.0f;   // width
+        liking[7] = 1.0f;   // movement
+        liking[6] = 0.6f;   // crest: likes less dense (higher crest)
+        const char* names[] { "level", "width", "bright", "bass", "body", "spread", "crest", "move", "rich" };
+        auto utility = [&] (const TasteModel::Features& f)
+        {
+            float u = 0.0f;
+            for (int k = 0; k < TasteModel::numFeatures; ++k)
+                u += liking[(size_t) k] * f[(size_t) k];
+            return u;
+        };
+        double early = 0.0, late = 0.0;
+        for (int click = 0; click < 80; ++click)
+        {
+            engine.generate (777 + click, true);
+            const auto f = engine.getLastShownFeatures();
+            if (! f.has_value())
+                continue;
+            const auto u = utility (*f);
+            if (click < 20) early += u;
+            if (click >= 60) late += u;
+            if (u > 1.5f)
+                engine.heartCurrent();
+            engine.simulateListening (u > 0.0f ? 8.0f : 0.0f); // kept or skipped
+        }
+        std::printf ("judgments: %d\nlearned weights (truth in brackets):\n", engine.getTasteJudgments());
+        const auto w = engine.getTasteWeights();
+        for (int k = 0; k < TasteModel::numFeatures; ++k)
+            std::printf ("  %-7s %+5.2f  (%+.1f)\n", names[k], w[(size_t) k], liking[(size_t) k]);
+        std::printf ("listener's liking of results: first 20 clicks %.2f, last 20 %.2f\n", early / 20.0, late / 20.0);
+        folder.deleteRecursively();
+        return 0;
+    }
+
     if (command == "genab")
     {
         // A blind listening test of Generate: per profile (each genre once, the

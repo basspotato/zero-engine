@@ -61,6 +61,8 @@ void applyTrim (Profile& profile, const ProfileTrim& trim);
 
 // Message thread only: writes every profile value through the host.
 void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& profile);
+// The sound the parameters hold now, as a profile (applyProfile in reverse).
+Profile readProfile (const juce::AudioProcessorValueTreeState& state, int genre, int type);
 
 // Any thread: points the macros at this profile's directions.
 void loadMacroMap (MacroMap& map, const Profile& profile);

@@ -36,6 +36,7 @@ target_sources(ZeroEngine
         Source/ReferenceMatch.cpp
         Source/MatchNet.cpp
         Source/SoundTraits.cpp
+        Source/TasteModel.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
@@ -89,6 +90,7 @@ target_sources(ZeroAnalyze
         Source/ReferenceMatch.cpp
         Source/MatchNet.cpp
         Source/SoundTraits.cpp
+        Source/TasteModel.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp

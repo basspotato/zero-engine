@@ -190,6 +190,19 @@ private:
     bool left;
 };
 
+// The heart beside the mini tesseract: an outline, filled when the sound
+// playing is hearted. Generate learns from hearts and breeds from them.
+class HeartButton : public juce::Button
+{
+public:
+    HeartButton() : juce::Button ("Heart") {}
+    void setFilled (bool shouldFill) { if (filled != shouldFill) { filled = shouldFill; repaint(); } }
+    void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+
+private:
+    bool filled = false;
+};
+
 // The Generate button: a slowly turning tesseract (4D cube) that folds in on
 // itself, turning inside out through the fourth dimension, when clicked.
 class TesseractButton : public juce::Button,
@@ -252,6 +265,7 @@ private:
     LevelMeter levelMeter;
     TesseractButton generateButton;
     TesseractButton anyGenreButton { true }; // the mini one in the display's corner: Generate from any genre
+    HeartButton heartButton; // left of the mini tesseract: like the sound playing
     juce::ComboBox favouritesBox;            // recall a saved sound
     juce::String currentFavourite;           // the last one saved or recalled, which Rename and Delete act on
     juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite
@@ -262,6 +276,7 @@ private:
     // Every engine parameter, in tabs; ADVANCED opens it over the panels.
     AdvancedPanel advancedPanel;
     juce::TextButton mainButton { "MAIN" }, advancedButton { "ADVANCED" }; // lit = the view showing
+    juce::TextButton quickSaveButton { "QUICK SAVE" }; // the current sound into Favourites under a random name
     juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
     bool keyPressed (const juce::KeyPress&) override; // Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z
 

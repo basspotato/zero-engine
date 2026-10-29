@@ -820,3 +820,77 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::monoFreq,    p.monoFreq);
     set (ParamIDs::stereoWidth, p.stereoWidth);
 }
+
+Profile readProfile (const juce::AudioProcessorValueTreeState& state, int genre, int type)
+{
+    // applyProfile in reverse: the designed profile for what parameters don't
+    // hold (macro directions), every parameter's current value over it.
+    auto p = makeProfile (genre, type);
+    auto get = [&] (const char* id, float& field)
+    {
+        if (const auto* value = state.getRawParameterValue (id))
+            field = value->load();
+    };
+
+    get (ParamIDs::weight, p.weight);
+    get (ParamIDs::grit,   p.grit);
+    get (ParamIDs::punch,  p.punch);
+    get (ParamIDs::width,  p.width);
+    get (ParamIDs::motion, p.motion);
+    get (ParamIDs::air,    p.air);
+
+    get (ParamIDs::waveTable, p.waveTable);
+    get (ParamIDs::waveTableB, p.waveTableB);
+    get (ParamIDs::tableMix, p.tableMix);
+    get (ParamIDs::wavePos, p.wavePos);
+    get (ParamIDs::unison,  p.unison);
+    get (ParamIDs::detune,  p.detune);
+    get (ParamIDs::blend,   p.blend);
+
+    get (ParamIDs::ampAttack,  p.ampAttack);
+    get (ParamIDs::ampDecay,   p.ampDecay);
+    get (ParamIDs::ampSustain, p.ampSustain);
+    get (ParamIDs::ampRelease, p.ampRelease);
+    get (ParamIDs::modAttack,  p.modAttack);
+    get (ParamIDs::modDecay,   p.modDecay);
+    get (ParamIDs::modSustain, p.modSustain);
+    get (ParamIDs::modRelease, p.modRelease);
+    get (ParamIDs::modToPos,   p.modToPos);
+    get (ParamIDs::modToPitch, p.modToPitch);
+    get (ParamIDs::subOctave,  p.subOctave);
+    get (ParamIDs::subOn,      p.subOn);
+    get (ParamIDs::subSplit,   p.subSplit);
+    get (ParamIDs::midHighPass, p.midHighPass);
+
+    get (ParamIDs::filterMode,     p.filterMode);
+    get (ParamIDs::filterCutoff,   p.filterCutoff);
+    get (ParamIDs::filterRes,      p.filterRes);
+    get (ParamIDs::filterEnv,      p.filterEnv);
+    get (ParamIDs::filterKeytrack, p.filterKeytrack);
+    get (ParamIDs::lfoToCutoff,    p.lfoToCutoff);
+    get (ParamIDs::velToCutoff,    p.velToCutoff);
+    get (ParamIDs::velSens,        p.velSens);
+
+    get (ParamIDs::playMode,   p.playMode);
+    get (ParamIDs::glide,      p.glide);
+
+    get (ParamIDs::lfoRate,    p.lfoRate);
+    get (ParamIDs::lfoShape,   p.lfoShape);
+    get (ParamIDs::lfoSync,    p.lfoSync);
+    get (ParamIDs::lfoToPos,   p.lfoToPos);
+    get (ParamIDs::lfoToPitch, p.lfoToPitch);
+
+    get (ParamIDs::delayMix,      p.delayMix);
+    get (ParamIDs::delayTime,     p.delayTime);
+    get (ParamIDs::delayFeedback, p.delayFeedback);
+    get (ParamIDs::reverbMix,     p.reverbMix);
+    get (ParamIDs::reverbSize,    p.reverbSize);
+
+    get (ParamIDs::levelTrim,   p.levelTrim);
+    get (ParamIDs::ottDepth,    p.ottDepth);
+    get (ParamIDs::spectral,    p.spectral);
+    get (ParamIDs::tilt,        p.tilt);
+    get (ParamIDs::monoFreq,    p.monoFreq);
+    get (ParamIDs::stereoWidth, p.stereoWidth);
+    return p;
+}

@@ -9,6 +9,7 @@
 #include "Arpeggiator.h"
 #include "ReferenceMatch.h"
 #include "SoundTraits.h"
+#include "TasteModel.h"
 #include <optional>
 
 class ZeroEngineProcessor : public juce::AudioProcessor,
@@ -79,9 +80,33 @@ public:
     // designed profile as usual.
     void generate (juce::int64 seed = juce::Time::currentTimeMillis(), bool anyGenreToo = false);
 
+    // The heart (message thread): marks the sound playing now as liked, or
+    // unmarks it. A heart is the strongest taste judgment (it beats the results
+    // shown before it), and Generate breeds some candidates from hearted sounds
+    // of the type. Saved in %APPDATA%/Zero Engine/Hearts.xml.
+    void heartCurrent();
+    bool isCurrentHearted() const noexcept { return currentHearted; }
+    int getTasteJudgments() const noexcept { return taste.judgments(); }
+    TasteModel::Features getTasteWeights() const noexcept { return taste.meanWeights(); }
+
+    // Tooling: keep favourites, taste and hearts under another folder (tests and
+    // simulations must never touch the owner's), and pretend the last result
+    // was played for some seconds before the next click.
+    void setUserFolder (const juce::File& folder) { favouritesFolder = folder.getChildFile ("Favourites"); }
+    void simulateListening (float seconds)
+    {
+        if (shown.empty()) return;
+        shown.back().playedSeconds = seconds;
+        shown.back().shownAt -= seconds > 0.0f ? seconds + 1.0 : 0.0;
+    }
+    std::optional<TasteModel::Features> getLastShownFeatures() const { return shown.empty() ? std::nullopt : std::optional { shown.back().features }; }
+
     // Message thread: favourites are whole sounds (every parameter) saved as
     // files, named "<Genre> <Type> <n>", so a generated sound is never lost.
     juce::String saveFavourite();            // the name it was saved under, or empty on failure
+    // Quick save: the same, under a random two-word name ("Neon Viper"), never
+    // one already used; the display shows the name for a few seconds.
+    juce::String quickSave();
     juce::StringArray getFavourites() const; // newest first
     bool loadFavourite (const juce::String& name);
     bool deleteFavourite (const juce::String& name);
@@ -137,7 +162,9 @@ private:
     bool restoreState (const juce::XmlElement&);
     void adoptCurrentGenreAndType();
     void checkpoint(); // record an undo step if the sound changed since the last one
-    void generatePattern (juce::Random&);
+    void generatePattern (juce::Random&, int genre); // a step pattern from the genre's grooves
+    void generateArp (int type, juce::Random&); // Generate's roll of the arp: on or off, its settings, a new pattern
+    bool arpFromGenerate = false;                // the arp is on because Generate switched it on
     std::vector<juce::ValueTree> undoStack, redoStack;
     juce::ValueTree lastKnown;
 
@@ -158,6 +185,23 @@ private:
     std::pair<Profile, int> pickGeneratedProfile (int genre, int type, juce::Random&); // the profile and its leading genre
     std::vector<std::unique_ptr<ZeroEngineProcessor>> checkers; // private engines for the check renders, made on first use
     std::vector<SoundTraits> recentGenerated; // the last few results, so the next one differs
+
+    // Taste: Generate results as shown, how long each was played, and what the
+    // owner did next, becoming judgments for the TasteModel (see generate,
+    // timerCallback, saveFavourite).
+    struct Shown { TasteModel::Features features {}; double shownAt = 0.0; float playedSeconds = 0.0f; int label = 0; }; // label: 2 favourite, 1 kept, -1 skipped
+    std::vector<Shown> shown;
+    bool showingLatest = false; // the sound is still the last Generate result (not stepped back from, nor replaced)
+    TasteModel taste;
+
+    juce::File tasteFile() const { return favouritesFolder.getParentDirectory().getChildFile ("Taste.xml"); }
+    void judgeLastShown();
+    struct Heart { Profile profile {}; int genre = 0, type = 0; TasteModel::Features features {}; };
+    std::vector<Heart> hearts;
+    bool heartsLoaded = false, currentHearted = false;
+    std::optional<SoundTraits> lastPickTraits; // set by pickGeneratedProfile when its pick was measured
+    juce::File heartsFile() const { return favouritesFolder.getParentDirectory().getChildFile ("Hearts.xml"); }
+    void loadTasteAndHearts();
     int lastGenerateFits = 0;
     std::array<std::optional<SoundCheck>, 12 * 6> designedChecks; // genre * 6 + type
 

@@ -347,6 +347,28 @@ void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
 }
 
 //==============================================================================
+void HeartButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    // Two lobes and a point, drawn from cubic curves inside the button's square.
+    const auto r = getLocalBounds().toFloat().reduced (3.0f + (down ? 1.0f : 0.0f));
+    const auto size = juce::jmin (r.getWidth(), r.getHeight());
+    const auto box = r.withSizeKeepingCentre (size, size);
+    const auto x = box.getX(), y = box.getY(), w = box.getWidth(), h = box.getHeight();
+    juce::Path heart;
+    heart.startNewSubPath (x + 0.5f * w, y + 0.95f * h);
+    heart.cubicTo (x - 0.05f * w, y + 0.55f * h, x + 0.05f * w, y + 0.02f * h, x + 0.5f * w, y + 0.28f * h);
+    heart.cubicTo (x + 0.95f * w, y + 0.02f * h, x + 1.05f * w, y + 0.55f * h, x + 0.5f * w, y + 0.95f * h);
+    heart.closeSubPath();
+
+    if (filled)
+    {
+        g.setColour (Palette::orange.withAlpha (highlighted ? 1.0f : 0.9f));
+        g.fillPath (heart);
+    }
+    g.setColour ((filled ? Palette::yellow : Palette::accent).withAlpha (highlighted ? 1.0f : 0.75f));
+    g.strokePath (heart, juce::PathStrokeType (1.4f));
+}
+
 void ChevronButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     const auto r = getLocalBounds().toFloat();
@@ -1365,6 +1387,16 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     };
     addAndMakeVisible (matchButton);
 
+    quickSaveButton.onClick = [this]
+    {
+        if (const auto name = processor.quickSave(); name.isNotEmpty())
+        {
+            currentFavourite = name;
+            refreshFavourites();
+        }
+    };
+    quickSaveButton.setTooltip ("Quick save: the sound as it is now goes into Favourites under a random name.");
+    addAndMakeVisible (quickSaveButton);
     undoButton.onClick = [this] { processor.undo(); };
     redoButton.onClick = [this] { processor.redo(); };
     addAndMakeVisible (undoButton);
@@ -1413,6 +1445,14 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     anyGenreButton.setTooltip ("Generate from any genre: big sounds drawn from all twelve genres and blends of two. "
                                "The result loads as the genre it mostly came from.");
 
+    heartButton.onClick = [this]
+    {
+        processor.heartCurrent();
+        heartButton.setFilled (processor.isCurrentHearted());
+    };
+    heartButton.setTooltip ("Heart this sound: both Generate buttons learn what you like from your hearts "
+                            "(and from what you play or skip), and breed new sounds from hearted ones.");
+
     backButton.onClick = [this] { processor.stepHistory (-1); refreshHistoryButtons(); };
     forwardButton.onClick = [this] { processor.stepHistory (1); refreshHistoryButtons(); };
     addAndMakeVisible (backButton);
@@ -1459,6 +1499,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     addAndMakeVisible (mainButton);
     addAndMakeVisible (advancedButton);
     addAndMakeVisible (anyGenreButton); // over the display
+    addAndMakeVisible (heartButton);
     addChildComponent (advancedPanel); // last, so it sits over the panels
     showAdvanced (false);
 
@@ -1559,6 +1600,7 @@ void ZeroEngineEditor::timerCallback()
 {
     undoButton.setEnabled (processor.canUndo());
     redoButton.setEnabled (processor.canRedo());
+    heartButton.setFilled (processor.isCurrentHearted());
 
     for (size_t m = 0; m < macros.size(); ++m)
     {
@@ -1693,10 +1735,12 @@ void ZeroEngineEditor::resized()
     auto area = juce::Rectangle<int> (designWidth, designHeight).reduced (16);
 
     auto top = area.removeFromTop (44);
-    top.removeFromLeft (200);
-    undoButton.setBounds (top.removeFromLeft (48).withSizeKeepingCentre (48, 22));
+    top.removeFromLeft (130);
+    quickSaveButton.setBounds (top.removeFromLeft (72).withSizeKeepingCentre (72, 22));
     top.removeFromLeft (4);
-    redoButton.setBounds (top.removeFromLeft (48).withSizeKeepingCentre (48, 22));
+    undoButton.setBounds (top.removeFromLeft (44).withSizeKeepingCentre (44, 22));
+    top.removeFromLeft (4);
+    redoButton.setBounds (top.removeFromLeft (44).withSizeKeepingCentre (44, 22));
     auto outputArea = top.removeFromRight (104);
     outputKnob.label.setBounds (outputArea.removeFromLeft (60));
     outputKnob.knob.setBounds (outputArea);
@@ -1751,6 +1795,7 @@ void ZeroEngineEditor::resized()
     levelMeter.setBounds (content (meterSection));
     display.setBounds (content (displaySection));
     anyGenreButton.setBounds (display.getRight() - 40, display.getBottom() - 40, 36, 36); // over the display's corner
+    heartButton.setBounds (anyGenreButton.getX() - 24, anyGenreButton.getBottom() - 22, 22, 20); // its lower left
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
     matchButton.setBounds (displayMode.getX() - 56, displaySection.getY() + 3, 52, 16);
