@@ -399,6 +399,12 @@ TesseractButton::TesseractButton (bool small)
 void TesseractButton::fold()
 {
     foldStart = juce::Time::getMillisecondCounterHiRes();
+    // Gravity waves from the collapse: three, a moment apart, starting as the
+    // tesseract reaches the black hole (mid-fold).
+    for (int i = 0; i < 3; ++i)
+        waves.push_back ({ spaceTime + 0.4 + 0.22 * i, juce::Random::getSystemRandom().nextFloat() * juce::MathConstants<float>::twoPi });
+    if (waves.size() > 9)
+        waves.erase (waves.begin(), waves.begin() + (std::ptrdiff_t) (waves.size() - 9));
 }
 
 void TesseractButton::timerCallback()
@@ -493,6 +499,38 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.fillEllipse (p.x - halo, p.y - halo, 2.0f * halo, 2.0f * halo);
         g.setColour (n.colour.brighter (0.4f).withAlpha (0.75f * shimmer));
         g.fillEllipse (p.x - 0.5f * n.size, p.y - 0.5f * n.size, n.size, n.size);
+    }
+
+    // Gravity waves from a collapse: faint rings rippling out from the black
+    // hole across the whole screen, uneven (a few slow wobbles round each),
+    // fading as they spread; light blue going to magenta.
+    {
+        const auto farthest = std::hypot (0.5f * screen.getWidth(), 0.5f * screen.getHeight());
+        for (const auto& w : waves)
+        {
+            const auto age = (float) (spaceTime - w.start);
+            const auto life = 3.2f;
+            if (age <= 0.0f || age >= life)
+                continue;
+            const auto k = age / life;
+            const auto reach = farthest * 1.1f * (1.0f - std::pow (1.0f - k, 2.0f)); // fast at first, easing out
+            juce::Path ring;
+            for (int s = 0; s <= 96; ++s)
+            {
+                const auto a = juce::MathConstants<float>::twoPi * (float) s / 96.0f;
+                const auto wobble = 1.0f + 0.05f * std::sin (3.0f * a + w.phase + age) + 0.035f * std::sin (5.0f * a - 1.7f * w.phase - 0.6f * age);
+                const auto p = c + juce::Point<float> (std::cos (a), std::sin (a) * 0.78f) * (reach * wobble);
+                if (s == 0)
+                    ring.startNewSubPath (p);
+                else
+                    ring.lineTo (p);
+            }
+            const auto alpha = 0.16f * (1.0f - k) * std::sqrt (k * 4.0f > 1.0f ? 1.0f : k * 4.0f);
+            g.setColour (Palette::accent.interpolatedWith (Palette::magenta, k).withAlpha (alpha));
+            g.strokePath (ring, juce::PathStrokeType (1.4f + 2.0f * (1.0f - k)));
+            g.setColour (Palette::accent.withAlpha (alpha * 0.25f)); // a soft halo
+            g.strokePath (ring, juce::PathStrokeType (8.0f * (1.0f - k) + 2.0f));
+        }
     }
 
     // The black hole at the centre: an accretion disc of tilted rings, magenta

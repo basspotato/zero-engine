@@ -1002,6 +1002,29 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "wavestrip" && args.size() >= 2)
+    {
+        // The gravity waves after a click: the Generate screen at 6 moments.
+        TesseractButton tesseract;
+        tesseract.setSize (420, 220);
+        const double moments[] { 0.6, 1.0, 1.5, 2.0, 2.7, 3.4 };
+        juce::Image strip (juce::Image::ARGB, 420 * 3, 220 * 2, true);
+        {
+            juce::Graphics g (strip);
+            for (size_t i = 0; i < std::size (moments); ++i)
+            {
+                tesseract.showWavesAt (moments[i]);
+                g.drawImageAt (tesseract.createComponentSnapshot (tesseract.getLocalBounds()), 420 * (int) (i % 3), 220 * (int) (i / 3));
+            }
+        }
+        juce::FileOutputStream out (argFile (args, 1, {}));
+        out.setPosition (0);
+        out.truncate();
+        juce::PNGImageFormat().writeImageToStream (strip, out);
+        std::printf ("Wrote %s\n", argFile (args, 1, {}).getFullPathName().toRawUTF8());
+        return 0;
+    }
+
     if (command == "foldstrip" && args.size() >= 2)
     {
         // The Generate tesseract at 11 points through its fold, side by side.

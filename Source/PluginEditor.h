@@ -218,6 +218,8 @@ public:
 
     // Freezes the animation at a point of the fold (0..1), for preview images.
     void showFoldAt (float progress) { foldStart = -1.0; foldProgress = progress; repaint(); }
+    // Shows the gravity waves a click sends out, some seconds after it (previews).
+    void showWavesAt (double secondsAfterClick) { waves = { { 0.4, 0.7f }, { 0.62, 2.1f }, { 0.84, 4.0f } }; spaceTime = secondsAfterClick; foldStart = -1.0; foldProgress = 0.0f; repaint(); }
 
     void paintButton (juce::Graphics&, bool highlighted, bool down) override;
 
@@ -235,6 +237,8 @@ private:
     double spaceTime = 0.0;
     struct Node { float radius, angle, size; juce::Colour colour; bool ray; float phase; }; // the burst at the centre (radius 0..1)
     std::vector<Node> nodes;
+    struct Wave { double start; float phase; }; // a gravity wave from a collapse: when it starts (spaceTime) and how it wobbles
+    std::vector<Wave> waves;
     void paintSpace (juce::Graphics&, juce::Rectangle<float> screen);
     bool mini = false;
 };
