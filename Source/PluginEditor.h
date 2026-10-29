@@ -228,6 +228,12 @@ private:
     float colourPhase = 0.0f; // the colour's drift: advances at the resting pace only
     double foldStart = -1.0;  // ms timestamp; negative when not folding
     float foldProgress = 0.0f; // 0..1 while folding
+    // Space behind it: stars (position 0..1, size, twinkle rate and phase), and
+    // the time they twinkle and the black hole turns by (seconds).
+    struct Star { float x, y, size, rate, phase; };
+    std::vector<Star> stars;
+    double spaceTime = 0.0;
+    void paintSpace (juce::Graphics&, juce::Rectangle<float> screen);
     bool mini = false;
 };
 

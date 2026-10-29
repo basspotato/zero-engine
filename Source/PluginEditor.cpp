@@ -417,8 +417,77 @@ void TesseractButton::timerCallback()
 
     angle += 0.008f + 0.12f * std::sin (juce::MathConstants<float>::pi * foldProgress); // spins up mid-fold
     colourPhase += 0.008f; // the resting turn's pace, whatever a fold does
+    spaceTime += 1.0 / 60.0;
     if (isShowing())
         repaint();
+}
+
+void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> screen)
+{
+    // Kept faint, so the tesseract stays the thing to look at.
+    using juce::MathConstants;
+    if (stars.empty())
+    {
+        juce::Random random (7);
+        for (int i = 0; i < 150; ++i)
+            stars.push_back ({ random.nextFloat(), random.nextFloat(), 0.5f + 1.3f * random.nextFloat() * random.nextFloat(),
+                               0.3f + 1.5f * random.nextFloat(), MathConstants<float>::twoPi * random.nextFloat() });
+    }
+    const auto t = (float) spaceTime;
+    juce::Graphics::ScopedSaveState saved (g);
+    g.reduceClipRegion (screen.toNearestInt());
+
+    // Stars, each twinkling at its own slow rate.
+    for (const auto& s : stars)
+    {
+        const auto twinkle = 0.5f + 0.5f * std::sin (s.phase + t * s.rate);
+        g.setColour (juce::Colour (0xffdfe9ff).withAlpha (0.12f + 0.45f * twinkle * juce::jmin (1.0f, s.size)));
+        g.fillEllipse (screen.getX() + s.x * screen.getWidth() - 0.5f * s.size, screen.getY() + s.y * screen.getHeight() - 0.5f * s.size,
+                       s.size, s.size);
+    }
+
+    // Two planets, drifting a few pixels over minutes: lit from the upper left.
+    auto planet = [&] (float x, float y, float radius, juce::Colour colour, float drift)
+    {
+        const auto centre = juce::Point<float> (screen.getX() + (x + 0.01f * std::sin (t * drift)) * screen.getWidth(),
+                                                screen.getY() + (y + 0.008f * std::cos (t * drift * 0.7f)) * screen.getHeight());
+        juce::ColourGradient lit (colour.withAlpha (0.38f), centre.x - radius * 0.4f, centre.y - radius * 0.4f,
+                                  colour.darker (0.8f).withAlpha (0.05f), centre.x + radius, centre.y + radius, true);
+        g.setGradientFill (lit);
+        g.fillEllipse (centre.x - radius, centre.y - radius, 2.0f * radius, 2.0f * radius);
+    };
+    const auto h = screen.getHeight();
+    planet (0.13f, 0.28f, 0.075f * h, Palette::accent, 0.031f);
+    planet (0.86f, 0.70f, 0.045f * h, Palette::magenta, 0.023f);
+
+    // A black hole at the centre: an accretion disc of tilted rings, magenta
+    // into orange, turning slowly; a dark core with a faint rim of light.
+    const auto c = screen.getCentre();
+    const auto r = 0.36f * juce::jmin (screen.getWidth(), screen.getHeight());
+    for (int ring = 0; ring < 7; ++ring)
+    {
+        const auto k = (float) ring / 6.0f;
+        const auto radius = r * (0.55f + 0.5f * k);
+        juce::Path disc;
+        disc.addEllipse (-radius, -radius * 0.32f, 2.0f * radius, 2.0f * radius * 0.32f);
+        const auto turn = juce::AffineTransform::rotation (-0.35f + 0.05f * std::sin (t * 0.05f))
+                              .translated (c.x, c.y);
+        g.setColour (Palette::magenta.interpolatedWith (Palette::orange, k).withAlpha (0.07f * (1.0f - 0.6f * k)));
+        // Each ring a dashed arc set turning at its own pace, so the disc swirls.
+        juce::Path dashed;
+        const float dashes[] { 6.0f + 10.0f * k, 9.0f };
+        juce::PathStrokeType (1.2f).createDashedStroke (dashed, disc, dashes, 2,
+            juce::AffineTransform::rotation (t * (0.08f - 0.04f * k)).followedBy (juce::AffineTransform::scale (1.0f, 1.0f)));
+        g.strokePath (disc, juce::PathStrokeType (2.5f), turn);
+        g.setColour (Palette::yellow.withAlpha (0.05f * (1.0f - k)));
+        g.fillPath (dashed, juce::AffineTransform::rotation (t * (0.1f - 0.05f * k)).followedBy (turn));
+    }
+    const auto core = r * 0.28f;
+    juce::ColourGradient rim (juce::Colour (0xff05060c), c.x, c.y, Palette::magenta.withAlpha (0.0f), c.x + core * 1.6f, c.y, true);
+    rim.addColour (0.62, juce::Colour (0xff05060c));
+    rim.addColour (0.72, Palette::orange.withAlpha (0.25f));
+    g.setGradientFill (rim);
+    g.fillEllipse (c.x - core * 1.6f, c.y - core * 1.6f, core * 3.2f, core * 3.2f);
 }
 
 void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
@@ -429,6 +498,7 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
     if (! mini)
     {
         fillScreen (g, bounds);
+        paintSpace (g, bounds.reduced (2.0f));
         auto hint = bounds.removeFromBottom (18.0f);
         if (highlighted) // the hint only appears on mouse-over
         {
