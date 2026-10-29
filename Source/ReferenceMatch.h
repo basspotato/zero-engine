@@ -26,7 +26,11 @@ public:
     // Message thread. Cancels any match already running. genre/type: where the
     // plugin is now; that preset is tried as startFrom (the sound as it is now)
     // instead of its designed default, like any other start.
-    void start (const juce::File& reference, int genre, int type, const Profile& startFrom);
+    // projectBpm: the tempo candidates render at when the file name gives none
+    // (loops are usually named with theirs, e.g. "..._175_Arp_..."): tempo-synced
+    // LFOs and delays must run at the reference's tempo to match it.
+    void start (const juce::File& reference, int genre, int type, const Profile& startFrom, float projectBpm = 120.0f);
+    static float tempoFromName (const juce::String& fileName); // 0 when it names none
 
     enum class State { idle, running, done, failed };
     State getState() const noexcept { return state.load(); }
@@ -42,6 +46,7 @@ public:
         juce::String summary;
         SoundPrint target, matched; // the reference and the best render, for tooling
         float distance = 0.0f;      // SoundPrint::distance of the best render
+        float bpm = 120.0f;         // the tempo it was rendered at
     };
     Result take();
 
@@ -59,11 +64,18 @@ public:
     // a match does (for tooling: does the true answer score near zero?).
     static float score (ZeroEngineProcessor& engine, const SoundPrint& target, int genre, int type, const Profile& profile, bool light);
 
+    // The settings the search moves, as 0..1 units (what the neural starting
+    // points predict): a profile's, and a profile with them set.
+    static constexpr int numSearched = 22;
+    static std::array<float, numSearched> unitsOf (const Profile&);
+    static Profile withUnitsOf (Profile, const std::array<float, numSearched>&);
+
 private:
     void run() override;
 
     std::vector<ZeroEngineProcessor*> engines;
     juce::File file;
+    float bpm = 120.0f;
     int genre = 0, type = 0;
     Profile from {};
     Result result;

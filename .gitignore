@@ -7,3 +7,5 @@ out/
 *.user
 CMakeUserPresets.json
 analysis/
+third_party/
+third party/

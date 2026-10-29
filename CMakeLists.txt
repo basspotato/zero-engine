@@ -34,6 +34,8 @@ target_sources(ZeroEngine
         Source/Arpeggiator.cpp
         Source/SoundPrint.cpp
         Source/ReferenceMatch.cpp
+        Source/MatchNet.cpp
+        Source/SoundTraits.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp
@@ -75,6 +77,7 @@ target_sources(ZeroAnalyze
         tools/analyze/MatchBench.cpp
         tools/analyze/MatchLibrary.cpp
         tools/analyze/MatchJudge.cpp
+        tools/analyze/MatchNetTrain.cpp
         tools/analyze/Library.cpp
         tools/analyze/Tuner.cpp
         tools/analyze/Harmonics.cpp
@@ -84,6 +87,8 @@ target_sources(ZeroAnalyze
         Source/Arpeggiator.cpp
         Source/SoundPrint.cpp
         Source/ReferenceMatch.cpp
+        Source/MatchNet.cpp
+        Source/SoundTraits.cpp
         Source/Profiles.cpp
         Source/PluginEditor.cpp
         Source/SynthVoice.cpp

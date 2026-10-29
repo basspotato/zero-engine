@@ -4,6 +4,8 @@
 #include "SynthVoice.h"
 #include "Wavetable.h"
 #include "Profiles.h"
+#include "GenerateTargets.h"
+#include <thread>
 
 namespace
 {
@@ -143,25 +145,23 @@ bool ZeroEngineProcessor::stepHistory (int direction)
     return true;
 }
 
-ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (int genre, int type, const Profile& profile)
+ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile& profile)
 {
-    // A third of a second of a note (or a triad for chords and pads) through a private
-    // engine, then the four measurements that explain most mix-to-mix variation:
-    // loudness, brightness, bass and width.
+    // Three quarters of a second of a note (or a triad for chords and pads)
+    // through a private engine, light (no spectral stage or oversampling: the
+    // check needs the shape, not the last detail), then its SoundTraits.
     constexpr double rate = 48000.0;
-    constexpr int block = 512, length = 16384; // 0.34 s
-    constexpr int fftOrder = 12, fftSize = 1 << fftOrder;
+    constexpr int block = 512, length = 72 * block; // 0.77 s
 
-    if (checker == nullptr)
-        checker = std::make_unique<ZeroEngineProcessor>();
-    checker->setPlayConfigDetails (0, 2, rate, block);
-    checker->prepareToPlay (rate, block); // fresh voices and tails for every candidate
+    engine.setPlayConfigDetails (0, 2, rate, block);
+    engine.prepareToPlay (rate, block); // fresh voices and tails for every candidate
+    engine.setLightRender (true);
     // Measure the tone, not the fade-in: slow attacks (pads, FX) would otherwise
     // be compared part-way up their swell.
     auto heard = profile;
     heard.ampAttack = juce::jmin (heard.ampAttack, 0.01f);
     heard.modAttack = juce::jmin (heard.modAttack, 0.01f);
-    checker->loadProfile (genre, type, heard);
+    engine.loadProfile (genre, type, heard);
 
     juce::AudioBuffer<float> out (2, length), chunk (2, block);
     juce::MidiBuffer midi;
@@ -176,91 +176,192 @@ ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (int genre, 
             for (int i = 0; i < (chord ? 3 : 1); ++i)
                 midi.addEvent (juce::MidiMessage::noteOn (1, root + intervals[i], (juce::uint8) 110), 0);
         chunk.clear();
-        checker->processBlock (chunk, midi);
+        engine.processBlock (chunk, midi);
         for (int ch = 0; ch < 2; ++ch)
-            out.copyFrom (ch, pos, chunk, ch, 0, juce::jmin (block, length - pos));
+            out.copyFrom (ch, pos, chunk, ch, 0, block);
     }
-
-    SoundCheck m;
-    double mid2 = 0.0, side2 = 0.0;
-    for (int i = 0; i < length; ++i)
-    {
-        const auto l = out.getSample (0, i), r = out.getSample (1, i);
-        mid2 += 0.25 * (l + r) * (l + r);
-        side2 += 0.25 * (l - r) * (l - r);
-    }
-    m.levelDb = (float) juce::Decibels::gainToDecibels (std::sqrt ((mid2 + side2) / length), -100.0);
-    m.sidePct = (float) (100.0 * side2 / juce::jmax (1.0e-12, mid2 + side2));
-
-    // Spectrum of the held part (the last 4096 samples, mid channel).
-    std::vector<float> fft ((size_t) fftSize * 2, 0.0f);
-    for (int i = 0; i < fftSize; ++i)
-    {
-        const auto s = length - fftSize + i;
-        const auto hann = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftSize - 1));
-        fft[(size_t) i] = 0.5f * (out.getSample (0, s) + out.getSample (1, s)) * hann;
-    }
-    juce::dsp::FFT (fftOrder).performFrequencyOnlyForwardTransform (fft.data());
-
-    double total = 0.0, weighted = 0.0, bass = 0.0;
-    for (int bin = 1; bin < fftSize / 2; ++bin)
-    {
-        const auto hz = bin * rate / fftSize;
-        const auto e = (double) fft[(size_t) bin] * fft[(size_t) bin];
-        total += e;
-        weighted += e * hz;
-        if (hz < 150.0)
-            bass += e;
-    }
-    m.centroidHz = (float) (total > 0.0 ? weighted / total : 0.0);
-    m.bassPct = (float) (total > 0.0 ? 100.0 * bass / total : 0.0);
-    return m;
+    return SoundTraits::of (out, rate);
 }
 
 Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random)
 {
-    // Render-and-check: several variations, each measured against the designed
-    // profile; keep those that still sit in the genre/type's character, then
-    // choose among them at random so results stay varied. If none fit, the
-    // closest one wins.
-    constexpr int candidates = 6;
+    // Render-and-check, then pick for size and interest:
+    //  1. Many variations, each measured (SoundTraits) on private engines in parallel.
+    //  2. Keep those still in the genre/type's character: loudness, brightness,
+    //     bass and width near the designed profile's (each term 1 at the edge).
+    //  3. Score the keepers, each trait on its own as a soft nudge (the owner's
+    //     sounds are a guide for parts, never a whole to copy): wider, more body,
+    //     denser, more movement and more partials than the designed sound score
+    //     higher, measured in spreads of the owner's sounds of this type and
+    //     capped at 1.5 (no reward for going to extremes); plus novelty, the
+    //     distance from the last few results, so clicks keep surprising.
+    //  4. Choose at random, weighted towards the best scores (softmax), so
+    //     results stay varied. If none fit, the closest one wins.
+    constexpr int candidates = 24;
+    constexpr int engines = 4;
+    while ((int) checkers.size() < engines)
+    {
+        checkers.push_back (std::make_unique<ZeroEngineProcessor>());
+        checkers.back()->stopProfileSync();
+    }
+
     // The designed profile never changes while running, so measure it once.
     auto& cached = designedChecks[(size_t) (genre * 6 + type)];
     if (! cached.has_value())
-        cached = measureProfile (genre, type, makeProfile (genre, type));
+        cached = measureProfile (*checkers[0], genre, type, makeProfile (genre, type));
     const auto target = *cached;
 
-    std::vector<std::pair<Profile, float>> fits;
-    Profile closest {};
-    auto closestDistance = std::numeric_limits<float>::max();
-
+    std::vector<Profile> profiles;
     for (int i = 0; i < candidates; ++i)
+        profiles.push_back (generateProfile (genre, type, random));
+    std::vector<SoundTraits> traits ((size_t) candidates);
     {
-        const auto profile = generateProfile (genre, type, random);
-        const auto m = measureProfile (genre, type, profile);
+        std::vector<std::thread> pool;
+        for (int e = 0; e < engines; ++e)
+            pool.emplace_back ([&, e]
+            {
+                for (int i = e; i < candidates; i += engines)
+                    traits[(size_t) i] = measureProfile (*checkers[(size_t) e], genre, type, profiles[(size_t) i]);
+            });
+        for (auto& t : pool)
+            t.join();
+    }
 
-        // Each term is 1.0 at the edge of "still the same kind of sound".
+    const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
+    auto spreadOf = [&] (int k) { return juce::jmax (1.0e-3f, guide.spread[(size_t) k]); };
+    // A trait's gain over the designed sound, in the owner's spreads, capped.
+    auto gain = [&] (int k, float value, float designed, bool lowerIsMore)
+    {
+        const auto z = (value - designed) / spreadOf (k);
+        return juce::jlimit (-2.0f, 1.5f, lowerIsMore ? -z : z);
+    };
+    enum { level, side, centroid, bass, body, spread, crest, movement, richness };
+
+    // How far a sound strays from the genre/type's character (1 at the edge of
+    // "still the same kind of sound"), or a large value when it is near silent.
+    auto strayOf = [&] (const SoundTraits& m)
+    {
+        if (m.levelDb < target.levelDb - 20.0f)
+            return std::numeric_limits<float>::max();
         const auto loudness = std::abs (m.levelDb - target.levelDb) / 6.0f;
         const auto brightness = std::abs (std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz))) / 0.8f;
-        const auto bass = std::abs (m.bassPct - target.bassPct) / 20.0f;
-        const auto spread = std::abs (m.sidePct - target.sidePct) / 20.0f;
-        const auto worst = juce::jmax (juce::jmax (loudness, brightness), juce::jmax (bass, spread));
-        const auto silent = m.levelDb < target.levelDb - 20.0f;
-
-        if (! silent && worst <= 1.0f)
-            fits.push_back ({ profile, worst });
-        if (! silent && worst < closestDistance)
+        const auto bassShare = std::abs (m.bassPct - target.bassPct) / 20.0f;
+        const auto widthOff = std::abs (m.sidePct - target.sidePct) / 20.0f;
+        return juce::jmax (juce::jmax (loudness, brightness), juce::jmax (bassShare, widthOff));
+    };
+    // Size + interest + novelty (see above).
+    auto scoreOf = [&] (const SoundTraits& m, bool print = false)
+    {
+        const auto a = m.asArray(), d = target.asArray();
+        const auto big = gain (side, a[side], d[side], false) + 0.5f * gain (body, a[body], d[body], false)
+                       + 0.5f * gain (crest, a[crest], d[crest], true);
+        const auto interest = gain (movement, a[movement], d[movement], false) + gain (richness, a[richness], d[richness], false);
+        auto novelty = 3.0f;
+        for (const auto& r : recentGenerated)
         {
-            closest = profile;
-            closestDistance = worst;
+            const auto b = r.asArray();
+            float sum = 0.0f;
+            for (int k = 0; k < SoundTraits::count; ++k)
+                if (k != centroid) // brightness in octaves, the rest in spreads
+                    sum += juce::square ((a[(size_t) k] - b[(size_t) k]) / spreadOf (k));
+            sum += juce::square (std::log2 (juce::jmax (20.0f, a[centroid]) / juce::jmax (20.0f, b[centroid])) / 0.8f);
+            novelty = juce::jmin (novelty, std::sqrt (sum));
+        }
+        if (print && debugGenerate)
+            std::printf ("    big %+5.2f  interest %+5.2f  novelty %4.2f  side %5.1f (designed %5.1f)  move %4.1f (%4.1f)  rich %.2f (%.2f)  crest %4.1f (%4.1f)  body %4.1f (%4.1f)\n",
+                         big, interest, novelty, a[side], d[side], a[movement], d[movement], a[richness], d[richness], a[crest], d[crest], a[body], d[body]);
+        return big + interest + 0.7f * novelty;
+    };
+
+    struct Keeper { int index; float score; };
+    std::vector<Keeper> keepers;
+    int closest = -1;
+    auto closestDistance = std::numeric_limits<float>::max();
+    for (int i = 0; i < candidates; ++i)
+    {
+        const auto stray = strayOf (traits[(size_t) i]);
+        if (stray < closestDistance)
+        {
+            closest = i;
+            closestDistance = stray;
+        }
+        if (stray <= 1.0f)
+            keepers.push_back ({ i, scoreOf (traits[(size_t) i]) });
+    }
+
+    lastGenerateFits = (int) keepers.size();
+    if (keepers.empty())
+        return closest >= 0 ? profiles[(size_t) closest] : makeProfile (genre, type);
+
+    // Softmax at temperature 0.35: the best are likely, not certain.
+    auto chosen = keepers.back().index;
+    {
+        const auto top = std::max_element (keepers.begin(), keepers.end(), [] (const Keeper& x, const Keeper& y) { return x.score < y.score; })->score;
+        std::vector<double> weights;
+        double sum = 0.0;
+        for (const auto& k : keepers)
+            sum += weights.emplace_back (std::exp ((k.score - top) / 0.35));
+        auto pick = random.nextDouble() * sum;
+        for (size_t k = 0; k < keepers.size(); ++k)
+            if ((pick -= weights[k]) <= 0.0)
+            {
+                chosen = keepers[k].index;
+                break;
+            }
+    }
+    auto best = profiles[(size_t) chosen];
+    auto bestTraits = traits[(size_t) chosen];
+    auto bestScore = scoreOf (bestTraits, true);
+
+    // Push: twice, one small nudge per engine (three of the settings Reference
+    // Match searches, moved a little); the best nudge that scores higher and
+    // still fits replaces it. Picking alone only chooses among what the
+    // variations happen to be; this walks the chosen one towards bigger.
+    for (int round = 0; round < 2; ++round)
+    {
+        std::vector<Profile> nudged ((size_t) engines);
+        for (auto& p : nudged)
+        {
+            auto units = ReferenceMatch::unitsOf (best);
+            for (int n = 0; n < 3; ++n)
+            {
+                auto& u = units[(size_t) random.nextInt (ReferenceMatch::numSearched)];
+                u = juce::jlimit (0.0f, 1.0f, u + 0.15f * (random.nextFloat() * 2.0f - 1.0f));
+            }
+            p = ReferenceMatch::withUnitsOf (best, units);
+        }
+        std::vector<SoundTraits> measured ((size_t) engines);
+        {
+            std::vector<std::thread> pool;
+            for (int e = 0; e < engines; ++e)
+                pool.emplace_back ([&, e] { measured[(size_t) e] = measureProfile (*checkers[(size_t) e], genre, type, nudged[(size_t) e]); });
+            for (auto& t : pool)
+                t.join();
+        }
+        auto improved = -1;
+        for (int e = 0; e < engines; ++e)
+            if (strayOf (measured[(size_t) e]) <= 1.0f)
+                if (const auto s = scoreOf (measured[(size_t) e]); s > bestScore + 0.05f)
+                {
+                    bestScore = s;
+                    improved = e;
+                }
+        if (improved >= 0)
+        {
+            best = nudged[(size_t) improved];
+            bestTraits = measured[(size_t) improved];
+            if (debugGenerate)
+                std::printf ("    pushed to %.2f\n", bestScore);
         }
     }
 
-    lastGenerateFits = (int) fits.size();
-    if (! fits.empty())
-        return fits[(size_t) random.nextInt ((int) fits.size())].first;
-    return closestDistance < std::numeric_limits<float>::max() ? closest : makeProfile (genre, type);
+    recentGenerated.push_back (bestTraits);
+    if (recentGenerated.size() > 6)
+        recentGenerated.erase (recentGenerated.begin());
+    return best;
 }
+
+
 
 void ZeroEngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
@@ -310,8 +411,9 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 macroParams[m]->setValueNotifyingHost (value);
     }
 
-    // Host tempo for the delay and synced LFOs; 120 BPM when there is none (standalone).
-    auto bpm = 120.0;
+    // Host tempo for the delay and synced LFOs; the fallback (120 BPM unless set) when
+    // there is none (standalone, offline renders).
+    auto bpm = (double) fallbackBpm.load();
     if (auto* host = getPlayHead())
         if (const auto position = host->getPosition())
             if (const auto hostTempo = position->getBpm())
@@ -521,7 +623,7 @@ void ZeroEngineProcessor::startMatch (const juce::File& reference)
     syncProfile();
     const int genre = appliedGenre, type = appliedType;
     matchSummary.clear();
-    matcher->start (reference, genre, type, makeProfile (genre, type));
+    matcher->start (reference, genre, type, makeProfile (genre, type), hostBpm.load()); // the project's tempo unless the file names one
 }
 
 juce::String ZeroEngineProcessor::getMatchStatus() const

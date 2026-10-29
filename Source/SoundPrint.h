@@ -48,6 +48,7 @@ struct SoundPrint
     // loudness envelope); set by tooling to tune, otherwise as tuned on matchbench.
     struct Weights { float mel = 1.0f, mfcc = 1.0f, centroid = 1.0f, loudness = 1.0f; };
     static inline Weights weights;
+    static inline bool debugNotes = false; // tooling: print each detected note and why it was merged or kept
 
     // How far apart two prints are; about 1 means "clearly a different sound".
     // explain (tooling): set to the terms that make up the distance.

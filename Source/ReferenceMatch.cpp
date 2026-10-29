@@ -149,9 +149,37 @@ ReferenceMatch::~ReferenceMatch()
     stopThread (10000);
 }
 
-void ReferenceMatch::start (const juce::File& reference, int newGenre, int newType, const Profile& startFrom)
+float ReferenceMatch::tempoFromName (const juce::String& fileName)
+{
+    // A time-stretched copy plays at some other tempo than its name says.
+    if (fileName.containsIgnoreCase ("stretch"))
+        return 0.0f;
+    // A number from 70 to 200 standing alone between separators, "bpm" after it
+    // preferred; one with a leading zero is an index ("093_Chord_Hit_116bpm").
+    float first = 0.0f;
+    for (auto token : juce::StringArray::fromTokens (fileName, " _-.()[]", ""))
+    {
+        const auto marked = token.endsWithIgnoreCase ("bpm");
+        if (marked)
+            token = token.dropLastCharacters (3);
+        if (token.isEmpty() || ! token.containsOnly ("0123456789") || token.startsWithChar ('0'))
+            continue;
+        const auto value = token.getFloatValue();
+        if (value < 70.0f || value > 200.0f)
+            continue;
+        if (marked)
+            return value;
+        if (first == 0.0f)
+            first = value;
+    }
+    return first;
+}
+
+void ReferenceMatch::start (const juce::File& reference, int newGenre, int newType, const Profile& startFrom, float projectBpm)
 {
     stopThread (10000);
+    const auto named = tempoFromName (reference.getFileNameWithoutExtension());
+    bpm = named > 0.0f ? named : projectBpm;
     file = reference;
     genre = newGenre;
     type = newType;
@@ -193,12 +221,22 @@ void ReferenceMatch::run()
 
     const auto playing = playingFor (target);
 
+    // A wobble at a note value of the reference's tempo runs synced, as it was
+    // surely made, so it keeps step with the notes (a free LFO a little off
+    // drifts out of phase over the phrase): the closest division within 7 %.
+    auto wobbleSync = 0.0f;
+    if (target.moveRateHz > 0.0f)
+        for (int s = 1; s < (int) std::size (lfoSyncBeats); ++s)
+            if (std::abs (bpm / 60.0f / lfoSyncBeats[s] / target.moveRateHz - 1.0f) < 0.07f)
+                wobbleSync = (float) s;
+
     const auto workers = (int) engines.size();
     for (auto* engine : engines) // once: preparing allocates (delay lines, oversampling); renders only reset
     {
         engine->setPlayConfigDetails (0, 2, rate, block);
         engine->prepareToPlay (rate, block);
         engine->setLightRender (lightSearch);
+        engine->setFallbackTempo (bpm); // synced LFOs and delays at the reference's tempo
         if (target.harmonics.has_value()) // the Sample wavetable is the reference's own
             engine->setSampleHarmonics (*target.harmonics);
     }
@@ -244,7 +282,7 @@ void ReferenceMatch::run()
             if (target.moveRateHz > 0.0f) // a wobbling reference: each preset with the wobble too
             {
                 auto p = c.profile;
-                p.lfoSync = 0.0f;
+                p.lfoSync = wobbleSync;
                 p.lfoRate = target.moveRateHz;
                 p.lfoToCutoff = juce::jmax (p.lfoToCutoff, 2.0f);
                 p.filterCutoff = juce::jmin (p.filterCutoff, 800.0f); // a wide-open filter has nothing to wobble
@@ -368,7 +406,7 @@ void ReferenceMatch::run()
                 for (const auto [toCutoff, toPos] : { std::pair { 1.5f, 0.0f }, { 3.0f, 0.0f }, { 0.0f, 0.5f } })
                 {
                     auto p = best.profile;
-                    p.lfoSync = 0.0f;
+                    p.lfoSync = wobbleSync;
                     p.lfoRate = target.moveRateHz;
                     p.lfoToCutoff = toCutoff;
                     p.lfoToPos = toPos;
@@ -382,7 +420,7 @@ void ReferenceMatch::run()
 
         auto base = best.profile;
         if (target.moveRateHz > 0.0f)
-            base.lfoSync = 0.0f; // free-running, so the rate dimension counts
+            base.lfoSync = wobbleSync; // free-running unless synced, so the rate dimension counts
         std::vector<double> units;
         for (const auto& d : dimensions)
             units.push_back (toUnit (d, base.*d.member));
@@ -549,6 +587,7 @@ void ReferenceMatch::run()
     result.type = winner.type;
     result.matched = winner.print;
     result.distance = winner.distance;
+    result.bpm = bpm;
     // How close, in words: a percentage of a loss means little to a listener.
     // Calibrated on matchbench (distance against the judge's dB).
     const auto closeness = winner.distance < closeBelow ? "VERY CLOSE" : winner.distance < closeBelow * 1.75f ? "CLOSE"
@@ -596,4 +635,20 @@ float ReferenceMatch::score (ZeroEngineProcessor& engine, const SoundPrint& targ
     }
     engine.setLightRender (false);
     return d;
+}
+
+std::array<float, ReferenceMatch::numSearched> ReferenceMatch::unitsOf (const Profile& p)
+{
+    static_assert (std::size (dimensions) == numSearched);
+    std::array<float, numSearched> units {};
+    for (size_t i = 0; i < units.size(); ++i)
+        units[i] = (float) toUnit (dimensions[i], p.*dimensions[i].member);
+    return units;
+}
+
+Profile ReferenceMatch::withUnitsOf (Profile p, const std::array<float, numSearched>& units)
+{
+    for (size_t i = 0; i < units.size(); ++i)
+        p.*dimensions[i].member = fromUnit (dimensions[i], juce::jlimit (0.0, 1.0, (double) units[i]));
+    return p;
 }

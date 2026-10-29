@@ -8,6 +8,7 @@
 #include "Profiles.h"
 #include "Arpeggiator.h"
 #include "ReferenceMatch.h"
+#include "SoundTraits.h"
 #include <optional>
 
 class ZeroEngineProcessor : public juce::AudioProcessor,
@@ -86,6 +87,7 @@ public:
 
     // How many of the last Generate's candidates passed the check (out of 6), for tests and tuning.
     int getLastGenerateFits() const noexcept { return lastGenerateFits; }
+    static inline bool debugGenerate = false; // tooling: print every candidate's scores
 
     // Message thread: step back (-1) or forward (+1) through generated sounds.
     // Returns false at either end.
@@ -120,6 +122,9 @@ public:
 
     // For engines used offline (Reference Match renders): no timer reloading profiles.
     void stopProfileSync() { stopTimer(); }
+    // The tempo used when the host gives none (Reference Match renders at the reference's).
+    void setFallbackTempo (float bpm) { fallbackBpm.store (juce::jlimit (40.0f, 300.0f, bpm)); }
+    float getTempo() const noexcept { return hostBpm.load(); }
 
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboardState;
@@ -142,11 +147,13 @@ private:
     std::vector<juce::ValueTree> history; // Generate history, oldest first (message thread)
     int historyPos = -1;
 
-    // Generate's render-and-check (message thread, ~0.15 s per click).
-    struct SoundCheck { float levelDb = -100, centroidHz = 0, bassPct = 0, sidePct = 0; };
-    SoundCheck measureProfile (int genre, int type, const Profile&);
+    // Generate's render-and-check (message thread): many variations measured on
+    // private engines in parallel, see pickGeneratedProfile.
+    using SoundCheck = SoundTraits;
+    static SoundCheck measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile&);
     Profile pickGeneratedProfile (int genre, int type, juce::Random&);
-    std::unique_ptr<ZeroEngineProcessor> checker; // private engine for the check renders, made on first use
+    std::vector<std::unique_ptr<ZeroEngineProcessor>> checkers; // private engines for the check renders, made on first use
+    std::vector<SoundTraits> recentGenerated; // the last few results, so the next one differs
     int lastGenerateFits = 0;
     std::array<std::optional<SoundCheck>, 12 * 6> designedChecks; // genre * 6 + type
 
@@ -154,7 +161,8 @@ private:
                                       .getChildFile ("Zero Engine").getChildFile ("Favourites");
 
     MacroMap macroMap;
-    std::atomic<float> hostBpm { 120.0f }; // for tempo-synced LFOs; 120 when the host gives none
+    std::atomic<float> hostBpm { 120.0f }; // for tempo-synced LFOs; fallbackBpm when the host gives none
+    std::atomic<float> fallbackBpm { 120.0f };
     std::atomic<float> livePosition { -1.0f }; // a playing voice's wavetable position, -1 when silent (display only)
     std::atomic<const WavetableBank*> sampleTable { nullptr }; // the voices' Sample bank, null until set
     std::vector<std::unique_ptr<WavetableBank>> sampleTables;   // the current one last; a few before it kept, as a voice may still read one

@@ -272,7 +272,11 @@ namespace
         for (int lag = 8; lag < 100 && lag + 1 < n / 2; ++lag)
             if (r[(size_t) lag] > 0.3 && r[(size_t) lag] >= r[(size_t) lag - 1] && r[(size_t) lag] >= r[(size_t) lag + 1])
             {
-                w.rateHz = 100.0f / (float) lag;
+                // Between whole blocks: the parabola through the peak and its neighbours.
+                const auto below = r[(size_t) lag - 1], at = r[(size_t) lag], above = r[(size_t) lag + 1];
+                const auto curve = below - 2.0 * at + above;
+                const auto shift = curve < 0.0 ? juce::jlimit (-0.5, 0.5, 0.5 * (below - above) / curve) : 0.0;
+                w.rateHz = (float) (100.0 / (lag + shift));
                 break;
             }
         return w;
@@ -560,6 +564,13 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
             const auto semitones = n.pitchHz > 0.0f && before.pitchHz > 0.0f ? std::abs (12.0f * std::log2 (n.pitchHz / before.pitchHz)) : 99.0f;
             const auto sameNote = std::abs (semitones - 12.0f * std::round (semitones / 12.0f)) < 0.7f && semitones < 25.0f;
             const auto similar = std::inner_product (shapes[i].begin(), shapes[i].end(), shapes[i - 1].begin(), 0.0) > 0.9;
+            if (debugNotes)
+                std::printf ("    note at %.2f s %.1f Hz: %s\n", n.start, n.pitchHz,
+                             sameNote && loudestIn (n) < 0.25 * loudestIn (before) ? "merged (echo: same note, 6 dB down)"
+                             : loudestIn (n) < loudestNote / 8.0 ? "merged (ghost: 9 dB under the loudest)"
+                             : similar && loudestIn (n) < 0.63 * loudestIn (before) ? "merged (same shape, 4 dB down)"
+                             : ! dipBefore (n, before) && (sameNote || pitchHolds (n)) ? "merged (held: no dip, pitch holds)"
+                             : "kept");
             if ((sameNote && loudestIn (n) < 0.25 * loudestIn (before)) || loudestIn (n) < loudestNote / 8.0
                 || (similar && loudestIn (n) < 0.63 * loudestIn (before)) || (! dipBefore (n, before) && (sameNote || pitchHolds (n))))
             {
@@ -630,7 +641,18 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
             level.push_back (10.0 * std::log10 (e));
             bright.push_back (10.0 * std::log10 (juce::jmax (1.0e-12, slope[(size_t) b]) / e));
         }
-        const auto a = wobbleOf (level), b = wobbleOf (bright);
+        auto a = wobbleOf (level), b = wobbleOf (bright);
+        // A first note too short to show a wobble (an arp, a gated loop): the
+        // brightness over the whole phrase instead, where a filter LFO running
+        // across the notes shows (a 16th-note one at 175 BPM is 11.7 Hz).
+        if (level.size() < 60 && print.notes.size() >= 3)
+        {
+            std::vector<double> phrase;
+            for (int k = onset + 2; k < end; ++k)
+                phrase.push_back (10.0 * std::log10 (juce::jmax (1.0e-12, slope[(size_t) k]) / juce::jmax (1.0e-12, energy[(size_t) k])));
+            if (const auto across = wobbleOf (phrase); across.rateHz > 0.0f && across.depthDb > b.depthDb)
+                b = across;
+        }
         const auto& w = (b.rateHz > 0.0f && (a.rateHz <= 0.0f || b.depthDb > a.depthDb)) ? b : a;
         print.moveRateHz = w.rateHz;
         print.moveDepthDb = juce::jmax (a.depthDb, b.depthDb);

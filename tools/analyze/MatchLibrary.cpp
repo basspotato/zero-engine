@@ -8,6 +8,7 @@
 #include "../../Source/Parameters.h"
 #include "../../Source/ReferenceMatch.h"
 #include "../../Source/SoundPrint.h"
+#include "../../Source/SoundTraits.h"
 
 namespace
 {
@@ -171,8 +172,12 @@ namespace
     }
 }
 
+int runLibraryTraits (const juce::StringArray& args);
+
 int runLibrary (const juce::StringArray& args)
 {
+    if (args.size() >= 2 && args[1] == "traits")
+        return runLibraryTraits (args);
     if (args.size() >= 3 && args[1] == "engine")
     {
         // n Generate variations, spread over every genre and type, half notes,
@@ -470,5 +475,106 @@ int runLibraryBench (const juce::StringArray& args)
     const auto out = runs.getChildFile (juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M") + " n" + juce::String (count) + " seed" + juce::String ((int) seed) + ".csv");
     out.replaceWithText (csv);
     std::printf ("\nwrote %s\n", out.getFullPathName().toRawUTF8());
+    return 0;
+}
+
+int runLibraryTraits (const juce::StringArray& args)
+{
+    // library traits [source=a,b] [under=<path>] [--write]: SoundTraits of every
+    // matching sound, per type: the targets Generate aims at. Measurement only.
+    juce::StringArray sources { "owner-library" };
+    juce::String under;
+    for (const auto& a : args)
+    {
+        if (a.startsWith ("source=")) sources = juce::StringArray::fromTokens (a.fromFirstOccurrenceOf ("=", false, false), ",", "");
+        if (a.startsWith ("under=")) under = a.fromFirstOccurrenceOf ("=", false, false);
+    }
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+
+    std::array<std::vector<SoundTraits>, 6> byType;
+    juce::String csv ("file,type,level,side,centroid,bass,body,spread,crest,movement,richness\n");
+    int read = 0;
+    for (const auto& e : readManifest())
+    {
+        const auto type = typeNames.indexOf (e.type);
+        if (type < 0 || ! sources.contains (e.source) || (under.isNotEmpty() && ! e.file.startsWithIgnoreCase (under)))
+            continue;
+        std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (e.file)));
+        if (reader == nullptr)
+            continue;
+        juce::AudioBuffer<float> audio (2, (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 3.0)));
+        reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
+        const auto t = SoundTraits::of (audio, reader->sampleRate);
+        if (t.levelDb < -60.0f)
+            continue;
+        byType[(size_t) type].push_back (t);
+        csv << csvField (e.file) << "," << e.type;
+        for (const auto v : t.asArray())
+            csv << "," << juce::String (v, 3);
+        csv << "\n";
+        if (++read % 200 == 0)
+            std::printf ("  %d measured\n", read);
+    }
+    libraryFolder().getChildFile ("traits.csv").replaceWithText (csv);
+
+    // Per type: the median and the spread (half the 16th-84th percentile range,
+    // a standard deviation that ignores outliers) of each trait.
+    const char* names[] { "level", "side%", "centroid", "bass%", "body%", "spread", "crest", "movement", "richness" };
+    std::array<std::array<float, SoundTraits::count>, 6> median {}, spread {};
+    std::printf ("\n%-6s %5s", "type", "n");
+    for (const auto* n : names)
+        std::printf (" %16s", n);
+    std::printf ("\n");
+    for (int type = 0; type < 6; ++type)
+    {
+        const auto& list = byType[(size_t) type];
+        std::printf ("%-6s %5d", typeNames[type].toRawUTF8(), (int) list.size());
+        for (int k = 0; k < SoundTraits::count; ++k)
+        {
+            std::vector<float> values;
+            for (const auto& t : list)
+                values.push_back (t.asArray()[(size_t) k]);
+            if (values.size() < 5)
+            {
+                std::printf (" %16s", "-");
+                continue;
+            }
+            std::sort (values.begin(), values.end());
+            auto at = [&] (double q) { return values[(size_t) juce::jlimit (0, (int) values.size() - 1, (int) (q * (double) (values.size() - 1)))]; };
+            median[(size_t) type][(size_t) k] = at (0.5);
+            spread[(size_t) type][(size_t) k] = juce::jmax (1.0e-3f, 0.5f * (at (0.84) - at (0.16)));
+            std::printf (" %8.2f +- %5.2f", median[(size_t) type][(size_t) k], spread[(size_t) type][(size_t) k]);
+        }
+        std::printf ("\n");
+    }
+
+    if (args.contains ("--write"))
+    {
+        juce::String text;
+        text << "#pragma once\n\n#include \"SoundTraits.h\"\n\n"
+             << "// What Generate aims at, per type (Bass, Lead, Chord, Pad, Pluck, FX): the median\n"
+             << "// and spread of each SoundTrait over the owner's sounds (" << read << " measured,\n"
+             << "// `ZeroAnalyze library traits --write`; measurement only, nothing trained).\n"
+             << "// Order: level, side %, centroid, bass %, body %, spread, crest, movement, richness.\n"
+             << "namespace GenerateTargets\n{\n"
+             << "    struct Target { std::array<float, SoundTraits::count> median, spread; int measured; };\n"
+             << "    inline const std::array<Target, 6> byType {{\n";
+        for (int type = 0; type < 6; ++type)
+        {
+            auto row = [] (const std::array<float, SoundTraits::count>& v)
+            {
+                juce::StringArray parts;
+                for (const auto x : v)
+                    parts.add (juce::String (x, 3) + "f");
+                return "{ " + parts.joinIntoString (", ") + " }";
+            };
+            text << "        { " << row (median[(size_t) type]) << ",\n          " << row (spread[(size_t) type]) << ", "
+                 << (int) byType[(size_t) type].size() << " }, // " << typeNames[type] << "\n";
+        }
+        text << "    }};\n}\n";
+        juce::File::getCurrentWorkingDirectory().getChildFile ("Source/GenerateTargets.h").replaceWithText (text);
+        std::printf ("wrote Source/GenerateTargets.h\n");
+    }
     return 0;
 }

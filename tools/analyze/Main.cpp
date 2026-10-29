@@ -23,6 +23,7 @@
 #include "Tests.h"
 #include "MatchBench.h"
 #include "MatchLibrary.h"
+#include "MatchNetTrain.h"
 #include "Library.h"
 #include "Tuner.h"
 #include "Harmonics.h"
@@ -352,6 +353,7 @@ int main (int argc, char* argv[])
             {
                 ZeroEngineProcessor scorer;
                 scorer.stopProfileSync();
+                scorer.setFallbackTempo (result.bpm);
                 auto variant = [&] (const char* name, auto change)
                 {
                     auto q = p;
@@ -368,8 +370,8 @@ int main (int argc, char* argv[])
             if (verbose && result.ok)
             {
                 const auto& t = result.target;
-                std::printf ("    reference: pitch %.0f Hz, %d notes over %.2f s%s, side %.1f %%, wobble %.2f Hz (%.1f dB)\n", t.pitchHz,
-                             (int) t.notes.size(), t.noteSeconds, t.cut ? " (goes on)" : "", t.sidePct, t.moveRateHz, t.moveDepthDb);
+                std::printf ("    reference: pitch %.0f Hz, %d notes over %.2f s%s, side %.1f %%, wobble %.2f Hz (%.1f dB), rendered at %.0f BPM\n", t.pitchHz,
+                             (int) t.notes.size(), t.noteSeconds, t.cut ? " (goes on)" : "", t.sidePct, t.moveRateHz, t.moveDepthDb, result.bpm);
                 juce::String terms;
                 SoundPrint::distance (result.matched, t, &terms);
                 std::printf ("    match: distance %.2f = %s\n", result.distance, terms.toRawUTF8());
@@ -403,6 +405,7 @@ int main (int argc, char* argv[])
     if (command == "notes" && args.size() >= 2)
     {
         // Reference Match's transcription of a sound: the notes candidates will play.
+        SoundPrint::debugNotes = true; // and why each detected note was kept or merged
         juce::AudioFormatManager formats;
         formats.registerBasicFormats();
         std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File::getCurrentWorkingDirectory().getChildFile (args[1])));
@@ -424,6 +427,10 @@ int main (int argc, char* argv[])
 
     if (command == "library")
         return runLibrary (args);
+    if (command == "netdata")
+        return runNetData (args);
+    if (command == "nettrain")
+        return runNetTrain (args);
     if (command == "libbench")
         return runLibraryBench (args);
 
@@ -567,11 +574,134 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "gendebug2" && args.size() >= 3)
+    {
+        // Generate's scoring for one profile, click by click: every keeper's terms.
+        ZeroEngineProcessor engine;
+        ZeroEngineProcessor::debugGenerate = true;
+        auto* genre = engine.state.getParameter (ParamIDs::genre);
+        auto* type = engine.state.getParameter (ParamIDs::type);
+        genre->setValueNotifyingHost (genre->convertTo0to1 ((float) genreNames.indexOf (args[1])));
+        type->setValueNotifyingHost (type->convertTo0to1 ((float) typeNames.indexOf (args[2])));
+        engine.syncProfile();
+        for (int s = 1; s <= 2; ++s)
+        {
+            std::printf ("click %d\n", s);
+            engine.generate (s * 7919);
+        }
+        return 0;
+    }
+
+    if (command == "genab")
+    {
+        // A blind listening test of Generate: per profile (each genre once, the
+        // type cycling), pairs of a plain variation (generateProfile, what the old
+        // Generate mostly gave) and the new Generate's pick, as a short phrase.
+        // Each pair's two files are x and y in random order; key.csv says which.
+        const auto folder = juce::File::getCurrentWorkingDirectory().getChildFile (args.size() > 1 ? args[1] : "analysis/generate_ab");
+        const auto pairs = args.size() > 2 ? args[2].getIntValue() : 2;
+        folder.deleteRecursively();
+        folder.createDirectory();
+        constexpr double rate = 48000.0;
+        constexpr int block = 512;
+        juce::Random shuffle (42);
+        juce::String key ("pair,genre,type,x,y\n");
+
+        auto phrase = [&] (ZeroEngineProcessor& engine, int type)
+        {
+            struct Note { double start, length; int note; };
+            std::vector<Note> notes;
+            constexpr int riff[] { 36, 36, 43, 39, 36, 36, 41, 39 };
+            constexpr int line[] { 72, 75, 79, 77, 75, 72, 70, 72, 72, 75, 79, 82, 80, 79, 77, 75 };
+            if (type == 0) // bass riff
+                for (int i = 0; i < 8; ++i)
+                    notes.push_back ({ i * 0.5, 0.42, riff[i] });
+            else if (type == 1 || type == 4) // lead / pluck line
+                for (int i = 0; i < 16; ++i)
+                    notes.push_back ({ i * 0.25, type == 4 ? 0.18 : 0.23, line[i] });
+            else if (type == 2 || type == 3) // chords: Cm Ab Eb Bb
+            {
+                const int chords[4][3] { { 60, 63, 67 }, { 56, 60, 63 }, { 55, 58, 63 }, { 58, 62, 65 } };
+                for (int c = 0; c < 4; ++c)
+                    for (const auto n : chords[c])
+                        notes.push_back ({ c * 1.0, 0.95, n });
+            }
+            else
+                notes.push_back ({ 0.0, 2.5, 60 }); // FX: one long hit
+            juce::AudioBuffer<float> out (2, (int) (5.5 * rate)), chunk (2, block);
+            juce::MidiBuffer midi;
+            for (int i = 0; i < 10; ++i)
+            {
+                chunk.clear();
+                engine.processBlock (chunk, midi);
+            }
+            for (int pos = 0; pos + block <= out.getNumSamples(); pos += block)
+            {
+                midi.clear();
+                for (const auto& n : notes)
+                {
+                    const auto on = (int) (n.start * rate), off = (int) ((n.start + n.length) * rate);
+                    if (on >= pos && on < pos + block)
+                        midi.addEvent (juce::MidiMessage::noteOn (1, n.note, (juce::uint8) 105), on - pos);
+                    if (off >= pos && off < pos + block)
+                        midi.addEvent (juce::MidiMessage::noteOff (1, n.note), off - pos);
+                }
+                chunk.clear();
+                engine.processBlock (chunk, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    out.copyFrom (ch, pos, chunk, ch, 0, block);
+            }
+            return out;
+        };
+        auto save = [&] (const juce::AudioBuffer<float>& audio, const juce::File& file)
+        {
+            juce::WavAudioFormat wav;
+            std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (new juce::FileOutputStream (file), rate, 2, 24, {}, 0));
+            if (writer != nullptr)
+                writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
+        };
+
+        int pair = 0;
+        for (int g = 0; g < genreNames.size(); ++g)
+        {
+            const auto t = g % typeNames.size();
+            ZeroEngineProcessor engine;
+            engine.setPlayConfigDetails (0, 2, rate, block);
+            engine.prepareToPlay (rate, block);
+            auto* genre = engine.state.getParameter (ParamIDs::genre);
+            auto* type = engine.state.getParameter (ParamIDs::type);
+            genre->setValueNotifyingHost (genre->convertTo0to1 ((float) g));
+            type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
+            engine.syncProfile();
+            for (int p = 0; p < pairs; ++p)
+            {
+                const auto seed = 1000 + 97 * g + p;
+                juce::Random random (seed);
+                engine.resetForRender();
+                engine.loadProfile (g, t, generateProfile (g, t, random));
+                const auto plain = phrase (engine, t);
+                engine.resetForRender();
+                engine.generate (seed);
+                const auto picked = phrase (engine, t);
+
+                const auto newIsX = shuffle.nextBool();
+                const auto name = juce::String (++pair).paddedLeft ('0', 2) + "_" + genreNames[g].removeCharacters (" &") + "_" + typeNames[t];
+                save (newIsX ? picked : plain, folder.getChildFile (name + "_x.wav"));
+                save (newIsX ? plain : picked, folder.getChildFile (name + "_y.wav"));
+                key << pair << "," << genreNames[g] << "," << typeNames[t] << "," << (newIsX ? "new,old" : "old,new") << "\n";
+                std::printf ("%s\n", name.toRawUTF8());
+            }
+        }
+        folder.getChildFile ("key.csv").replaceWithText (key);
+        std::printf ("wrote %d pairs to %s (key.csv says which is new)\n", pair, folder.getFullPathName().toRawUTF8());
+        return 0;
+    }
+
     if (command == "gencheck")
     {
-        // Generate's render-and-check: time per click and how many of the 6
+        // Generate's render-and-check: time per click and how many of the 24
         // candidates still fit the genre/type, 3 clicks per profile.
-        std::printf ("%-24s %8s %s\n", "profile", "ms/click", "fits of 6");
+        std::printf ("%-24s %8s %s\n", "profile", "ms/click", "fits of 24");
         double totalMs = 0.0;
         int totalFits = 0, clicks = 0;
         for (int g = 0; g < genreNames.size(); ++g)
@@ -597,7 +727,7 @@ int main (int argc, char* argv[])
                 clicks += 3;
                 std::printf ("%-24s %8.0f %s\n", (genreNames[g] + " " + typeNames[t]).toRawUTF8(), ms, fits.toRawUTF8());
             }
-        std::printf ("\nAverage %.0f ms per click; %.1f of 6 candidates fit on average.\n", totalMs / clicks, (double) totalFits / clicks);
+        std::printf ("\nAverage %.0f ms per click; %.1f of 24 candidates fit on average.\n", totalMs / clicks, (double) totalFits / clicks);
         return 0;
     }
 
