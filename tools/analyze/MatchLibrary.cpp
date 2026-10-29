@@ -231,7 +231,7 @@ int runLibrary (const juce::StringArray& args)
             return 1;
         }
         const juce::StringArray skipWords { "kick", "snare", "hat", "clap", "perc", "drum", "cymbal", "crash", "ride", "tom", "shaker",
-                                            "rim", "snap", "vox", "vocal", "voice", "acapella", "speech", "master", "mixdown", "bounce", "stem",
+                                            "rim", "snap", "vox", "vocal", "voice", "acapella", "speech", "master", "mixdown", "bounce", "stem", "hihat", "fill", "top",
                                             "guitar", "piano", "sax", "flute", "brass", "trumpet", "violin", "cello", "choir", "acoustic" };
         const std::pair<const char*, const char*> typeWords[] { { "808", "Bass" }, { "bass", "Bass" }, { "sub", "Bass" }, { "reese", "Bass" },
                                                                 { "lead", "Lead" }, { "pad", "Pad" }, { "atmos", "Pad" }, { "string", "Pad" },
@@ -253,8 +253,13 @@ int runLibrary (const juce::StringArray& args)
             if (verboseScan)
                 std::printf ("    %s\n", file.getFullPathName().toRawUTF8());
             std::fflush (stdout); // so a log shows where a scan stopped
-            const auto path = file.getFullPathName().toLowerCase();
-            if (std::any_of (skipWords.begin(), skipWords.end(), [&] (const juce::String& w) { return path.contains (w); }))
+            // Only the file's own name and its folder speak for it (a pack named
+            // "Drumsound & Bassline" holds synths too), as whole words ("stem"
+            // is not "System", "tom" not "Atmosphere"); a plural s counts.
+            const auto path = (file.getParentDirectory().getFileName() + " " + file.getFileNameWithoutExtension()).toLowerCase();
+            const auto words = juce::StringArray::fromTokens (path, " _-.,()[]&+#'", "");
+            const auto named = [&] (const juce::String& w) { return words.contains (w) || words.contains (w + "s"); };
+            if (std::any_of (skipWords.begin(), skipWords.end(), named))
             {
                 ++dropped["named as drums, voice, acoustic or a mix"];
                 continue;

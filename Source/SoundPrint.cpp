@@ -69,15 +69,37 @@ namespace
     }
 
 
-    // Log-mel frames of a mono signal: 40 bands from 40 Hz to 16 kHz, in dB under
-    // the loudest cell, floor -80. Zero-padded so even a short note gets a frame.
+    double melOf (double hz) { return 2595.0 * std::log10 (1.0 + hz / 700.0); }
+    double hzOfMel (double m) { return 700.0 * (std::pow (10.0, m / 2595.0) - 1.0); }
+
+    // The centre of mel band b, on the one scale every sound shares (40 Hz to 16 kHz).
+    double bandCentreHz (int b)
+    {
+        const auto lo = melOf (40.0), hi = melOf (16000.0);
+        return hzOfMel (lo + (hi - lo) * (b + 1) / (SoundPrint::melBands + 1));
+    }
+
+    // How many bands (from the bottom) both sounds can hold: a 16 kHz recording
+    // has nothing above 7.2 kHz, so the bands above it are left out of the comparison.
+    int sharedBands (const SoundPrint& a, const SoundPrint& b)
+    {
+        const auto top = juce::jmin (a.maxHz, b.maxHz);
+        int n = 0;
+        while (n < SoundPrint::melBands && bandCentreHz (n) < top)
+            ++n;
+        return juce::jmax (1, n);
+    }
+
+    // Log-mel frames of a mono signal: 40 bands from 40 Hz to 16 kHz whatever the
+    // sample rate (bands above a low rate's Nyquist stay empty), in dB under the
+    // loudest cell, floor -80. Zero-padded so even a short note gets a frame.
     std::vector<std::array<float, SoundPrint::melBands>> melFrames (const std::vector<float>& x, double sampleRate, int order, int hop)
     {
         constexpr auto bands = SoundPrint::melBands;
         const auto size = 1 << order;
-        auto mel = [] (double hz) { return 2595.0 * std::log10 (1.0 + hz / 700.0); };
-        auto hzOf = [] (double m) { return 700.0 * (std::pow (10.0, m / 2595.0) - 1.0); };
-        const auto lo = mel (40.0), hi = mel (juce::jmin (16000.0, 0.45 * sampleRate));
+        auto mel = [] (double hz) { return melOf (hz); };
+        auto hzOf = [] (double m) { return hzOfMel (m); };
+        const auto lo = mel (40.0), hi = mel (16000.0);
         std::vector<std::array<float, bands>> weights ((size_t) size / 2);
         for (int b = 0; b < bands; ++b)
         {
@@ -119,16 +141,16 @@ namespace
         return out;
     }
 
-    // Mean dB difference of two spectrograms over the frames both have (cells
-    // under -70 dB in both skipped).
-    float melDistance (bool overLonger, const std::vector<std::array<float, SoundPrint::melBands>>& a,
+    // Mean dB difference of two spectrograms over the frames both have and the
+    // lowest `bands` bands (cells under -70 dB in both skipped).
+    float melDistance (bool overLonger, int bands, const std::vector<std::array<float, SoundPrint::melBands>>& a,
                        const std::vector<std::array<float, SoundPrint::melBands>>& b)
     {
         double sum = 0.0;
         int n = 0;
         const auto frames = overLonger ? juce::jmax (a.size(), b.size()) : juce::jmin (a.size(), b.size());
         for (size_t f = 0; f < frames; ++f)
-            for (size_t band = 0; band < (size_t) SoundPrint::melBands; ++band)
+            for (size_t band = 0; band < (size_t) bands; ++band)
             {
                 const auto x = f < a.size() ? a[f][band] : -80.0f, y = f < b.size() ? b[f][band] : -80.0f; // past the end: silence
                 if (x > -70.0f || y > -70.0f)
@@ -145,9 +167,8 @@ namespace
     // left out), its brightness as the centroid in mel bands, and its loudness.
     struct FrameFeatures { std::array<float, 13> mfcc {}; float centroid = 0.0f, loudnessDb = -80.0f; };
 
-    FrameFeatures featuresOf (const std::array<float, SoundPrint::melBands>& frame)
+    FrameFeatures featuresOf (const std::array<float, SoundPrint::melBands>& frame, int bands)
     {
-        constexpr auto bands = SoundPrint::melBands;
         FrameFeatures f;
         for (int k = 1; k <= 13; ++k)
         {
@@ -173,7 +194,7 @@ namespace
     // over frames where both sound, and loudness difference (dB).
     struct Composite { float mfcc = 0.0f, centroid = 0.0f, loudness = 0.0f; };
 
-    Composite compositeDistance (bool overLonger, const std::vector<std::array<float, SoundPrint::melBands>>& a,
+    Composite compositeDistance (bool overLonger, int bands, const std::vector<std::array<float, SoundPrint::melBands>>& a,
                                  const std::vector<std::array<float, SoundPrint::melBands>>& b)
     {
         std::array<float, SoundPrint::melBands> silence;
@@ -183,7 +204,7 @@ namespace
         int n = 0, sounding = 0;
         for (size_t i = 0; i < frames; ++i)
         {
-            const auto x = featuresOf (i < a.size() ? a[i] : silence), y = featuresOf (i < b.size() ? b[i] : silence);
+            const auto x = featuresOf (i < a.size() ? a[i] : silence, bands), y = featuresOf (i < b.size() ? b[i] : silence, bands);
             if (x.loudnessDb < -60.0f && y.loudnessDb < -60.0f)
                 continue;
             double m = 0.0;
@@ -573,6 +594,7 @@ SoundPrint SoundPrint::of (const juce::AudioBuffer<float>& audio, double sampleR
     const auto rms = std::sqrt ((mid2 + side2) / length);
     print.levelDb = (float) juce::Decibels::gainToDecibels (rms, -100.0);
     print.sidePct = (float) (100.0 * side2 / juce::jmax (1.0e-12, mid2 + side2));
+    print.maxHz = (float) (0.45 * sampleRate);
     print.pitchHz = findPitch ? (notePitch > 0.0f ? notePitch : pitchOf (mono, sampleRate)) : 0.0f;
 
     // Octave bands (for checking the pitch against the spectrum): Hann-windowed
@@ -641,8 +663,9 @@ float SoundPrint::distance (const SoundPrint& a, const SoundPrint& b, juce::Stri
     // unit means "clearly different"; and stereo width, which the mono
     // spectrograms can't see.
     const auto overLonger = ! a.cut && ! b.cut; // whole sounds: a tail one has and the other lacks counts
-    const auto mel = 0.5f * (melDistance (overLonger, a.melTone, b.melTone) + melDistance (overLonger, a.melAttack, b.melAttack)) / 4.0f;
-    const auto c = compositeDistance (overLonger, a.melTone, b.melTone);
+    const auto bands = sharedBands (a, b); // only the frequencies both can hold
+    const auto mel = 0.5f * (melDistance (overLonger, bands, a.melTone, b.melTone) + melDistance (overLonger, bands, a.melAttack, b.melAttack)) / 4.0f;
+    const auto c = compositeDistance (overLonger, bands, a.melTone, b.melTone);
     const auto width = (a.sidePct - b.sidePct) / 15.0f;
     if (explain != nullptr)
         *explain = juce::String::formatted ("mel %.2f mfcc %.2f centroid %.2f loudness %.2f width %.2f", mel, c.mfcc / 4.0f, c.centroid / 2.0f,

@@ -15,6 +15,7 @@ struct SoundPrint
 
     std::array<float, numBands> bandsDb {}; // octave bands 31 Hz to 16 kHz, dB under the total (pitch and octave checks)
     float sidePct = 0.0f, levelDb = -100.0f, pitchHz = 0.0f;
+    float maxHz = 21600.0f; // the highest frequency its sample rate holds (less a margin): bands above are not compared
     float moveRateHz = 0.0f, moveDepthDb = 0.0f; // a wobble (LFO on level or brightness): rate, 0 if none, and depth
 
     // How the sound evolves: log-mel spectrograms (40 bands, 40 Hz to 16 kHz, dB
