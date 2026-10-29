@@ -623,12 +623,9 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
     }
 
     // Fold: shrink towards the centre while turning a half turn through w (the
-    // outer cube passes through the inner one), down to about 5 px across in the
-    // black hole's middle (never gone), then open out again.
+    // outer cube passes through the inner one), then open out again.
     const auto pulse = std::sin (MathConstants<float>::pi * foldProgress);
-    const auto smallest = 2.5f / (juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.38f); // a 2.5 px radius
-    const auto shrink = 1.0f - (1.0f - smallest) * pulse - (down ? 0.08f : 0.0f) * (1.0f - pulse);
-    const auto vanish = juce::jmax (0.3f, shrink); // lines thin as it shrinks, so the smallest is still a tesseract
+    const auto shrink = 1.0f - 0.7f * pulse - (down ? 0.08f : 0.0f);
     const auto wTurn = angle + MathConstants<float>::pi * foldProgress;
 
     const auto centre = getLocalBounds().toFloat().getCentre(); // the black hole's centre
@@ -692,7 +689,7 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
                 {
                     const auto near = juce::jlimit (0.15f, 1.0f, (0.5f + 0.25f * (depth[a] + depth[b]) * 0.5f) * glow + 0.4f * pulse);
                     g.setColour (colour.withAlpha (pass == 0 ? near * 0.15f : near));
-                    g.drawLine ({ points[a], points[b] }, ((pass == 0 ? 5.0f : 1.4f) + 1.2f * pulse) * vanish);
+                    g.drawLine ({ points[a], points[b] }, (pass == 0 ? 5.0f : 1.4f) + 1.2f * pulse);
                 }
 }
 
