@@ -1427,6 +1427,13 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     setWantsKeyboardFocus (true);
 
     setUpMacro (outputKnob, ParamIDs::output, "Output");
+    // Clones of THE WEEDS' amp envelope knobs: the same parameters, on the main page.
+    {
+        const std::pair<const char*, const char*> adsr[] { { ParamIDs::ampAttack, "Attack" }, { ParamIDs::ampDecay, "Decay" },
+                                                           { ParamIDs::ampSustain, "Sustain" }, { ParamIDs::ampRelease, "Release" } };
+        for (size_t i = 0; i < envelope.size(); ++i)
+            setUpMacro (envelope[i], adsr[i].first, adsr[i].second);
+    }
 
     genreBox.addItemList (genreNames, 1);
     typeBox.addItemList (typeNames, 1);
@@ -1449,7 +1456,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     displayMode.setSelectedId (ScopeView::wavetable, juce::dontSendNotification);
     displayMode.onChange = [this] { display.setMode (displayMode.getSelectedId()); };
     addAndMakeVisible (displayMode);
-    addAndMakeVisible (levelMeter);
+    addChildComponent (levelMeter); // the main page shows the envelope knobs in its place
 
     generateButton.onClick = [this]
     {
@@ -1772,7 +1779,7 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
     };
 
     section (displaySection, "DISPLAY");
-    section (meterSection, "OUTPUT");
+    section (meterSection, "ENVELOPE");
     section (generateSection, "GENERATE");
     if (! favouritesSection.isEmpty())
         section (favouritesSection, "FAVOURITES");
@@ -1857,6 +1864,17 @@ void ZeroEngineEditor::resized()
     backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
 
     levelMeter.setBounds (content (meterSection));
+    // The amp envelope's four knobs, the same parameters THE WEEDS sets.
+    {
+        auto row = content (meterSection);
+        const auto cellWidth = row.getWidth() / (int) envelope.size();
+        for (auto& knob : envelope)
+        {
+            auto cell = row.removeFromLeft (cellWidth);
+            knob.label.setBounds (cell.removeFromBottom (18));
+            knob.knob.setBounds (cell.reduced (4));
+        }
+    }
     display.setBounds (content (displaySection));
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);

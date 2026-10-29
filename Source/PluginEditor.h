@@ -259,6 +259,7 @@ private:
 
     std::array<Macro, 6> macros;
     Macro outputKnob;
+    std::array<Macro, 4> envelope; // attack, decay, sustain, release on the main page
     juce::ComboBox genreBox, typeBox;
     std::unique_ptr<ComboAttachment> genreAttachment, typeAttachment;
     ScopeView display;

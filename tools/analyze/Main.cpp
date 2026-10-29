@@ -885,21 +885,19 @@ int main (int argc, char* argv[])
                 std::printf ("%s\n", name.toRawUTF8());
             }
         }
-        // And the mini tesseract: any genre, two per type, named by where they came from.
-        for (int t = 0; t < typeNames.size(); ++t)
+        // And Mood mode: 18 clicks in a row (every mood about three times), named
+        // by mood, each played as its type's phrase.
         {
             ZeroEngineProcessor engine;
             engine.setPlayConfigDetails (0, 2, rate, block);
             engine.prepareToPlay (rate, block);
-            auto* type = engine.state.getParameter (ParamIDs::type);
-            type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
-            engine.syncProfile();
-            for (int p = 0; p < 2; ++p)
+            for (int p = 0; p < 18; ++p)
             {
                 engine.resetForRender();
-                engine.generate (5000 + 31 * t + p, true);
-                const auto from = genreNames[(int) engine.state.getRawParameterValue (ParamIDs::genre)->load()];
-                const auto name = "any_" + typeNames[t] + "_" + juce::String (p + 1) + "_from_" + from.removeCharacters (" &");
+                engine.generate (5000 + 31 * p, true);
+                const auto t = (int) engine.state.getRawParameterValue (ParamIDs::type)->load();
+                const auto name = "mood_" + juce::String (p + 1).paddedLeft ('0', 2) + "_"
+                                + engine.getMatchStatus().replaceCharacter (' ', '_').toLowerCase();
                 save (phrase (engine, t), folder.getChildFile (name + ".wav"));
                 std::printf ("%s\n", name.toRawUTF8());
             }
