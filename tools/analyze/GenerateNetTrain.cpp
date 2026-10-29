@@ -44,6 +44,8 @@ namespace
             }
             p = ReferenceMatch::withUnitsOf (p, u);
         }
+        // Detune capped as Generate caps it.
+        p.detune = juce::jmin (p.detune, juce::jmax (makeProfile (source, type).detune, 0.4f) + 0.1f);
         return p;
     }
 
