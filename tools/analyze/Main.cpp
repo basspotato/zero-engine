@@ -592,6 +592,48 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "clarityaudit")
+    {
+        // Clarity (energy on the notes' harmonics) of each designed profile and of
+        // 24 Generate variations of it: where generated sounds lose their tuning.
+        ZeroEngineProcessor engine;
+        engine.stopProfileSync();
+        if (args.contains ("full")) // clarityaudit ... full: measure at full quality, as the plugin plays
+            ZeroEngineProcessor::measureLight = false;
+        if (args.size() >= 4) // clarityaudit <Genre> <Type>: each variation's settings that might smear it
+        {
+            const auto g = genreNames.indexOf (args[2]), t = typeNames.indexOf (args[3]);
+            juce::Random random (g * 100 + t);
+            for (int i = 0; i < 24; ++i)
+            {
+                const auto p = generateProfile (g, t, random);
+                const auto m = ZeroEngineProcessor::measureForTools (engine, g, t, p);
+                std::printf ("%.2f  off %+5.0f c  spread %4.0f c  flat %.3f  table %2d  unison %d detune %.2f  lfoPos %.2f  grit %.2f  cutoff %5.0f  filterEnv %.1f res %.2f\n",
+                             m.clarity, m.pitchOffsetCents, m.pitchSpreadCents, m.flatness, (int) p.waveTable, (int) p.unison, p.detune, p.lfoToPos,
+                             p.grit, p.filterCutoff, p.filterEnv, p.filterRes);
+            }
+            return 0;
+        }
+        std::printf ("%-24s %8s %8s %8s %8s\n", "profile", "designed", "var min", "var mean", "below-0.1");
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+            {
+                const auto designed = ZeroEngineProcessor::measureForTools (engine, g, t, makeProfile (g, t)).clarity;
+                juce::Random random (g * 100 + t);
+                float lowest = 1.0f, sum = 0.0f;
+                int worse = 0;
+                for (int i = 0; i < 24; ++i)
+                {
+                    const auto c = ZeroEngineProcessor::measureForTools (engine, g, t, generateProfile (g, t, random)).clarity;
+                    lowest = juce::jmin (lowest, c);
+                    sum += c;
+                    worse += c < designed - 0.1f;
+                }
+                std::printf ("%-24s %8.2f %8.2f %8.2f %8d\n", (genreNames[g] + " " + typeNames[t]).toRawUTF8(), designed, lowest, sum / 24.0f, worse);
+            }
+        return 0;
+    }
+
     if (command == "tastesim")
     {
         // Does the taste model learn? A simulated listener who likes wide,

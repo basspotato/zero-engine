@@ -373,7 +373,7 @@ ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineP
 
     engine.setPlayConfigDetails (0, 2, rate, block);
     engine.prepareToPlay (rate, block); // fresh voices and tails for every candidate
-    engine.setLightRender (true);
+    engine.setLightRender (measureLight);
     // Measure the tone, not the fade-in: slow attacks (pads, FX) would otherwise
     // be compared part-way up their swell.
     auto heard = profile;
@@ -398,7 +398,15 @@ ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineP
         for (int ch = 0; ch < 2; ++ch)
             out.copyFrom (ch, pos, chunk, ch, 0, block);
     }
-    return SoundTraits::of (out, rate);
+    // Clarity on the notes played (and the sub's, an octave or two down, below the
+    // 80 Hz the measure starts at: no need to list it).
+    std::vector<float> fundamentals;
+    for (int i = 0; i < (chord ? 3 : 1); ++i)
+        fundamentals.push_back ((float) juce::MidiMessage::getMidiNoteInHertz (root + intervals[i]));
+    auto traits = SoundTraits::of (out, rate);
+    traits.clarity = SoundTraits::clarityOf (out, rate, fundamentals);
+    SoundTraits::measureTuning (out, rate, fundamentals.front(), traits);
+    return traits;
 }
 
 std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random)
@@ -454,6 +462,13 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     // at most 8): a heart's searched settings nudged, a third of the time
     // crossed with another heart's. In Generate they play as the current genre;
     // in any genre, as the heart's own.
+    // Detune no further than the designed sound's own (or 0.4) plus 0.1: past that
+    // the unison beats against itself and reads as out of tune, not as width.
+    auto capDetune = [&] (Profile p, int source)
+    {
+        p.detune = juce::jmin (p.detune, juce::jmax (makeProfile (source, type).detune, 0.4f) + 0.1f);
+        return p;
+    };
     std::vector<const Heart*> parents;
     for (const auto& h : hearts)
         if (h.type == type)
@@ -476,7 +491,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             auto& u = units[(size_t) random.nextInt (ReferenceMatch::numSearched)];
             u = juce::jlimit (0.0f, 1.0f, u + 0.16f * (random.nextFloat() * 2.0f - 1.0f));
         }
-        profiles.push_back (ReferenceMatch::withUnitsOf (parent.profile, units));
+        profiles.push_back (capDetune (ReferenceMatch::withUnitsOf (parent.profile, units), free ? parent.genre : genre));
         sources.push_back (free ? parent.genre : genre);
     }
 
@@ -484,7 +499,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     {
         if (! free)
         {
-            profiles.push_back (generateProfile (genre, type, random));
+            profiles.push_back (capDetune (generateProfile (genre, type, random), genre));
             sources.push_back (genre);
             continue;
         }
@@ -506,7 +521,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             p.waveTable = table;
             source = mix > 0.5f ? b : a;
         }
-        profiles.push_back (p);
+        profiles.push_back (capDetune (p, source));
         sources.push_back (source);
     }
     std::vector<SoundTraits> traits ((size_t) candidates);
@@ -543,6 +558,14 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         const auto brightness = std::abs (std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz))) / (free ? 1.3f : 0.8f);
         const auto bassShare = std::abs (m.bassPct - target.bassPct) / (free ? juce::jmax (20.0f, 2.0f * guide.spread[3]) : 20.0f);
         const auto widthOff = std::abs (m.sidePct - target.sidePct) / (free ? juce::jmax (20.0f, 2.0f * guide.spread[1]) : 20.0f);
+        // Tuning gates (not FX, which may be anything): the pitch more than 15
+        // cents from where the designed sound sits, more wobble than it has (by
+        // 12 cents; 25 in any genre, where a supersaw may meet a plain lead), or
+        // a noisier spectrum: out of tune, smeared or hiss, whatever it scores.
+        if (type != 5 && (std::abs (m.pitchOffsetCents - target.pitchOffsetCents) > 15.0f
+                          || m.pitchSpreadCents > target.pitchSpreadCents + (free ? 25.0f : 12.0f)
+                          || m.flatness > target.flatness + 0.05f))
+            return std::numeric_limits<float>::max();
         return juce::jmax (juce::jmax (loudness, brightness), juce::jmax (bassShare, widthOff));
     };
     // Size + interest + novelty (see above).
@@ -573,7 +596,8 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         const auto a = m.asArray(), d = target.asArray();
         const auto big = gain (side, a[side], d[side], false) + 0.5f * gain (body, a[body], d[body], false)
                        + 0.5f * gain (crest, a[crest], d[crest], true);
-        const auto interest = gain (movement, a[movement], d[movement], false) + gain (richness, a[richness], d[richness], false);
+        // Movement at half weight: wobble and beating earn it too easily.
+        const auto interest = 0.5f * gain (movement, a[movement], d[movement], false) + gain (richness, a[richness], d[richness], false);
         auto novelty = 3.0f;
         for (const auto& r : recentGenerated)
         {
@@ -647,7 +671,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
                 auto& u = units[(size_t) random.nextInt (ReferenceMatch::numSearched)];
                 u = juce::jlimit (0.0f, 1.0f, u + 0.15f * (random.nextFloat() * 2.0f - 1.0f));
             }
-            p = ReferenceMatch::withUnitsOf (best, units);
+            p = capDetune (ReferenceMatch::withUnitsOf (best, units), source);
         }
         std::vector<SoundTraits> measured ((size_t) engines);
         {
@@ -912,7 +936,9 @@ void ZeroEngineProcessor::generateArp (int type, juce::Random& random)
         param->setValueNotifyingHost (param->convertTo0to1 (value));
     };
     const auto byHand = arpParams[0]->load() > 0.5f && ! arpFromGenerate;
-    constexpr float chance[6] { 0.25f, 0.25f, 0.2f, 0.1f, 0.5f, 0.15f }; // Bass, Lead, Chord, Pad, Pluck, FX
+    // Only for types an arp suits on its own (never chords, pads or FX, where a
+    // held chord under a moving pattern turns to mush).
+    constexpr float chance[6] { 0.2f, 0.2f, 0.0f, 0.0f, 0.35f, 0.0f }; // Bass, Lead, Chord, Pad, Pluck, FX
     const auto on = byHand || random.nextFloat() < chance[juce::jlimit (0, 5, type)];
     arpFromGenerate = on && ! byHand;
     set (ParamIDs::arpOn, on ? 1.0f : 0.0f);
@@ -931,14 +957,15 @@ void ZeroEngineProcessor::generateArp (int type, juce::Random& random)
         return weighted.begin()->first;
     };
     // Modes: Up, Down, Up / Down, Random, As Played, Sequence (uses the pattern).
-    set (ParamIDs::arpMode, (float) pick ({ { 0, 2.0f }, { 1, 1.0f }, { 2, 2.0f }, { 3, 1.0f }, { 4, 1.0f }, { 5, 3.0f } }));
+    // No Random mode: it scrambles the notes.
+    set (ParamIDs::arpMode, (float) pick ({ { 0, 2.0f }, { 1, 1.0f }, { 2, 2.0f }, { 4, 1.0f }, { 5, 3.0f } }));
     // Rates: 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32.
     const auto rate = type == 0               ? pick ({ { 1, 3.0f }, { 3, 3.0f }, { 2, 1.0f } })
                     : type == 2 || type == 3  ? pick ({ { 0, 1.0f }, { 1, 3.0f }, { 3, 2.0f }, { 2, 1.0f } })
                     : type == 5               ? pick ({ { 3, 2.0f }, { 5, 1.0f }, { 4, 1.0f } })
                                               : pick ({ { 3, 4.0f }, { 1, 2.0f }, { 4, 1.0f }, { 5, 0.5f } });
     set (ParamIDs::arpRate, (float) rate);
-    set (ParamIDs::arpOctaves, (float) (type == 0 ? pick ({ { 1, 4.0f }, { 2, 1.0f } }) : pick ({ { 1, 5.0f }, { 2, 3.5f }, { 3, 1.5f } })));
+    set (ParamIDs::arpOctaves, (float) (type == 0 ? 1 : pick ({ { 1, 3.0f }, { 2, 1.0f } })));
     const auto gate = type == 4 ? 0.3f + 0.3f * random.nextFloat()           // plucks: short
                     : type == 3 ? 0.7f + 0.3f * random.nextFloat()           // pads: long
                                 : 0.4f + 0.45f * random.nextFloat();
@@ -1001,7 +1028,13 @@ int ZeroEngineProcessor::generatePattern (juce::Random& random, int genre)
         const auto c = steps[step];
         set (SeqIDs::on (step), step == 0 || c != '.' ? 1.0f : 0.0f);
         set (SeqIDs::accent (step), c == 'A' ? 1.0f : 0.0f);
-        set (SeqIDs::pitch (step), (float) (reroll ? pitches[(size_t) random.nextInt ((int) pitches.size())] : groove.pitches[(size_t) step]));
+        // Only octaves and fifths: they agree with whatever is held; thirds,
+        // fourths and sevenths over a held chord or the wrong key clash.
+        auto pitch = reroll ? pitches[(size_t) random.nextInt ((int) pitches.size())] : (int) groove.pitches[(size_t) step];
+        const auto inOctave = ((pitch % 12) + 12) % 12;
+        if (inOctave != 0 && inOctave != 7)
+            pitch -= inOctave; // down to the octave below it
+        set (SeqIDs::pitch (step), (float) pitch);
     }
     return groove.rate;
 }

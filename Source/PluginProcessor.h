@@ -120,6 +120,7 @@ public:
     // How many of the last Generate's candidates passed the check (out of 6), for tests and tuning.
     int getLastGenerateFits() const noexcept { return lastGenerateFits; }
     static inline bool debugGenerate = false; // tooling: print every candidate's scores
+    static inline bool measureLight = true;    // Generate's check renders light (tooling can compare full quality)
 
     // Message thread: step back (-1) or forward (+1) through generated sounds.
     // Returns false at either end.
@@ -185,6 +186,9 @@ private:
     // private engines in parallel, see pickGeneratedProfile.
     using SoundCheck = SoundTraits;
     static SoundCheck measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile&);
+public:
+    static SoundTraits measureForTools (ZeroEngineProcessor& engine, int genre, int type, const Profile& p) { return measureProfile (engine, genre, type, p); }
+private:
     static constexpr int anyGenre = 12; // pickGeneratedProfile: draw from every genre
     std::pair<Profile, int> pickGeneratedProfile (int genre, int type, juce::Random&); // the profile and its leading genre
     std::vector<std::unique_ptr<ZeroEngineProcessor>> checkers; // private engines for the check renders, made on first use

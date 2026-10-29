@@ -2,6 +2,7 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
+#include <vector>
 
 // What makes a sound big and interesting, measured (Generate ranks its
 // candidates by these; the targets per type come from measuring the owner's
@@ -21,6 +22,14 @@ struct SoundTraits
 {
     float levelDb = -100.0f, sidePct = 0.0f, centroidHz = 0.0f, bassPct = 0.0f;
     float bodyPct = 0.0f, spreadOct = 0.0f, crestDb = 0.0f, movementDb = 0.0f, richness = 0.0f;
+    // Clarity (not in asArray: measured separately, as it needs the notes): the
+    // share of energy on the played notes' harmonics, 0..1. Detune smear, pitch
+    // wobble, noise and inharmonic mush all lower it.
+    float clarity = 1.0f;
+    // Tuning (also outside asArray, from measureTuning): how far the pitch sits
+    // from the note played (median, cents), how much it moves (cents), and how
+    // noise-like the spectrum is (median flatness 150 Hz to 5 kHz, 0..1).
+    float pitchOffsetCents = 0.0f, pitchSpreadCents = 0.0f, flatness = 0.0f;
 
     static constexpr int count = 9;
     std::array<float, count> asArray() const
@@ -30,4 +39,6 @@ struct SoundTraits
 
     // Allocates (FFT buffers): never on the audio thread.
     static SoundTraits of (const juce::AudioBuffer<float>& audio, double sampleRate);
+    static float clarityOf (const juce::AudioBuffer<float>& audio, double sampleRate, const std::vector<float>& fundamentals);
+    static void measureTuning (const juce::AudioBuffer<float>& audio, double sampleRate, float expectedHz, SoundTraits& traits);
 };
