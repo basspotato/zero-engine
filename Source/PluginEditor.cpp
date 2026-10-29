@@ -516,9 +516,9 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.fillPath (dashed, juce::AffineTransform::rotation (t * (0.1f - 0.05f * k) + 3.0f * flare).followedBy (turn));
     }
     const auto core = r * 0.28f;
-    juce::ColourGradient rim (juce::Colour (0xff05060c), c.x, c.y, Palette::magenta.withAlpha (0.0f), c.x + core * 1.6f, c.y, true);
+    juce::ColourGradient rim (juce::Colour (0xff05060c), c.x, c.y, Palette::accent.withAlpha (0.0f), c.x + core * 1.6f, c.y, true);
     rim.addColour (0.62, juce::Colour (0xff05060c));
-    rim.addColour (0.72, Palette::orange.withAlpha (0.25f + 0.5f * flare));
+    rim.addColour (0.72, Palette::accent.withAlpha (0.3f + 0.5f * flare));
     g.setGradientFill (rim);
     g.fillEllipse (c.x - core * 1.6f, c.y - core * 1.6f, core * 3.2f, core * 3.2f);
 }
@@ -541,11 +541,10 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
         }
     }
 
-    // Fold: it falls into the black hole: spiralling in to almost nothing while
-    // turning a half turn through w and fading, then spiralling back out.
+    // Fold: shrink towards the centre while turning a half turn through w (the
+    // outer cube passes through the inner one), then open out again.
     const auto pulse = std::sin (MathConstants<float>::pi * foldProgress);
-    const auto shrink = 1.0f - 0.97f * pulse - (down ? 0.08f : 0.0f);
-    const auto spin = MathConstants<float>::twoPi * 1.25f * pulse;
+    const auto shrink = 1.0f - 0.7f * pulse - (down ? 0.08f : 0.0f);
     const auto wTurn = angle + MathConstants<float>::pi * foldProgress;
 
     const auto centre = getLocalBounds().toFloat().getCentre(); // the black hole's centre
@@ -575,7 +574,7 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
         x *= f4; y *= f4; z *= f4;
         const auto f3 = 2.5f / (4.0f - z);
         const auto px = x * f3 * radius, py = y * f3 * radius;
-        points[i] = { centre.x + px * std::cos (spin) - py * std::sin (spin), centre.y + px * std::sin (spin) + py * std::cos (spin) };
+        points[i] = { centre.x + px, centre.y + py };
         depth[i] = w;
     }
 
@@ -607,9 +606,9 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
             for (int bit = 1; bit < 16; bit <<= 1)
                 if (const auto b = a | bit; b != a)
                 {
-                    const auto near = juce::jlimit (0.15f, 1.0f, (0.5f + 0.25f * (depth[a] + depth[b]) * 0.5f) * glow + 0.4f * pulse) * (1.0f - 0.85f * pulse);
+                    const auto near = juce::jlimit (0.15f, 1.0f, (0.5f + 0.25f * (depth[a] + depth[b]) * 0.5f) * glow + 0.4f * pulse);
                     g.setColour (colour.withAlpha (pass == 0 ? near * 0.15f : near));
-                    g.drawLine ({ points[a], points[b] }, (pass == 0 ? 5.0f : 1.4f) * (1.0f - 0.5f * pulse));
+                    g.drawLine ({ points[a], points[b] }, (pass == 0 ? 5.0f : 1.4f) + 1.2f * pulse);
                 }
 }
 
@@ -1565,9 +1564,14 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
 
     generateButton.onClick = [this]
     {
-        processor.generate (juce::Time::currentTimeMillis(), processor.isMoodMode());
-        refreshHistoryButtons();
+        // Fold at once; the sound is worked out in the background and lands
+        // mid-fold.
         generateButton.fold();
+        processor.generateAsync (processor.isMoodMode(), [self = juce::Component::SafePointer<ZeroEngineEditor> (this)]
+        {
+            if (self != nullptr)
+                self->refreshHistoryButtons();
+        });
     };
     addAndMakeVisible (generateButton);
 

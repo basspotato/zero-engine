@@ -84,6 +84,11 @@ public:
     // loads as the genre it mostly came from. Switching Genre or Type loads a
     // designed profile as usual.
     void generate (juce::int64 seed = juce::Time::currentTimeMillis(), bool moodMode = false);
+    // The same off the message thread (the editor's tesseract): returns at once,
+    // applies the sound on the message thread when it is ready, then calls done.
+    void generateAsync (bool moodMode, std::function<void()> done);
+    bool isGenerating() const noexcept { return generating; }
+    ~ZeroEngineProcessor() override;
 
     // Generate's mode (message thread), saved with the project: Mood (free,
     // creative, each mood picks its own type) or Genre (within the selected
@@ -246,8 +251,13 @@ private:
     int lastOctaveFailures = 0; // tooling: picks that failed the octave check, since construction
     std::array<std::optional<SoundCheck>, 12 * 6> designedChecks; // genre * 6 + type
 
-    juce::File favouritesFolder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                                      .getChildFile ("Zero Engine").getChildFile ("Favourites");
+    // Favourites, hearts and taste live here; tooling (tests, simulations) points
+    // userFolderForTools elsewhere so they never touch the owner's.
+public:
+    static inline juce::File userFolderForTools;
+private:
+    juce::File favouritesFolder = (userFolderForTools == juce::File() ? juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Zero Engine")
+                                                                      : userFolderForTools).getChildFile ("Favourites");
 
     MacroMap macroMap;
     std::atomic<float> hostBpm { 120.0f }; // for tempo-synced LFOs; fallbackBpm when the host gives none
@@ -299,6 +309,15 @@ private:
     std::atomic<float>& delayFeedback;
     std::atomic<float>& reverbMix;
     std::atomic<float>& reverbSize;
+
+    // Generate on a worker (generateAsync): last, so it is destroyed (and any
+    // job finished) before the engines and state it uses.
+    struct GeneratePlan { juce::Random random; int genre, type, mood; };
+    GeneratePlan prepareGenerate (juce::int64 seed, bool moodMode);
+    void applyGenerate (GeneratePlan&, const Profile&, int source);
+    bool generating = false;
+    std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
+    juce::ThreadPool generateWorker { juce::ThreadPoolOptions{}.withNumberOfThreads (1).withThreadName ("Zero Engine Generate") };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ZeroEngineProcessor)
 };

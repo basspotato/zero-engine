@@ -119,7 +119,7 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
     loadMacroMap (macroMap, profile);
 }
 
-void ZeroEngineProcessor::generate (juce::int64 seed, bool moodMode)
+ZeroEngineProcessor::GeneratePlan ZeroEngineProcessor::prepareGenerate (juce::int64 seed, bool moodMode)
 {
     syncProfile(); // a Genre/Type change not yet picked up by the timer
     // The seed scrambled first (splitmix64): clicks a moment apart give nearby
@@ -128,26 +128,28 @@ void ZeroEngineProcessor::generate (juce::int64 seed, bool moodMode)
     auto mixed = (juce::uint64) seed + 0x9e3779b97f4a7c15ull;
     mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ull;
     mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebull;
-    juce::Random random ((juce::int64) (mixed ^ (mixed >> 31)));
-    const int genre = appliedGenre;
-    auto type = appliedType.load();
+    GeneratePlan plan { juce::Random ((juce::int64) (mixed ^ (mixed >> 31))), appliedGenre, appliedType.load(), -1 };
 
     // Mood mode: a mood (never the last one twice running) picks the type; the
     // genre box keeps the genre, and the display shows the mood's name.
-    auto mood = -1;
     if (moodMode)
     {
-        mood = (lastMood + 1 + random.nextInt (Moods::count - 1)) % Moods::count;
+        plan.mood = (lastMood + 1 + plan.random.nextInt (Moods::count - 1)) % Moods::count;
         if (lastMood < 0)
-            mood = random.nextInt (Moods::count);
-        lastMood = mood;
-        type = Moods::typeOf (mood);
+            plan.mood = plan.random.nextInt (Moods::count);
+        lastMood = plan.mood;
+        plan.type = Moods::typeOf (plan.mood);
     }
 
     // Taste: what became of the last result decides a judgment or two.
     loadTasteAndHearts();
     judgeLastShown();
+    lastPickTraits.reset();
+    return plan;
+}
 
+void ZeroEngineProcessor::applyGenerate (GeneratePlan& plan, const Profile& profile, int source)
+{
     // History, like a browser: going back and generating drops what was ahead;
     // the sound before the first click (or any tweak since) is kept as a step too.
     history.erase (history.begin() + juce::jmin ((int) history.size(), historyPos + 1), history.end());
@@ -155,31 +157,59 @@ void ZeroEngineProcessor::generate (juce::int64 seed, bool moodMode)
         history.push_back (state.copyState());
 
     // In Genre mode the result loads as its genre; a mood keeps the genre box.
-
-    lastPickTraits.reset();
-    const auto [profile, source] = pickGeneratedProfile (genre, type, random, mood);
-    loadProfile (mood >= 0 ? genre : source, type, profile);
-    if (mood >= 0)
+    loadProfile (plan.mood >= 0 ? plan.genre : source, plan.type, profile);
+    if (plan.mood >= 0)
     {
-        matchSummary = Moods::nameOf (mood);
+        matchSummary = Moods::nameOf (plan.mood);
         matchSummaryUntil = juce::Time::getMillisecondCounterHiRes() + 3000.0;
     }
     currentHeart = -1;
     if (lastPickTraits.has_value()) // a measured pick (not a fallback)
     {
-        shown.push_back ({ TasteModel::featuresOf (*lastPickTraits, type), juce::Time::getMillisecondCounterHiRes() / 1000.0 });
+        shown.push_back ({ TasteModel::featuresOf (*lastPickTraits, plan.type), juce::Time::getMillisecondCounterHiRes() / 1000.0 });
         if (shown.size() > 12)
             shown.erase (shown.begin());
         showingLatest = true;
     }
 
-    generateArp (type, random);
+    generateArp (plan.type, plan.random);
 
     history.push_back (state.copyState());
     constexpr size_t maxHistory = 50;
     if (history.size() > maxHistory)
         history.erase (history.begin(), history.begin() + (std::ptrdiff_t) (history.size() - maxHistory));
     historyPos = (int) history.size() - 1;
+}
+
+void ZeroEngineProcessor::generate (juce::int64 seed, bool moodMode)
+{
+    auto plan = prepareGenerate (seed, moodMode);
+    const auto [profile, source] = pickGeneratedProfile (plan.genre, plan.type, plan.random, plan.mood);
+    applyGenerate (plan, profile, source);
+}
+
+void ZeroEngineProcessor::generateAsync (bool moodMode, std::function<void()> done)
+{
+    // The renders and checks (about 0.4 s) run on a worker, so the tesseract
+    // folds at once and the sound arrives mid-fold; the result is applied back
+    // on the message thread. A click while one is running is ignored.
+    if (generating)
+        return;
+    generating = true;
+    auto plan = prepareGenerate (juce::Time::currentTimeMillis(), moodMode);
+    generateWorker.addJob ([this, plan, done, alive = alive]() mutable
+    {
+        const auto [profile, source] = pickGeneratedProfile (plan.genre, plan.type, plan.random, plan.mood);
+        juce::MessageManager::callAsync ([this, plan, profile = profile, source = source, done, alive]() mutable
+        {
+            if (! alive->load())
+                return;
+            applyGenerate (plan, profile, source);
+            generating = false;
+            if (done)
+                done();
+        });
+    });
 }
 
 void ZeroEngineProcessor::loadTasteAndHearts()
@@ -252,6 +282,8 @@ void ZeroEngineProcessor::judgeLastShown()
 
 void ZeroEngineProcessor::heartCurrent()
 {
+    if (generating) // a pick reads the hearts on its worker; it lands in a moment
+        return;
     loadTasteAndHearts();
     if (currentHeart >= 0) // un-heart this sound
     {
@@ -1391,4 +1423,10 @@ void ZeroEngineProcessor::resetForRender()
         if (auto* voice = dynamic_cast<ZeroVoice*> (synth.getVoice (i)))
             voice->reseed(); // the same start phases every time, as a fresh engine
     finishing.reset();
+}
+
+ZeroEngineProcessor::~ZeroEngineProcessor()
+{
+    alive->store (false);                   // a result still on its way is dropped
+    generateWorker.removeAllJobs (true, 10000); // and a running pick finishes first
 }

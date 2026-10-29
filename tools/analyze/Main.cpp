@@ -641,6 +641,65 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "pluckcheck")
+    {
+        // The test's pluck loop (Techno Pluck, C4 Eb G F a quarter second apart),
+        // rendered three times and read by SoundPrint: is it the same each time?
+        for (int run = 0; run < 3; ++run)
+        {
+            ZeroEngineProcessor engine;
+            engine.stopProfileSync();
+            engine.setPlayConfigDetails (0, 2, 48000.0, 512);
+            engine.prepareToPlay (48000.0, 512);
+            auto p = makeProfile (genreNames.indexOf ("Techno"), typeNames.indexOf ("Pluck"));
+            p.ampDecay = 0.12f; p.ampSustain = 0.0f; p.tilt -= 2.0f; p.waveTable = p.waveTable < 1.0f ? 2.0f : 0.0f; // as the test changes it
+            engine.loadProfile (genreNames.indexOf ("Techno"), typeNames.indexOf ("Pluck"), p);
+            juce::AudioBuffer<float> settle (2, 512), out (2, 72000), chunk (2, 512);
+            juce::MidiBuffer midi;
+            for (int i = 0; i < 10; ++i) { settle.clear(); engine.processBlock (settle, midi); }
+            constexpr int steps[] { 0, 3, 7, 5 };
+            for (int pos = 0; pos + 512 <= out.getNumSamples(); pos += 512)
+            {
+                midi.clear();
+                for (int n = 0; n < 4; ++n)
+                {
+                    const auto at = n * 12000, off = at + 9600;
+                    if (at >= pos && at < pos + 512) midi.addEvent (juce::MidiMessage::noteOn (1, 60 + steps[n], (juce::uint8) 110), at - pos);
+                    if (off >= pos && off < pos + 512) midi.addEvent (juce::MidiMessage::noteOff (1, 60 + steps[n]), off - pos);
+                }
+                chunk.clear();
+                engine.processBlock (chunk, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    out.copyFrom (ch, pos, chunk, ch, 0, 512);
+            }
+            const auto print = SoundPrint::of (out, 48000.0);
+            std::printf ("run %d: pitch %.1f Hz, %d notes, rms %.5f, arp %s\n", run, print.pitchHz, (int) print.notes.size(), out.getRMSLevel (0, 0, out.getNumSamples()),
+                         engine.state.getRawParameterValue (ParamIDs::arpOn)->load() > 0.5f ? "on" : "off");
+            for (const auto& n : print.notes)
+                std::printf ("   at %.2f %.1f Hz\n", n.start, n.pitchHz);
+        }
+        return 0;
+    }
+
+    if (command == "asynccheck")
+    {
+        // The tesseract's Generate in the background: how long the click itself
+        // takes, and how long until the sound lands (message loop pumped).
+        ZeroEngineProcessor engine;
+        for (int i = 0; i < 4; ++i)
+        {
+            auto landed = false;
+            const auto start = juce::Time::getMillisecondCounterHiRes();
+            engine.generateAsync (i % 2 == 1, [&] { landed = true; });
+            const auto clickMs = juce::Time::getMillisecondCounterHiRes() - start;
+            while (! landed && juce::Time::getMillisecondCounterHiRes() - start < 5000.0)
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (5);
+            std::printf ("click %.0f ms, sound landed after %.0f ms (%s), %s\n", clickMs, juce::Time::getMillisecondCounterHiRes() - start,
+                         i % 2 == 1 ? "mood" : "genre", landed ? "ok" : "NEVER LANDED");
+        }
+        return 0;
+    }
+
     if (command == "anycheck" && args.size() >= 2)
     {
         // The mini tesseract's genres: n any-genre clicks for a type, with the

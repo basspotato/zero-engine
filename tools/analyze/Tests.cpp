@@ -648,7 +648,12 @@ namespace
         const auto target = SoundPrint::of (reference, 48000.0);
         const auto wanted = (float) juce::MidiMessage::getMidiNoteInHertz (note);
         if (std::abs (target.pitchHz / wanted - 1.0f) > 0.03f)
-            problems.add ("pitch read as " + juce::String (target.pitchHz, 1) + " Hz, wanted " + juce::String (wanted, 1));
+        {
+            juce::String notes;
+            for (const auto& n : target.notes)
+                notes << juce::String (n.start, 2) << " s " << juce::String (n.pitchHz, 0) << " Hz, ";
+            problems.add ("pitch read as " + juce::String (target.pitchHz, 1) + " Hz, wanted " + juce::String (wanted, 1) + " (notes: " + notes + "rms " + juce::String (reference.getRMSLevel (0, 0, reference.getNumSamples()), 5) + ")");
+        }
         ZeroEngineProcessor scorer;
         scorer.stopProfileSync();
         const auto before = ReferenceMatch::score (scorer, target, genre, type, start, false);
@@ -855,7 +860,17 @@ namespace
     }
 }
 
+int runAllTests();
+
 int runTests()
+{
+    // Never the owner's favourites, hearts or taste.
+    ZeroEngineProcessor::userFolderForTools = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_tests_user");
+    ZeroEngineProcessor::userFolderForTools.deleteRecursively();
+    return runAllTests();
+}
+
+int runAllTests()
 {
     int failures = 0;
 
