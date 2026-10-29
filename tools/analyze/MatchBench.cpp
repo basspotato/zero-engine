@@ -189,6 +189,16 @@ namespace
     }
 }
 
+juce::AudioBuffer<float> renderBenchSound (int genre, int type, const Profile& profile, bool loop)
+{
+    return render (genre, type, profile, patternFor (type, loop));
+}
+
+float judgeBenchSound (const juce::AudioBuffer<float>& reference, const juce::AudioBuffer<float>& candidate)
+{
+    return judge (reference, candidate);
+}
+
 int runMatchBench (const juce::StringArray& arguments)
 {
     // w=mel,mfcc,centroid,loudness: try other composite-loss weights.

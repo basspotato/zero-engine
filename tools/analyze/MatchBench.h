@@ -1,6 +1,6 @@
 #pragma once
 
-#include <juce_core/juce_core.h>
+#include <juce_audio_basics/juce_audio_basics.h>
 
 // ZeroAnalyze matchbench [refFolder]: how well Reference Match does.
 //
@@ -12,3 +12,11 @@
 // baseline. With refFolder, every WAV in it is matched too and the matcher's
 // own closeness is printed (real sounds have no notes to replay).
 int runMatchBench (const juce::StringArray& args);
+
+struct Profile;
+
+// The benchmark's renders and judge, shared with the library tools: a profile
+// playing the type's test note or arp loop (2 s at 48 kHz), and the mean log-mel
+// dB difference between two such renders.
+juce::AudioBuffer<float> renderBenchSound (int genre, int type, const Profile& profile, bool loop);
+float judgeBenchSound (const juce::AudioBuffer<float>& reference, const juce::AudioBuffer<float>& candidate);

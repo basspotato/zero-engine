@@ -22,6 +22,7 @@
 #include "Freesound.h"
 #include "Tests.h"
 #include "MatchBench.h"
+#include "MatchLibrary.h"
 #include "Library.h"
 #include "Tuner.h"
 #include "Harmonics.h"
@@ -389,6 +390,11 @@ int main (int argc, char* argv[])
             std::printf ("  at %.2f s for %.2f s  %6.1f Hz\n", n.start, n.length, n.pitchHz);
         return 0;
     }
+
+    if (command == "library")
+        return runLibrary (args);
+    if (command == "libbench")
+        return runLibraryBench (args);
 
     if (command == "matchbench")
         return runMatchBench (args);
