@@ -467,9 +467,8 @@ static juce::Image spaceImage (const char* fileName)
 
 // Cuts the part of a photo inside `area` (0..1 of the picture) out of its
 // black sky: brightness becomes alpha, and the edge of the oval fades, so
-// only the planet (or nebula) is left. `tint` maps the colour (identity if null).
-static juce::Image cutOut (const juce::Image& photo, juce::Rectangle<float> area, int size,
-                           std::function<juce::Colour (juce::Colour)> tint = nullptr)
+// only the planet is left.
+static juce::Image cutOut (const juce::Image& photo, juce::Rectangle<float> area, int size)
 {
     if (! photo.isValid())
         return {};
@@ -484,13 +483,11 @@ static juce::Image cutOut (const juce::Image& photo, juce::Rectangle<float> area
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < size; ++x)
         {
-            auto c = out.getPixelAt (x, y);
+            const auto c = out.getPixelAt (x, y);
             const auto brightness = juce::jmax (c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue());
             const auto dx = 2.0f * (x + 0.5f) / size - 1.0f, dy = 2.0f * (y + 0.5f) / height - 1.0f;
             const auto edge = juce::jlimit (0.0f, 1.0f, (1.0f - std::sqrt (dx * dx + dy * dy)) / 0.2f);
             const auto alpha = juce::jlimit (0.0f, 1.0f, (brightness - 0.08f) / 0.3f) * edge;
-            if (tint != nullptr)
-                c = tint (c);
             out.setPixelAt (x, y, c.withAlpha (alpha));
         }
     return out;
@@ -527,22 +524,6 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         picturesCut = true;
         saturn = cutOut (spaceImage ("saturn.jpg"), { 0.25f, 0.395f, 0.5f, 0.215f }, 360);
         moon = cutOut (spaceImage ("moon.jpg"), { 0.284f, 0.325f, 0.425f, 0.34f }, 220);
-        // The exploding star in a darker purple.
-        nebula = cutOut (spaceImage ("nebula.jpg"), { 0.2625f, 0.0225f, 0.525f, 0.945f }, 300, [] (juce::Colour c)
-        {
-            const auto brightness = juce::jmax (c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue());
-            return c.interpolatedWith (juce::Colour (0xff6a2fb0).withMultipliedBrightness (brightness * 1.3f), 0.6f)
-                    .withMultipliedBrightness (0.7f);
-        });
-    }
-    // Lower left, behind the stars.
-    if (nebula.isValid())
-    {
-        const auto size = 0.62f * screen.getHeight();
-        g.setOpacity (0.55f);
-        g.drawImage (nebula, juce::Rectangle<float> (size, size).withCentre ({ screen.getX() + 0.12f * screen.getWidth(),
-                                                                            screen.getY() + 0.78f * screen.getHeight() }));
-        g.setOpacity (1.0f);
     }
    #endif
 

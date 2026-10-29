@@ -250,7 +250,7 @@ private:
     std::vector<Wave> waves;
     // The owner's photos cut out of their black skies (made once; empty when
     // the pictures weren't built in).
-    juce::Image saturn, moon, nebula;
+    juce::Image saturn, moon;
     bool picturesCut = false;
     void paintSpace (juce::Graphics&, juce::Rectangle<float> screen);
     bool mini = false;
