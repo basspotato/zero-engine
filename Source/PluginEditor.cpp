@@ -16,6 +16,7 @@ namespace Palette
     const juce::Colour accent     { 0xff72c9e6 }; // light blue
     const juce::Colour orange     { 0xffff7417 };
     const juce::Colour yellow     { 0xffffc531 };
+    const juce::Colour magenta    { 0xfff736aa }; // the pink-magenta the tesseract passes through between blue and orange
     const juce::Colour text       { 0xffdfe4ff };
     const juce::Colour warn       { 0xffff9a2e };
     const juce::Colour track      { 0xff141621 };
@@ -415,6 +416,7 @@ void TesseractButton::timerCallback()
     }
 
     angle += 0.008f + 0.12f * std::sin (juce::MathConstants<float>::pi * foldProgress); // spins up mid-fold
+    colourPhase += 0.008f; // the resting turn's pace, whatever a fold does
     if (isShowing())
         repaint();
 }
@@ -488,7 +490,11 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
         return juce::Colour (hue, juce::jmap (t, from.getSaturation(), to.getSaturation()),
                              juce::jmap (t, from.getBrightness(), to.getBrightness()), 1.0f);
     };
-    const auto shade = juce::jlimit (0.0f, 1.0f, pulse);
+    // The colour drifts at the resting turn's pace, one slow round trip per turn
+    // (blue, violet, magenta, orange, yellow and back), smooth as a cosine; a
+    // fold flashes on top of wherever it is.
+    const auto drift = 0.5f - 0.5f * std::cos (colourPhase);
+    const auto shade = juce::jlimit (0.0f, 1.0f, juce::jmax (drift, pulse));
     const auto colour = shade < 0.6f ? aroundTheWheel (Palette::accent, Palette::orange, shade / 0.6f)
                                      : Palette::orange.interpolatedWith (Palette::yellow, (shade - 0.6f) / 0.4f);
     for (const auto pass : { 0, 1 })
@@ -639,7 +645,7 @@ void LevelMeter::paint (juce::Graphics& g)
         // Colour by level: light blue low down, fading to orange as it rises, yellow
         // near the top, red at 0 dB. The RMS body is the wide bar, the peak a thinner
         // one behind it; each gets a lit cap and a soft rounded sheen.
-        auto fill = [&] (float db, float inset, float alpha)
+        auto fill = [&] (float db, float inset, float alpha, bool isPeak)
         {
             const auto top = yFor (db);
             auto r = bar.reduced (inset, 0.0f).withTop (top);
@@ -661,18 +667,18 @@ void LevelMeter::paint (juce::Graphics& g)
             g.fillRect (r);
 
             const auto capColour = gradient.getColourAtPosition (juce::jlimit (0.0, 1.0, (double) meterFraction (db)));
-            g.setColour (capColour.withAlpha (0.35f));
+            g.setColour ((isPeak ? Palette::magenta : capColour).withAlpha (0.35f));
             g.fillRect (r.withHeight (6.0f).translated (0.0f, -3.0f));
-            g.setColour (capColour.brighter (0.5f).withAlpha (1.0f));
+            g.setColour ((isPeak ? Palette::magenta : capColour.brighter (0.5f)).withAlpha (1.0f));
             g.fillRect (r.withHeight (1.5f));
         };
-        fill (peak[ch], barWidth * 0.3f, 0.55f);
-        fill (rms[ch], 0.0f, 0.95f);
+        fill (peak[ch], barWidth * 0.3f, 0.55f, true); // the peak's cap in the tesseract's magenta
+        fill (rms[ch], 0.0f, 0.95f, false);
 
         // Peak hold.
         if (hold[ch] > meterFloorDb)
         {
-            g.setColour (hold[ch] > -0.1f ? Palette::clip : Palette::text);
+            g.setColour (hold[ch] > -0.1f ? Palette::clip : Palette::magenta);
             g.fillRect (bar.getX(), yFor (hold[ch]) - 1.0f, bar.getWidth(), 2.0f);
         }
 

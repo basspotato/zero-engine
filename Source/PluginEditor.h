@@ -225,6 +225,7 @@ private:
     void timerCallback() override;
 
     float angle = 0.0f;       // idle rotation, radians
+    float colourPhase = 0.0f; // the colour's drift: advances at the resting pace only
     double foldStart = -1.0;  // ms timestamp; negative when not folding
     float foldProgress = 0.0f; // 0..1 while folding
     bool mini = false;
