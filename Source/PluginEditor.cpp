@@ -554,7 +554,7 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     }
 
     // The black hole at the centre: an accretion disc of tilted rings, magenta
-    // into orange, turning slowly, flaring as the tesseract falls in (a fold);
+    // into orange, turning slowly (steady through a fold; only the rim brightens);
     // a dark core with a faint rim of light.
     const auto flare = std::sin (MathConstants<float>::pi * foldProgress);
     const auto r = 0.36f * juce::jmin (screen.getWidth(), screen.getHeight());
@@ -565,13 +565,13 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         juce::Path disc;
         disc.addEllipse (-radius, -radius * 0.32f, 2.0f * radius, 2.0f * radius * 0.32f);
         const auto turn = juce::AffineTransform::rotation (-0.35f + 0.05f * std::sin (t * 0.05f)).translated (c.x, c.y);
-        g.setColour (Palette::magenta.interpolatedWith (Palette::orange, k).withAlpha ((0.08f + 0.25f * flare) * (1.0f - 0.6f * k)));
+        g.setColour (Palette::magenta.interpolatedWith (Palette::orange, k).withAlpha (0.08f * (1.0f - 0.6f * k)));
         g.strokePath (disc, juce::PathStrokeType (2.5f), turn);
         juce::Path dashed;
         const float dashes[] { 6.0f + 10.0f * k, 9.0f };
         juce::PathStrokeType (1.2f).createDashedStroke (dashed, disc, dashes, 2);
-        g.setColour (Palette::yellow.withAlpha ((0.06f + 0.2f * flare) * (1.0f - k)));
-        g.fillPath (dashed, juce::AffineTransform::rotation (t * (0.1f - 0.05f * k) + 3.0f * flare).followedBy (turn));
+        g.setColour (Palette::yellow.withAlpha (0.06f * (1.0f - k)));
+        g.fillPath (dashed, juce::AffineTransform::rotation (t * (0.1f - 0.05f * k)).followedBy (turn));
     }
     const auto core = r * 0.28f;
     juce::ColourGradient rim (juce::Colour (0xff05060c), c.x, c.y, Palette::accent.withAlpha (0.0f), c.x + core * 1.6f, c.y, true);
@@ -590,13 +590,6 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
     {
         fillScreen (g, bounds);
         paintSpace (g, bounds.reduced (2.0f));
-        auto hint = bounds.removeFromBottom (18.0f);
-        if (highlighted) // the hint only appears on mouse-over
-        {
-            g.setColour (Palette::yellow.withAlpha (0.9f));
-            g.setFont (Fonts::ui (9.0f, true));
-            g.drawText ("CLICK FOR A NEW SOUND", hint, juce::Justification::centred);
-        }
     }
 
     // Fold: shrink towards the centre while turning a half turn through w (the
