@@ -1,5 +1,6 @@
 #include "GenerateNetTrain.h"
 #include "../../Source/GenerateNet.h"
+#include "../../Source/Moods.h"
 #include "../../Source/PluginProcessor.h"
 #include "../../Source/Parameters.h"
 #include "../../Source/ReferenceMatch.h"
@@ -186,7 +187,16 @@ int runGenerateNetData (const juce::StringArray& args)
                 r.genre = random.nextInt (12);
                 r.type = random.nextInt (6);
                 int source = r.genre;
-                const auto p = candidate (r.genre, r.type, random, source);
+                // A third from the mood recipes (Mood mode), the rest as Genre mode draws.
+                Profile p;
+                if (random.nextFloat() < 0.33f)
+                {
+                    const auto mood = random.nextInt (Moods::count);
+                    r.type = Moods::typeOf (mood);
+                    p = Moods::make (mood, random, source);
+                }
+                else
+                    p = candidate (r.genre, r.type, random, source);
                 r.genre = source;
                 r.features = GenerateNet::featuresOf (p, source, r.type);
                 r.outputs = GenerateNet::outputsOf (ZeroEngineProcessor::measureForTools (engine, source, r.type, p), r.type);

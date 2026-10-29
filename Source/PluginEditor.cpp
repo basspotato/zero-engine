@@ -460,34 +460,57 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     planet (0.13f, 0.28f, 0.075f * h, Palette::accent, 0.031f);
     planet (0.86f, 0.70f, 0.045f * h, Palette::magenta, 0.023f);
 
-    // A black hole at the centre: an accretion disc of tilted rings, magenta
-    // into orange, turning slowly; a dark core with a faint rim of light.
-    const auto c = screen.getCentre();
-    const auto r = 0.36f * juce::jmin (screen.getWidth(), screen.getHeight());
-    for (int ring = 0; ring < 7; ++ring)
+    // At the centre, a burst: faint orbit rings, a glowing warm core, fine rays
+    // fanning out to small glowing nodes that drift round their orbits (the
+    // inner ones faster) and shimmer.
+    if (nodes.empty())
     {
-        const auto k = (float) ring / 6.0f;
-        const auto radius = r * (0.55f + 0.5f * k);
-        juce::Path disc;
-        disc.addEllipse (-radius, -radius * 0.32f, 2.0f * radius, 2.0f * radius * 0.32f);
-        const auto turn = juce::AffineTransform::rotation (-0.35f + 0.05f * std::sin (t * 0.05f))
-                              .translated (c.x, c.y);
-        g.setColour (Palette::magenta.interpolatedWith (Palette::orange, k).withAlpha (0.07f * (1.0f - 0.6f * k)));
-        // Each ring a dashed arc set turning at its own pace, so the disc swirls.
-        juce::Path dashed;
-        const float dashes[] { 6.0f + 10.0f * k, 9.0f };
-        juce::PathStrokeType (1.2f).createDashedStroke (dashed, disc, dashes, 2,
-            juce::AffineTransform::rotation (t * (0.08f - 0.04f * k)).followedBy (juce::AffineTransform::scale (1.0f, 1.0f)));
-        g.strokePath (disc, juce::PathStrokeType (2.5f), turn);
-        g.setColour (Palette::yellow.withAlpha (0.05f * (1.0f - k)));
-        g.fillPath (dashed, juce::AffineTransform::rotation (t * (0.1f - 0.05f * k)).followedBy (turn));
+        juce::Random random (11);
+        const juce::Colour colours[] { Palette::orange, Palette::magenta, Palette::accent, juce::Colour (0xffb39cf0), Palette::yellow };
+        for (int i = 0; i < 70; ++i)
+        {
+            const auto radius = 0.12f + 0.88f * std::sqrt (random.nextFloat());
+            nodes.push_back ({ radius, MathConstants<float>::twoPi * random.nextFloat(), 0.8f + 2.2f * random.nextFloat() * random.nextFloat(),
+                               colours[random.nextInt ((int) std::size (colours))], random.nextFloat() < 0.6f,
+                               MathConstants<float>::twoPi * random.nextFloat() });
+        }
     }
-    const auto core = r * 0.28f;
-    juce::ColourGradient rim (juce::Colour (0xff05060c), c.x, c.y, Palette::magenta.withAlpha (0.0f), c.x + core * 1.6f, c.y, true);
-    rim.addColour (0.62, juce::Colour (0xff05060c));
-    rim.addColour (0.72, Palette::orange.withAlpha (0.25f));
-    g.setGradientFill (rim);
-    g.fillEllipse (c.x - core * 1.6f, c.y - core * 1.6f, core * 3.2f, core * 3.2f);
+    const auto c = screen.getCentre();
+    const auto reach = juce::jmin (0.4f * screen.getWidth(), 0.66f * screen.getHeight()); // the outer orbits run off the top and bottom
+
+    for (int ring = 1; ring <= 5; ++ring)
+    {
+        const auto rr = reach * (float) ring / 5.0f;
+        g.setColour (Palette::accent.withAlpha (0.05f));
+        g.drawEllipse (c.x - rr, c.y - rr, 2.0f * rr, 2.0f * rr, 0.8f);
+    }
+
+    for (const auto& n : nodes)
+    {
+        const auto a = n.angle + t * 0.02f / n.radius;
+        const auto p = c + juce::Point<float> (std::cos (a), std::sin (a)) * (n.radius * reach);
+        const auto shimmer = 0.6f + 0.4f * std::sin (n.phase + t * 1.3f);
+        if (n.ray)
+        {
+            juce::ColourGradient ray (Palette::orange.withAlpha (0.32f * shimmer), c.x, c.y, n.colour.withAlpha (0.06f), p.x, p.y, false);
+            g.setGradientFill (ray);
+            g.drawLine ({ c, p }, 0.7f);
+        }
+        const auto halo = 3.0f * n.size;
+        juce::ColourGradient glow (n.colour.withAlpha (0.35f * shimmer), p.x, p.y, n.colour.withAlpha (0.0f), p.x + halo, p.y, true);
+        g.setGradientFill (glow);
+        g.fillEllipse (p.x - halo, p.y - halo, 2.0f * halo, 2.0f * halo);
+        g.setColour (n.colour.brighter (0.4f).withAlpha (0.8f * shimmer));
+        g.fillEllipse (p.x - 0.5f * n.size, p.y - 0.5f * n.size, n.size, n.size);
+    }
+
+    // The core: a soft warm glow with a bright point, breathing slowly.
+    const auto core = reach * (0.22f + 0.02f * std::sin (t * 0.6f));
+    juce::ColourGradient glow (juce::Colour (0xffffe2c4).withAlpha (0.85f), c.x, c.y, Palette::orange.withAlpha (0.0f), c.x + core, c.y, true);
+    glow.addColour (0.18, Palette::orange.withAlpha (0.55f));
+    glow.addColour (0.5, Palette::magenta.withAlpha (0.12f));
+    g.setGradientFill (glow);
+    g.fillEllipse (c.x - core, c.y - core, 2.0f * core, 2.0f * core);
 }
 
 void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool down)

@@ -233,6 +233,8 @@ private:
     struct Star { float x, y, size, rate, phase; };
     std::vector<Star> stars;
     double spaceTime = 0.0;
+    struct Node { float radius, angle, size; juce::Colour colour; bool ray; float phase; }; // the burst at the centre (radius 0..1)
+    std::vector<Node> nodes;
     void paintSpace (juce::Graphics&, juce::Rectangle<float> screen);
     bool mini = false;
 };
