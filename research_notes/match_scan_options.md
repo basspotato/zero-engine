@@ -50,3 +50,10 @@ picks parameters or works off the audio thread, licences checked).
 ## Fine for offline analysis
 librosa (ISC), FluCoMa (BSD: NMF, HPSS, transient separation, descriptors),
 sms-tools: prototyping only, nothing shipped.
+
+## Basic Pitch in the plugin (researched 2026-10-28, nothing built yet)
+- Licences: Basic Pitch code and weights Apache-2.0 (`basic_pitch/saved_models/icassp_2022/nmp.onnx`, 230 KB), NeuralNote Apache-2.0, RTNeural BSD-3, ONNX Runtime MIT.
+- NeuralNote main (v2) moved to a transformer (MuScriptor, ggml, 210 MB+ downloads); the Basic Pitch version is tag v1.1.0: github.com/DamRsn/NeuralNote/tree/v1.1.0
+- v1.1.0 layout: CQT front end in ONNX Runtime (`Lib/Model/Features.cpp`, `features_model.ort`), CNN in RTNeural (`Lib/Model/BasicPitchCNN.cpp`, 4 json models in `Lib/ModelData/`), note creation `Lib/Model/Notes.cpp` (frame threshold 0.3, onset 0.5, min note 125 ms, energy 11, MIDI 21-108). Input mono 22050 Hz.
+- Catch: their prebuilt static ONNX Runtime links only with MSVC 19.35 (NeuralNote issue #21). Options: rebuild with ort-builder (needs Python), load Microsoft's onnxruntime.dll at runtime, run Spotify's full nmp.onnx in stock ORT and keep only Notes.cpp, or write the CQT in C++ (must match nnAudio).
+- Expected weak spots on synths: octave errors on bright saws, weak sub-bass, notes under the minimum length dropped (fast arps need 35-60 ms), supersaws split into extra notes. Test on matchbench's engine targets first.
