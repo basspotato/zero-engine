@@ -9,4 +9,5 @@ CMakeUserPresets.json
 analysis/
 third_party/
 third party/
-Resources/Space/
+Resources/Space/*
+!Resources/Space/background.jpg
