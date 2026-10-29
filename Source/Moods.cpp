@@ -91,7 +91,7 @@ namespace Moods
                 p.ampSustain = 1.0f;
                 p.ampRelease = between (2.0f, 3.0f);
                 p.filterMode = 0.0f;
-                p.filterCutoff = logBetween (2000.0f, 8000.0f);
+                p.filterCutoff = logBetween (1500.0f, 5000.0f); // darker: the owner heard harshness
                 p.filterRes = between (0.0f, 0.15f);
                 p.filterEnv = 0.0f;
                 p.lfoRate = logBetween (0.05f, 0.3f);
@@ -103,9 +103,9 @@ namespace Moods
                 p.delayFeedback = between (0.3f, 0.5f);
                 p.width = between (0.6f, 0.9f);
                 p.grit = between (0.0f, 0.1f);
-                p.air = between (0.6f, 0.9f);
+                p.air = between (0.45f, 0.7f);
                 p.motion = between (0.4f, 0.7f);
-                p.tilt = between (-1.0f, 2.0f);
+                p.tilt = between (-1.5f, 1.0f);
                 break;
 
             case warmKeys:
@@ -131,7 +131,9 @@ namespace Moods
                 p.reverbSize = between (0.4f, 0.8f);
                 p.delayMix = between (0.0f, 0.15f);
                 p.width = between (0.3f, 0.6f);
-                p.grit = between (0.05f, 0.25f);
+                p.grit = between (0.0f, 0.1f); // clean: more read as distorted mids
+                p.ottDepth = between (0.0f, 0.15f);
+                p.spectral = between (0.0f, 0.1f);
                 p.air = between (0.2f, 0.5f);
                 p.motion = between (0.1f, 0.3f);
                 p.tilt = between (-3.0f, 0.0f);
@@ -149,21 +151,21 @@ namespace Moods
                 p.ampSustain = between (0.0f, 0.2f);
                 p.ampRelease = between (0.8f, 2.0f);
                 p.filterMode = 0.0f;
-                p.filterCutoff = logBetween (6000.0f, 16000.0f);
+                p.filterCutoff = logBetween (3500.0f, 9000.0f); // softer top: the owner found bells too much
                 p.filterRes = between (0.0f, 0.15f);
                 p.filterEnv = between (0.0f, 1.0f);
                 p.lfoRate = logBetween (0.2f, 1.0f);
                 p.lfoToPos = between (0.0f, 0.2f);
                 p.lfoToCutoff = 0.0f;
-                p.reverbMix = between (0.3f, 0.5f);
+                p.reverbMix = between (0.25f, 0.42f);
                 p.reverbSize = between (0.6f, 0.9f);
                 p.delayMix = between (0.15f, 0.35f);
-                p.delayFeedback = between (0.25f, 0.45f);
+                p.delayFeedback = between (0.2f, 0.35f);
                 p.width = between (0.4f, 0.7f);
                 p.grit = 0.0f;
-                p.air = between (0.5f, 0.8f);
+                p.air = between (0.3f, 0.55f);
                 p.motion = between (0.1f, 0.3f);
-                p.tilt = between (0.0f, 2.0f);
+                p.tilt = between (-1.0f, 1.0f);
                 break;
 
             case darkTexture:

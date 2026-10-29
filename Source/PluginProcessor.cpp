@@ -520,10 +520,12 @@ float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTrai
     auto capped = [] (float v) { return juce::jlimit (-2.0f, 1.5f, v); };
     enum { level, side, centroid, bass, body, spread, crest, movement, richness };
     const auto warmth = capped (-std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) / 0.8f);
+    // Harsh: more than half an octave brighter than the target costs on top.
+    const auto harsh = juce::jmin (3.0f, 1.5f * juce::jmax (0.0f, std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) - 0.5f));
     const auto clean = capped (4.0f * (m.clarity - 0.85f)) - capped (20.0f * m.flatness);
     const auto widthNear = -0.5f * std::abs (capped (z (side)));
     const auto calm = -capped (juce::jmax (0.0f, z (movement) - 0.5f));
-    return warmth + 0.5f * capped (z (body)) + 0.5f * capped (z (richness)) + clean + widthNear + calm;
+    return warmth - harsh + 0.5f * capped (z (body)) + 0.5f * capped (z (richness)) + clean + widthNear + calm;
 }
 
 std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random, int mood)
