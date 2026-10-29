@@ -1065,13 +1065,13 @@ int main (int argc, char* argv[])
                 std::printf ("%s\n", name.toRawUTF8());
             }
         }
-        // And Mood mode: 18 clicks in a row (every mood about three times), named
+        // And Mood mode: 24 clicks in a row (every mood about three times), named
         // by mood, each played as its type's phrase.
         {
             ZeroEngineProcessor engine;
             engine.setPlayConfigDetails (0, 2, rate, block);
             engine.prepareToPlay (rate, block);
-            for (int p = 0; p < 18; ++p)
+            for (int p = 0; p < 24; ++p)
             {
                 engine.resetForRender();
                 engine.generate (5000 + 31 * p, true);
@@ -1081,6 +1081,29 @@ int main (int argc, char* argv[])
                 save (phrase (engine, t), folder.getChildFile (name + ".wav"));
                 std::printf ("%s\n", name.toRawUTF8());
             }
+        }
+        // And Mutate: 8 sounds (types in turn), each as a (the Generate result) and b
+        // (one MUTATE click on it).
+        for (int m = 0; m < 8; ++m)
+        {
+            const auto g = (3 * m + 1) % genreNames.size(), t = m % typeNames.size();
+            auto owned = std::make_unique<ZeroEngineProcessor>(); // on the heap: main's stack is full of engines already
+            auto& engine = *owned;
+            engine.setPlayConfigDetails (0, 2, rate, block);
+            engine.prepareToPlay (rate, block);
+            auto* genre = engine.state.getParameter (ParamIDs::genre);
+            auto* type = engine.state.getParameter (ParamIDs::type);
+            genre->setValueNotifyingHost (genre->convertTo0to1 ((float) g));
+            type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
+            engine.syncProfile();
+            engine.resetForRender();
+            engine.generate (7000 + 13 * m);
+            const auto name = "mutate_" + juce::String (m + 1).paddedLeft ('0', 2) + "_" + genreNames[g].removeCharacters (" &") + "_" + typeNames[t];
+            save (phrase (engine, t), folder.getChildFile (name + "_a.wav"));
+            engine.resetForRender();
+            engine.generate (8000 + 13 * m, false, true);
+            save (phrase (engine, t), folder.getChildFile (name + "_b.wav"));
+            std::printf ("%s\n", name.toRawUTF8());
         }
         folder.getChildFile ("key.csv").replaceWithText (key);
         std::printf ("wrote %d pairs to %s (key.csv says which is new)\n", pair, folder.getFullPathName().toRawUTF8());
