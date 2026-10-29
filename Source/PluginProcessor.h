@@ -72,9 +72,12 @@ public:
     // (the offline tuner passes candidate profiles through this).
     void loadProfile (int genre, int type, const Profile& profile);
 
-    // Message thread: the Generate button. Loads a random variation on the
-    // current Genre/Type's profile. Switching Genre or Type loads a designed profile as usual.
-    void generate (juce::int64 seed = juce::Time::currentTimeMillis());
+    // Message thread: the Generate button. Loads a big, interesting variation on
+    // the current Genre/Type's profile (see pickGeneratedProfile). anyGenreToo (the
+    // mini tesseract): draws from every genre and blends of two instead, and
+    // loads as the genre it mostly came from. Switching Genre or Type loads a
+    // designed profile as usual.
+    void generate (juce::int64 seed = juce::Time::currentTimeMillis(), bool anyGenreToo = false);
 
     // Message thread: favourites are whole sounds (every parameter) saved as
     // files, named "<Genre> <Type> <n>", so a generated sound is never lost.
@@ -151,7 +154,8 @@ private:
     // private engines in parallel, see pickGeneratedProfile.
     using SoundCheck = SoundTraits;
     static SoundCheck measureProfile (ZeroEngineProcessor& engine, int genre, int type, const Profile&);
-    Profile pickGeneratedProfile (int genre, int type, juce::Random&);
+    static constexpr int anyGenre = 12; // pickGeneratedProfile: draw from every genre
+    std::pair<Profile, int> pickGeneratedProfile (int genre, int type, juce::Random&); // the profile and its leading genre
     std::vector<std::unique_ptr<ZeroEngineProcessor>> checkers; // private engines for the check renders, made on first use
     std::vector<SoundTraits> recentGenerated; // the last few results, so the next one differs
     int lastGenerateFits = 0;

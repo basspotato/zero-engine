@@ -367,8 +367,8 @@ void ChevronButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 }
 
 //==============================================================================
-TesseractButton::TesseractButton()
-    : juce::Button ("Generate")
+TesseractButton::TesseractButton (bool small)
+    : juce::Button (small ? "Generate any genre" : "Generate"), mini (small)
 {
     startTimerHz (60);
 }
@@ -402,14 +402,16 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
     using juce::MathConstants;
 
     auto bounds = getLocalBounds().toFloat();
-    fillScreen (g, bounds);
-
-    auto hint = bounds.removeFromBottom (18.0f);
-    if (highlighted) // the hint only appears on mouse-over
+    if (! mini)
     {
-        g.setColour (Palette::yellow.withAlpha (0.9f));
-        g.setFont (Fonts::ui (9.0f, true));
-        g.drawText ("CLICK FOR A NEW SOUND", hint, juce::Justification::centred);
+        fillScreen (g, bounds);
+        auto hint = bounds.removeFromBottom (18.0f);
+        if (highlighted) // the hint only appears on mouse-over
+        {
+            g.setColour (Palette::yellow.withAlpha (0.9f));
+            g.setFont (Fonts::ui (9.0f, true));
+            g.drawText ("CLICK FOR A NEW SOUND", hint, juce::Justification::centred);
+        }
     }
 
     // Fold: shrink towards the centre while turning a half turn through w (the
@@ -1402,6 +1404,15 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     };
     addAndMakeVisible (generateButton);
 
+    anyGenreButton.onClick = [this]
+    {
+        processor.generate (juce::Time::currentTimeMillis(), true);
+        refreshHistoryButtons();
+        anyGenreButton.fold();
+    };
+    anyGenreButton.setTooltip ("Generate from any genre: big sounds drawn from all twelve genres and blends of two. "
+                               "The result loads as the genre it mostly came from.");
+
     backButton.onClick = [this] { processor.stepHistory (-1); refreshHistoryButtons(); };
     forwardButton.onClick = [this] { processor.stepHistory (1); refreshHistoryButtons(); };
     addAndMakeVisible (backButton);
@@ -1447,6 +1458,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     mainButton.onClick = [this] { showAdvanced (false); };
     addAndMakeVisible (mainButton);
     addAndMakeVisible (advancedButton);
+    addAndMakeVisible (anyGenreButton); // over the display
     addChildComponent (advancedPanel); // last, so it sits over the panels
     showAdvanced (false);
 
@@ -1738,6 +1750,7 @@ void ZeroEngineEditor::resized()
     backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
     levelMeter.setBounds (content (meterSection));
     display.setBounds (content (displaySection));
+    anyGenreButton.setBounds (display.getRight() - 40, display.getBottom() - 40, 36, 36); // over the display's corner
     // The mode menu sits in the header strip, left of the LED.
     displayMode.setBounds (displaySection.getRight() - 26 - 96, displaySection.getY() + 3, 96, 16);
     matchButton.setBounds (displayMode.getX() - 56, displaySection.getY() + 3, 52, 16);

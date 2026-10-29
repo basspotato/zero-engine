@@ -196,7 +196,9 @@ class TesseractButton : public juce::Button,
                         private juce::Timer
 {
 public:
-    TesseractButton();
+    // mini: the small one in the display corner (Generate from any genre): no
+    // screen of its own, no hint.
+    explicit TesseractButton (bool mini = false);
 
     // Starts the fold animation.
     void fold();
@@ -212,6 +214,7 @@ private:
     float angle = 0.0f;       // idle rotation, radians
     double foldStart = -1.0;  // ms timestamp; negative when not folding
     float foldProgress = 0.0f; // 0..1 while folding
+    bool mini = false;
 };
 
 class ZeroEngineEditor : public juce::AudioProcessorEditor,
@@ -248,6 +251,7 @@ private:
     juce::ComboBox displayMode; // in the DISPLAY header strip
     LevelMeter levelMeter;
     TesseractButton generateButton;
+    TesseractButton anyGenreButton { true }; // the mini one in the display's corner: Generate from any genre
     juce::ComboBox favouritesBox;            // recall a saved sound
     juce::String currentFavourite;           // the last one saved or recalled, which Rename and Delete act on
     juce::TextButton saveButton { "SAVE" };  // save the current sound as a favourite

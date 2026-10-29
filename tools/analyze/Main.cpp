@@ -692,6 +692,25 @@ int main (int argc, char* argv[])
                 std::printf ("%s\n", name.toRawUTF8());
             }
         }
+        // And the mini tesseract: any genre, two per type, named by where they came from.
+        for (int t = 0; t < typeNames.size(); ++t)
+        {
+            ZeroEngineProcessor engine;
+            engine.setPlayConfigDetails (0, 2, rate, block);
+            engine.prepareToPlay (rate, block);
+            auto* type = engine.state.getParameter (ParamIDs::type);
+            type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
+            engine.syncProfile();
+            for (int p = 0; p < 2; ++p)
+            {
+                engine.resetForRender();
+                engine.generate (5000 + 31 * t + p, true);
+                const auto from = genreNames[(int) engine.state.getRawParameterValue (ParamIDs::genre)->load()];
+                const auto name = "any_" + typeNames[t] + "_" + juce::String (p + 1) + "_from_" + from.removeCharacters (" &");
+                save (phrase (engine, t), folder.getChildFile (name + ".wav"));
+                std::printf ("%s\n", name.toRawUTF8());
+            }
+        }
         folder.getChildFile ("key.csv").replaceWithText (key);
         std::printf ("wrote %d pairs to %s (key.csv says which is new)\n", pair, folder.getFullPathName().toRawUTF8());
         return 0;

@@ -109,7 +109,7 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
     loadMacroMap (macroMap, profile);
 }
 
-void ZeroEngineProcessor::generate (juce::int64 seed)
+void ZeroEngineProcessor::generate (juce::int64 seed, bool anyGenreToo)
 {
     syncProfile(); // a Genre/Type change not yet picked up by the timer
     juce::Random random (seed);
@@ -121,7 +121,10 @@ void ZeroEngineProcessor::generate (juce::int64 seed)
     if (history.empty() || ! history.back().isEquivalentTo (state.state))
         history.push_back (state.copyState());
 
-    loadProfile (genre, type, pickGeneratedProfile (genre, type, random));
+    // Any genre: candidates from every genre and blends of two; the result
+    // loads as the genre it mostly came from.
+    const auto [profile, source] = pickGeneratedProfile (anyGenreToo ? anyGenre : genre, type, random);
+    loadProfile (source, type, profile);
 
     // With the arp on, Generate also writes a new step pattern: an instant groove.
     if (arpParams[0]->load() > 0.5f)
@@ -183,7 +186,7 @@ ZeroEngineProcessor::SoundCheck ZeroEngineProcessor::measureProfile (ZeroEngineP
     return SoundTraits::of (out, rate);
 }
 
-Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random)
+std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random)
 {
     // Render-and-check, then pick for size and interest:
     //  1. Many variations, each measured (SoundTraits) on private engines in parallel.
@@ -205,15 +208,62 @@ Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Ra
         checkers.back()->stopProfileSync();
     }
 
-    // The designed profile never changes while running, so measure it once.
-    auto& cached = designedChecks[(size_t) (genre * 6 + type)];
-    if (! cached.has_value())
-        cached = measureProfile (*checkers[0], genre, type, makeProfile (genre, type));
-    const auto target = *cached;
+    const auto free = genre == anyGenre;
+    const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
 
+    // What a keeper must stay near and what it is scored against: the designed
+    // profile (never changes while running, so measured once), or in Free, where
+    // no genre's character applies, the owner's sounds of this type.
+    SoundTraits target;
+    if (free)
+    {
+        const auto& m = guide.median;
+        target.sidePct = m[1]; target.centroidHz = m[2]; target.bassPct = m[3]; target.bodyPct = m[4];
+        target.spreadOct = m[5]; target.crestDb = m[6]; target.movementDb = m[7]; target.richness = m[8];
+    }
+    else
+    {
+        auto& cached = designedChecks[(size_t) (genre * 6 + type)];
+        if (! cached.has_value())
+            cached = measureProfile (*checkers[0], genre, type, makeProfile (genre, type));
+        target = *cached;
+    }
+
+    // The variations. In Free each comes from any genre, and more than half are
+    // blends of two genres' variations (their searched settings mixed 25-75 %,
+    // the leading one's other settings and, half the time, the other's
+    // wavetable): sounds no single genre makes. sources: the leading genre.
     std::vector<Profile> profiles;
+    std::vector<int> sources;
     for (int i = 0; i < candidates; ++i)
-        profiles.push_back (generateProfile (genre, type, random));
+    {
+        if (! free)
+        {
+            profiles.push_back (generateProfile (genre, type, random));
+            sources.push_back (genre);
+            continue;
+        }
+        const auto a = random.nextInt (anyGenre);
+        auto p = generateProfile (a, type, random);
+        auto source = a;
+        if (random.nextFloat() < 0.6f)
+        {
+            const auto b = (a + 1 + random.nextInt (anyGenre - 1)) % anyGenre;
+            const auto other = generateProfile (b, type, random);
+            const auto mix = 0.25f + 0.5f * random.nextFloat();
+            auto units = ReferenceMatch::unitsOf (p);
+            const auto otherUnits = ReferenceMatch::unitsOf (other);
+            for (size_t k = 0; k < units.size(); ++k)
+                units[k] += mix * (otherUnits[k] - units[k]);
+            auto lead = mix > 0.5f ? other : p;
+            const auto table = random.nextBool() ? other.waveTable : p.waveTable;
+            p = ReferenceMatch::withUnitsOf (lead, units);
+            p.waveTable = table;
+            source = mix > 0.5f ? b : a;
+        }
+        profiles.push_back (p);
+        sources.push_back (source);
+    }
     std::vector<SoundTraits> traits ((size_t) candidates);
     {
         std::vector<std::thread> pool;
@@ -221,13 +271,12 @@ Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Ra
             pool.emplace_back ([&, e]
             {
                 for (int i = e; i < candidates; i += engines)
-                    traits[(size_t) i] = measureProfile (*checkers[(size_t) e], genre, type, profiles[(size_t) i]);
+                    traits[(size_t) i] = measureProfile (*checkers[(size_t) e], sources[(size_t) i], type, profiles[(size_t) i]);
             });
         for (auto& t : pool)
             t.join();
     }
 
-    const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
     auto spreadOf = [&] (int k) { return juce::jmax (1.0e-3f, guide.spread[(size_t) k]); };
     // A trait's gain over the designed sound, in the owner's spreads, capped.
     auto gain = [&] (int k, float value, float designed, bool lowerIsMore)
@@ -239,14 +288,16 @@ Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Ra
 
     // How far a sound strays from the genre/type's character (1 at the edge of
     // "still the same kind of sound"), or a large value when it is near silent.
+    // In Free the bounds are looser (twice the owner's spread, a wider brightness
+    // range) and loudness is left to the profile's own trim.
     auto strayOf = [&] (const SoundTraits& m)
     {
-        if (m.levelDb < target.levelDb - 20.0f)
+        if (free ? m.levelDb < -45.0f : m.levelDb < target.levelDb - 20.0f)
             return std::numeric_limits<float>::max();
-        const auto loudness = std::abs (m.levelDb - target.levelDb) / 6.0f;
-        const auto brightness = std::abs (std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz))) / 0.8f;
-        const auto bassShare = std::abs (m.bassPct - target.bassPct) / 20.0f;
-        const auto widthOff = std::abs (m.sidePct - target.sidePct) / 20.0f;
+        const auto loudness = free ? 0.0f : std::abs (m.levelDb - target.levelDb) / 6.0f;
+        const auto brightness = std::abs (std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz))) / (free ? 1.3f : 0.8f);
+        const auto bassShare = std::abs (m.bassPct - target.bassPct) / (free ? juce::jmax (20.0f, 2.0f * guide.spread[3]) : 20.0f);
+        const auto widthOff = std::abs (m.sidePct - target.sidePct) / (free ? juce::jmax (20.0f, 2.0f * guide.spread[1]) : 20.0f);
         return juce::jmax (juce::jmax (loudness, brightness), juce::jmax (bassShare, widthOff));
     };
     // Size + interest + novelty (see above).
@@ -291,7 +342,7 @@ Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Ra
 
     lastGenerateFits = (int) keepers.size();
     if (keepers.empty())
-        return closest >= 0 ? profiles[(size_t) closest] : makeProfile (genre, type);
+        return closest >= 0 ? std::pair { profiles[(size_t) closest], sources[(size_t) closest] } : std::pair { makeProfile (sources[0], type), sources[0] };
 
     // Softmax at temperature 0.35: the best are likely, not certain.
     auto chosen = keepers.back().index;
@@ -310,6 +361,7 @@ Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Ra
             }
     }
     auto best = profiles[(size_t) chosen];
+    const auto source = sources[(size_t) chosen];
     auto bestTraits = traits[(size_t) chosen];
     auto bestScore = scoreOf (bestTraits, true);
 
@@ -334,7 +386,7 @@ Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Ra
         {
             std::vector<std::thread> pool;
             for (int e = 0; e < engines; ++e)
-                pool.emplace_back ([&, e] { measured[(size_t) e] = measureProfile (*checkers[(size_t) e], genre, type, nudged[(size_t) e]); });
+                pool.emplace_back ([&, e] { measured[(size_t) e] = measureProfile (*checkers[(size_t) e], source, type, nudged[(size_t) e]); });
             for (auto& t : pool)
                 t.join();
         }
@@ -358,7 +410,7 @@ Profile ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Ra
     recentGenerated.push_back (bestTraits);
     if (recentGenerated.size() > 6)
         recentGenerated.erase (recentGenerated.begin());
-    return best;
+    return { best, source };
 }
 
 
