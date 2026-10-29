@@ -666,6 +666,16 @@ void LevelMeter::paint (juce::Graphics& g)
             g.setGradientFill (sheen);
             g.fillRect (r);
 
+            // The top of the bar blends from its own colour into the tesseract's
+            // magenta, so the pink grows out of the orange rather than sitting on it.
+            {
+                const auto blend = juce::jmin (r.getHeight(), 14.0f);
+                juce::ColourGradient glow (Palette::magenta.withAlpha (0.0f), 0.0f, r.getY() + blend,
+                                           Palette::magenta.withAlpha (0.75f * alpha), 0.0f, r.getY(), false);
+                g.setGradientFill (glow);
+                g.fillRect (r.withHeight (blend));
+            }
+
             const auto capColour = gradient.getColourAtPosition (juce::jlimit (0.0, 1.0, (double) meterFraction (db)));
             g.setColour ((isPeak ? Palette::magenta : capColour).withAlpha (0.35f));
             g.fillRect (r.withHeight (6.0f).translated (0.0f, -3.0f));
