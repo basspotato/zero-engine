@@ -480,14 +480,15 @@ int runLibraryBench (const juce::StringArray& args)
 
 int runLibraryTraits (const juce::StringArray& args)
 {
-    // library traits [source=a,b] [under=<path>] [--write]: SoundTraits of every
-    // matching sound, per type: the targets Generate aims at. Measurement only.
+    // library traits [source=a,b] [under=<path>] [exclude=<path>] [--write]: SoundTraits
+    // of every matching sound, per type: the targets Generate aims at. Measurement only.
     juce::StringArray sources { "owner-library" };
-    juce::String under;
+    juce::String under, exclude;
     for (const auto& a : args)
     {
         if (a.startsWith ("source=")) sources = juce::StringArray::fromTokens (a.fromFirstOccurrenceOf ("=", false, false), ",", "");
         if (a.startsWith ("under=")) under = a.fromFirstOccurrenceOf ("=", false, false);
+        if (a.startsWith ("exclude=")) exclude = a.fromFirstOccurrenceOf ("=", false, false);
     }
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
@@ -498,7 +499,8 @@ int runLibraryTraits (const juce::StringArray& args)
     for (const auto& e : readManifest())
     {
         const auto type = typeNames.indexOf (e.type);
-        if (type < 0 || ! sources.contains (e.source) || (under.isNotEmpty() && ! e.file.startsWithIgnoreCase (under)))
+        if (type < 0 || ! sources.contains (e.source) || (under.isNotEmpty() && ! e.file.startsWithIgnoreCase (under))
+            || (exclude.isNotEmpty() && e.file.startsWithIgnoreCase (exclude)))
             continue;
         std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (e.file)));
         if (reader == nullptr)

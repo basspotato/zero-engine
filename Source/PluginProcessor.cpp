@@ -620,6 +620,13 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         const auto& m = guide.median;
         target.sidePct = m[1]; target.centroidHz = m[2]; target.bassPct = m[3]; target.bodyPct = m[4];
         target.spreadOct = m[5]; target.crestDb = m[6]; target.movementDb = m[7]; target.richness = m[8];
+        if (mood >= 0 && genre >= 0 && genre < anyGenre) // a mood's loudness: the designed sound of its type in the genre box
+        {
+            auto& cached = designedChecks[(size_t) (genre * 6 + type)];
+            if (! cached.has_value())
+                cached = measureProfile (*checkers[0], genre, type, makeProfile (genre, type));
+            target.levelDb = cached->levelDb;
+        }
     }
     else if (parent != nullptr) // Mutate: stay near the sound being mutated
         target = measureProfile (*checkers[0], genre, type, *parent);
