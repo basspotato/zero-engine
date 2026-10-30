@@ -132,29 +132,43 @@ private:
     int dragStep = -1, dragStartPitch = 0;
 };
 
-// The arp page's display: the output waveform across 16 step lanes; each step
-// that plays leaves a hit in its lane (height by its pitch, brighter on an
-// accent) that fades over about a second, so a running pattern leaves a trail.
+// The arp page's display, after the owner's Magic Touch "Spectral Cloud": the
+// spectrum of what's playing is drawn each frame into an image that fades a
+// little every frame, so older traces linger as smoke, with a slow average as a
+// thin bright line on top. Each step that plays leaves a glowing bar in its lane
+// (height by its pitch, orange on an accent) in the same fading image, so a
+// running pattern leaves a trail; a fresh hit flashes brighter for a moment.
 class ArpScope : public juce::Component,
                  private juce::Timer
 {
 public:
     ArpScope (juce::AudioProcessorValueTreeState&, std::function<int()> playingStep, std::function<void (float*, int)> scope);
     void paint (juce::Graphics&) override;
+    void resized() override;
+    void previewFrame (double seconds) { clock = seconds; update(); } // tooling: one frame at a given time, without the timer
 
 private:
     void timerCallback() override;
+    void update();
+    double now() const { return clock >= 0.0 ? clock : juce::Time::getMillisecondCounterHiRes() / 1000.0; }
+    double clock = -1.0; // set by previews
+    juce::Rectangle<float> plotArea() const;           // inside the frame, above the step numbers
+    juce::Path spectrumPath (const std::vector<float>& db) const; // in plot coordinates
+    juce::Rectangle<float> barFor (int step, float height) const;
 
-    static constexpr int steps = 16, scopeSamples = 2048;
+    static constexpr int steps = 16, fftOrder = 11, fftSize = 1 << fftOrder, points = 180;
     std::function<int()> playingStep;
     std::function<void (float*, int)> copyScope;
     std::array<std::atomic<float>*, steps> on {}, pitch {}, accent {};
     std::atomic<float>* length = nullptr;
     struct Hit { int step; double start; float height; bool accented; };
-    std::vector<Hit> hits;
+    std::vector<Hit> hits;  // for the fresh flash only; the trail lives in the ghost image
     int lastStep = -1;
-    std::vector<float> samples = std::vector<float> ((size_t) scopeSamples);
-    float level = 0.0f; // eased, for the trace's glow
+    juce::dsp::FFT fft { fftOrder };
+    juce::dsp::WindowingFunction<float> window { (size_t) fftSize, juce::dsp::WindowingFunction<float>::hann };
+    std::vector<float> fftData = std::vector<float> ((size_t) fftSize * 2);
+    std::vector<float> spectrum = std::vector<float> ((size_t) points, -90.0f), slowAverage = std::vector<float> ((size_t) points, -90.0f);
+    juce::Image ghost; // the fading smoke: spectra and hits, plot-sized
 };
 
 // Every engine parameter in the console style: knobs for numbers, slim menus

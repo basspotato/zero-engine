@@ -1315,113 +1315,216 @@ ArpScope::ArpScope (juce::AudioProcessorValueTreeState& state, std::function<int
     }
     length = state.getRawParameterValue (ParamIDs::seqLength);
     setInterceptsMouseClicks (false, false);
-    startTimerHz (60);
+    startTimerHz (30); // as Magic Touch: the smoke fades per frame
+}
+
+juce::Rectangle<float> ArpScope::plotArea() const
+{
+    return getLocalBounds().toFloat().reduced (6.0f).withTrimmedBottom (13.0f);
+}
+
+void ArpScope::resized()
+{
+    const auto plot = plotArea();
+    ghost = juce::Image (juce::Image::ARGB, juce::jmax (1, (int) plot.getWidth()), juce::jmax (1, (int) plot.getHeight()), true);
+}
+
+juce::Path ArpScope::spectrumPath (const std::vector<float>& db) const
+{
+    // 30 Hz to 16 kHz across, -84 to 0 dB up (a little headroom on top).
+    const auto w = (float) ghost.getWidth(), h = (float) ghost.getHeight();
+    juce::Path path;
+    for (int i = 0; i < points; ++i)
+    {
+        const auto x = w * (float) i / (float) (points - 1);
+        const auto y = h - h * 0.92f * juce::jlimit (0.0f, 1.0f, (db[(size_t) i] + 84.0f) / 84.0f);
+        if (i == 0)
+            path.startNewSubPath (x, y);
+        else
+            path.lineTo (x, y);
+    }
+    return path;
+}
+
+juce::Rectangle<float> ArpScope::barFor (int step, float height) const
+{
+    // A note bar across the lane at the step's pitch (-12..+12 semitones from the
+    // middle), in plot coordinates.
+    const auto w = (float) ghost.getWidth(), h = (float) ghost.getHeight();
+    const auto lane = w / steps;
+    const auto y = h * 0.5f - height * h * 0.36f;
+    return { lane * (float) step + lane * 0.14f, y - 3.0f, lane * 0.72f, 6.0f };
 }
 
 void ArpScope::timerCallback()
 {
-    if (! isShowing())
+    if (isShowing())
+        update();
+}
+
+void ArpScope::update()
+{
+    if (! ghost.isValid())
         return;
-    // A new step that plays (on, not a rest) leaves a hit.
-    const auto now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+
+    // The spectrum of the newest samples: peak per point, falling back slowly.
+    copyScope (fftData.data(), fftSize);
+    window.multiplyWithWindowingTable (fftData.data(), (size_t) fftSize);
+    fft.performFrequencyOnlyForwardTransform (fftData.data());
+    constexpr double sampleRate = 48000.0; // close enough for drawing
+    for (int i = 0; i < points; ++i)
+    {
+        const auto lo = 30.0 * std::pow (16000.0 / 30.0, (double) i / points);
+        const auto hi = 30.0 * std::pow (16000.0 / 30.0, (double) (i + 1) / points);
+        // Where a point spans less than a bin (the lows), read between bins; else the
+        // loudest bin in its span. Tilted +3 dB an octave around 1 kHz so a full
+        // mix reads level, as analysers do.
+        const auto centre = (lo + hi) * 0.5 * fftSize / sampleRate;
+        const auto b0 = juce::jlimit (1, fftSize / 2 - 2, (int) (lo * fftSize / sampleRate));
+        const auto b1 = juce::jlimit (b0, fftSize / 2 - 1, (int) (hi * fftSize / sampleRate));
+        float peak = 0.0f;
+        if (b1 - b0 < 1)
+        {
+            const auto i0 = juce::jlimit (1, fftSize / 2 - 2, (int) centre);
+            const auto frac = (float) juce::jlimit (0.0, 1.0, centre - i0);
+            peak = fftData[(size_t) i0] + frac * (fftData[(size_t) i0 + 1] - fftData[(size_t) i0]);
+        }
+        else
+            for (int b = b0; b <= b1; ++b)
+                peak = juce::jmax (peak, fftData[(size_t) b]);
+        const auto db = juce::Decibels::gainToDecibels (peak / (fftSize * 0.25f), -100.0f)
+                      + 3.0f * (float) std::log2 ((lo + hi) * 0.5 / 1000.0);
+        auto& s = spectrum[(size_t) i];
+        s = db > s ? db : juce::jmax (db, s - 2.5f);
+    }
+    for (int i = 0; i < points; ++i) // the slow line follows the softened trace
+    {
+        float sum = 0.0f;
+        for (int k = -3; k <= 3; ++k)
+            sum += spectrum[(size_t) juce::jlimit (0, points - 1, i + k)];
+        slowAverage[(size_t) i] += 0.06f * (sum / 7.0f - slowAverage[(size_t) i]);
+    }
+
+    // The smoke: everything fades a little each frame, then this frame's trace
+    // (softened over its neighbours) goes in as Magic Touch draws it (wide faint
+    // glow, medium, thin bright).
+    std::vector<float> soft (spectrum.size());
+    for (int i = 0; i < points; ++i)
+    {
+        float sum = 0.0f, weight = 0.0f;
+        for (int k = -3; k <= 3; ++k)
+            if (const auto j = i + k; j >= 0 && j < points)
+            {
+                const auto w = 4.0f - (float) std::abs (k);
+                sum += w * spectrum[(size_t) j];
+                weight += w;
+            }
+        soft[(size_t) i] = sum / weight;
+    }
+    ghost.multiplyAllAlphas (0.88f);
+    juce::Graphics g (ghost);
+    const auto trace = spectrumPath (soft);
+    const auto smoke = Palette::accent.interpolatedWith (juce::Colours::white, 0.35f);
+    g.setColour (smoke.withAlpha (0.05f));
+    g.strokePath (trace, juce::PathStrokeType (9.0f));
+    g.setColour (smoke.withAlpha (0.10f));
+    g.strokePath (trace, juce::PathStrokeType (3.5f));
+    g.setColour (smoke.withAlpha (0.22f));
+    g.strokePath (trace, juce::PathStrokeType (1.2f));
+
+    // A new step that plays (on, not a rest): its bar and beam go into the smoke
+    // (they fade with it, leaving the trail), and it flashes for a moment.
+    const auto now = this->now();
     const auto step = playingStep();
     if (step != lastStep && step >= 0 && step < steps && on[(size_t) step]->load() > 0.5f)
         hits.push_back ({ step, now, juce::jlimit (-1.0f, 1.0f, pitch[(size_t) step]->load() / 12.0f), accent[(size_t) step]->load() > 0.5f });
     lastStep = step;
-    hits.erase (std::remove_if (hits.begin(), hits.end(), [now] (const Hit& h) { return now - h.start > 1.4; }), hits.end());
-
-    copyScope (samples.data(), scopeSamples);
-    float peak = 0.0f;
-    for (const auto v : samples)
-        peak = juce::jmax (peak, std::abs (v));
-    level += 0.2f * (peak - level);
+    for (const auto& h : hits)
+    {
+        if (now - h.start > 0.25)
+            continue; // its trail is already laid down
+        const auto colour = h.accented ? Palette::orange : Palette::accent;
+        const auto bar = barFor (h.step, h.height);
+        // A beam of light falling from the bar, narrowing and fading as it goes.
+        juce::Path beam;
+        const auto top = bar.getBottom(), bottom = (float) ghost.getHeight();
+        beam.startNewSubPath (bar.getX() + bar.getWidth() * 0.18f, top);
+        beam.lineTo (bar.getRight() - bar.getWidth() * 0.18f, top);
+        beam.lineTo (bar.getCentreX() + bar.getWidth() * 0.06f, bottom);
+        beam.lineTo (bar.getCentreX() - bar.getWidth() * 0.06f, bottom);
+        beam.closeSubPath();
+        g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.12f), bar.getCentreX(), top, colour.withAlpha (0.0f), bar.getCentreX(), bottom, false));
+        g.fillPath (beam);
+        g.setColour (colour.withAlpha (0.06f));
+        g.fillRoundedRectangle (bar.expanded (5.0f, 6.0f), 6.0f);
+        g.setColour (colour.withAlpha (0.18f));
+        g.fillRoundedRectangle (bar.expanded (1.5f, 1.5f), 4.0f);
+    }
+    hits.erase (std::remove_if (hits.begin(), hits.end(), [now] (const Hit& h) { return now - h.start > 0.6; }), hits.end());
     repaint();
 }
 
 void ArpScope::paint (juce::Graphics& g)
 {
     const auto box = getLocalBounds().toFloat();
-    g.setColour (Palette::screen);
-    g.fillRoundedRectangle (box, 4.0f);
-    auto area = box.reduced (6.0f, 6.0f);
-    const auto labels = area.removeFromBottom (12.0f);
-    const auto laneWidth = area.getWidth() / steps;
+    juce::ColourGradient bg (Palette::screen.brighter (0.04f), 0.0f, box.getY(), Palette::screen.darker (0.4f), 0.0f, box.getBottom(), false);
+    g.setGradientFill (bg);
+    g.fillRoundedRectangle (box, 5.0f);
+    const auto plot = plotArea();
+    const auto lane = plot.getWidth() / steps;
     const auto active = juce::jlimit (1, steps, juce::roundToInt (length->load()));
-    const auto now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+    const auto now = this->now();
 
-    // Lanes: a faint line between steps (brighter every four), the steps past
-    // Seq Length dimmed, the playing step's lane lit.
+    // Lanes: hairlines (brighter every four), steps past Seq Length shaded, the
+    // playing lane softly lit from below.
     for (int s = 0; s < steps; ++s)
     {
-        const auto lane = juce::Rectangle<float> (area.getX() + s * laneWidth, area.getY(), laneWidth, area.getHeight());
+        const auto r = juce::Rectangle<float> (plot.getX() + (float) s * lane, plot.getY(), lane, plot.getHeight());
         if (s >= active)
         {
-            g.setColour (Palette::panel.withAlpha (0.45f));
-            g.fillRect (lane);
+            g.setColour (Palette::panel.withAlpha (0.5f));
+            g.fillRect (r);
         }
         if (s == lastStep)
         {
-            g.setColour (Palette::accent.withAlpha (0.07f));
-            g.fillRect (lane);
+            juce::ColourGradient lit (Palette::accent.withAlpha (0.0f), 0.0f, r.getY(), Palette::accent.withAlpha (0.10f), 0.0f, r.getBottom(), false);
+            g.setGradientFill (lit);
+            g.fillRect (r);
         }
         if (s > 0)
         {
-            g.setColour (Palette::panelEdge.withAlpha (s % 4 == 0 ? 0.7f : 0.3f));
-            g.drawVerticalLine (juce::roundToInt (lane.getX()), lane.getY(), lane.getBottom());
+            g.setColour (Palette::panelEdge.withAlpha (s % 4 == 0 ? 0.55f : 0.22f));
+            g.drawVerticalLine (juce::roundToInt (r.getX()), r.getY(), r.getBottom());
         }
-        g.setColour ((s == lastStep ? Palette::accent : Palette::text).withAlpha (s < active ? 0.8f : 0.3f));
+        g.setColour ((s == lastStep ? Palette::accent : Palette::text).withAlpha (s < active ? 0.75f : 0.3f));
         g.setFont (Fonts::mono (9.0f));
-        g.drawText (juce::String (s + 1), juce::Rectangle<float> (lane.getX(), labels.getY(), laneWidth, labels.getHeight()), juce::Justification::centred);
+        g.drawText (juce::String (s + 1), juce::Rectangle<float> (r.getX(), plot.getBottom() + 1.0f, lane, 12.0f), juce::Justification::centred);
     }
+    g.setColour (Palette::panelEdge.withAlpha (0.3f)); // the pitch centre line
+    g.drawHorizontalLine (juce::roundToInt (plot.getCentreY()), plot.getX(), plot.getRight());
 
-    // Hits: a glow down the lane and a dot at the step's pitch, fading over
-    // about a second, so the steps just played leave a trail.
+    // The smoke, then the slow average as a thin bright line.
+    g.drawImageAt (ghost, (int) plot.getX(), (int) plot.getY());
+    g.setColour (Palette::accent.interpolatedWith (juce::Colours::white, 0.35f).withAlpha (0.8f));
+    g.strokePath (spectrumPath (slowAverage), juce::PathStrokeType (1.0f), juce::AffineTransform::translation (plot.getX(), plot.getY()));
+
+    // Fresh hits flash: the bar white-hot at first, spreading to the lane's
+    // width as it cools to its colour.
     for (const auto& h : hits)
     {
         const auto age = (float) (now - h.start);
-        const auto fade = std::exp (-age / 0.32f) * (h.accented ? 1.0f : 0.7f);
-        const auto colour = h.accented ? Palette::orange : Palette::accent;
-        const auto lane = juce::Rectangle<float> (area.getX() + h.step * laneWidth, area.getY(), laneWidth, area.getHeight());
-        const auto y = area.getCentreY() - h.height * area.getHeight() * 0.38f;
-        juce::ColourGradient column (colour.withAlpha (0.35f * fade), lane.getCentreX(), y,
-                                     colour.withAlpha (0.0f), lane.getCentreX(), y + area.getHeight() * 0.5f, true);
-        g.setGradientFill (column);
-        g.fillRect (lane.reduced (1.0f, 0.0f));
-        const auto radius = laneWidth * (0.16f + 0.5f * (1.0f - std::exp (-age / 0.25f))); // a ring spreading out
-        g.setColour (colour.withAlpha (0.5f * fade));
-        g.drawEllipse (lane.getCentreX() - radius, y - radius, 2.0f * radius, 2.0f * radius, 1.5f);
-        g.setColour (colour.withAlpha (fade));
-        g.fillEllipse (lane.getCentreX() - 4.0f, y - 4.0f, 8.0f, 8.0f);
+        const auto heat = std::exp (-age / 0.12f);
+        const auto colour = (h.accented ? Palette::orange : Palette::accent).interpolatedWith (juce::Colours::white, 0.6f * heat);
+        auto bar = barFor (h.step, h.height).translated (plot.getX(), plot.getY());
+        bar = bar.withSizeKeepingCentre (bar.getWidth() * (0.75f + 0.33f * (1.0f - heat)), bar.getHeight());
+        const auto fade = std::exp (-age / 0.25f);
+        g.setColour (colour.withAlpha (0.25f * fade));
+        g.fillRoundedRectangle (bar.expanded (4.0f, 5.0f), 6.0f);
+        g.setColour (colour.withAlpha (0.95f * fade));
+        g.fillRoundedRectangle (bar, 3.0f);
     }
-
-    // The output on top: from a rising zero crossing so it stands still, scaled
-    // to the window (a quiet signal is lifted, but never more than 4x), with a
-    // wide faint pass under it for glow.
-    int startAt = 0;
-    for (int i = 1; i < scopeSamples / 2; ++i)
-        if (samples[(size_t) i - 1] < 0.0f && samples[(size_t) i] >= 0.0f)
-        {
-            startAt = i;
-            break;
-        }
-    const auto shown = scopeSamples - scopeSamples / 2;
-    const auto gain = 0.45f * area.getHeight() * juce::jmin (4.0f, 0.9f / juce::jmax (1.0e-3f, level));
-    juce::Path trace;
-    for (int i = 0; i < shown; i += 2)
-    {
-        const auto x = area.getX() + area.getWidth() * (float) i / (float) (shown - 1);
-        const auto y = area.getCentreY() - juce::jlimit (-area.getHeight() * 0.5f, area.getHeight() * 0.5f, samples[(size_t) (startAt + i)] * gain);
-        if (i == 0)
-            trace.startNewSubPath (x, y);
-        else
-            trace.lineTo (x, y);
-    }
-    const auto glow = juce::jlimit (0.3f, 1.0f, 0.3f + 2.0f * level);
-    g.setColour (Palette::accent.withAlpha (0.15f * glow));
-    g.strokePath (trace, juce::PathStrokeType (5.0f));
-    g.setColour (Palette::accent.withAlpha (0.85f * glow));
-    g.strokePath (trace, juce::PathStrokeType (1.4f));
 }
+
 
 //==============================================================================
 juce::Component* AdvancedPanel::Control::widget() const

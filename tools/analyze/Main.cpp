@@ -1248,6 +1248,62 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "arpstrip" && args.size() >= 2)
+    {
+        // The arp page's pattern display while an arp runs (Trance Pluck, a held
+        // C minor chord, some steps transposed), at four moments, stacked.
+        constexpr double rate = 48000.0;
+        constexpr int block = 256;
+        auto owned = std::make_unique<ZeroEngineProcessor>();
+        auto& engine = *owned;
+        engine.setPlayConfigDetails (0, 2, rate, block);
+        engine.prepareToPlay (rate, block);
+        auto set = [&] (const juce::String& id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+        set (ParamIDs::genre, (float) genreNames.indexOf ("Trance"));
+        set (ParamIDs::type, (float) typeNames.indexOf ("Pluck"));
+        engine.syncProfile();
+        set (ParamIDs::arpOn, 1.0f);
+        const int transposed[][2] { { 2, 7 }, { 5, -5 }, { 9, 12 }, { 13, 3 }, { 14, -12 } };
+        for (const auto& t : transposed)
+            set (SeqIDs::pitch (t[0]), (float) t[1]);
+        ArpScope scope (engine.state, [&engine] { return engine.getSequenceStep(); },
+                        [&engine] (float* dest, int n) { engine.copyScope (dest, n); });
+        scope.setSize (900, 260);
+        const double moments[] { 1.2, 1.5, 1.8, 2.4 };
+        juce::Image strip (juce::Image::ARGB, 900, 260 * (int) std::size (moments), true);
+        juce::AudioBuffer<float> audio (2, block);
+        juce::MidiBuffer midi;
+        double t = 0.0, nextFrame = 0.0;
+        size_t shot = 0;
+        while (shot < std::size (moments))
+        {
+            midi.clear();
+            if (t == 0.0)
+                for (auto note : { 60, 63, 67 })
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), 0);
+            audio.clear();
+            engine.processBlock (audio, midi);
+            t += block / rate;
+            if (t >= nextFrame)
+            {
+                scope.previewFrame (t);
+                nextFrame += 1.0 / 30.0;
+            }
+            if (t >= moments[shot])
+            {
+                juce::Graphics g (strip);
+                g.drawImageAt (scope.createComponentSnapshot (scope.getLocalBounds()), 0, 260 * (int) shot);
+                ++shot;
+            }
+        }
+        juce::FileOutputStream out (argFile (args, 1, {}));
+        out.setPosition (0);
+        out.truncate();
+        juce::PNGImageFormat().writeImageToStream (strip, out);
+        std::printf ("Wrote %s\n", argFile (args, 1, {}).getFullPathName().toRawUTF8());
+        return 0;
+    }
+
     if (command == "foldstrip" && args.size() >= 2)
     {
         // The Generate tesseract at 11 points through its fold, side by side.
