@@ -662,6 +662,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     auto capDetune = [&] (Profile p, int source)
     {
         p.detune = juce::jmin (p.detune, juce::jmax (makeProfile (source, type).detune, 0.4f) + 0.1f);
+        keepInCharacter (p, source, type); // every candidate, bred, pushed or mutated
         return p;
     };
     // Any genre: one lead genre per click, at random but not one of the last
@@ -677,9 +678,11 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         leadGenre = allowed[(size_t) random.nextInt ((int) allowed.size())];
     }
 
+    // Parents: hearts of this type; in Genre mode only this genre's (a hearted
+    // dubstep bass bred into a House bass came out a peak-time lead).
     std::vector<const Heart*> parents;
     for (const auto& h : hearts)
-        if (h.type == type)
+        if (h.type == type && (free || h.genre == genre))
             parents.push_back (&h);
     const auto offspring = parent != nullptr ? 0 : juce::jmin (8, 2 * (int) parents.size()); // Mutate breeds only from the sound itself
     for (int i = 0; i < offspring; ++i)
@@ -835,12 +838,13 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     auto strayOf = [&] (const SoundTraits& m) { return strayFrom (target, m, type, free || parent != nullptr); }; // Mutate: the looser bounds, or it can't be heard
     // Size + interest + novelty (see above).
     // The owner's taste (TasteModel), once it has a few judgments: one draw of
-    // it per click (Thompson sampling: unsure early, so clicks explore), capped,
-    // at full strength from 40 judgments; one click in five ignores it, so
-    // results never settle into one style.
+    // it per click (Thompson sampling: unsure early, so clicks explore), capped
+    // at 1 (the owner wants variety over a single style), at full strength from
+    // 40 judgments; one click in three ignores it, so results never settle into
+    // one style.
     std::optional<TasteModel::Features> tasteWeights;
     auto tasteStrength = 0.0f;
-    const auto ignoreTaste = random.nextFloat() < 0.2f;
+    const auto ignoreTaste = random.nextFloat() < 0.35f; // the owner wants variety, not one style: a third of clicks are free of taste
     if (taste.judgments() >= 4 && ! ignoreTaste)
     {
         tasteWeights = taste.sampleWeights (random);
@@ -860,7 +864,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             liking[i] = settingsTaste.scoreOf (GenerateNet::featuresOf (profiles[i], sources[i], type));
         const auto centre = std::accumulate (liking.begin(), liking.end(), 0.0f) / (float) juce::jmax ((size_t) 1, liking.size());
         for (auto& l : liking)
-            l = strength * juce::jlimit (-1.5f, 1.5f, l - centre);
+            l = strength * juce::jlimit (-1.0f, 1.0f, l - centre);
     }
     auto tasteOf = [&] (const SoundTraits& m)
     {
@@ -870,7 +874,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         float dot = 0.0f;
         for (int k = 0; k < TasteModel::numFeatures; ++k)
             dot += (*tasteWeights)[(size_t) k] * f[(size_t) k];
-        return tasteStrength * juce::jlimit (-1.5f, 1.5f, dot);
+        return tasteStrength * juce::jlimit (-1.0f, 1.0f, dot);
     };
 
     auto scoreOf = [&] (const SoundTraits& m, bool print = false)

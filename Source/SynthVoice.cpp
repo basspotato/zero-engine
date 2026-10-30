@@ -118,6 +118,8 @@ void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*
     subPhase = 0.0;
     lfoPhase = 0.0f;
     lfoHeld = random.nextFloat() * 2.0f - 1.0f;
+    lfoSmoothing = 1.0f - std::exp (-1.0f / (0.003f * (float) getSampleRate()));
+    lfoSmoothed = rawLfo (0.0f); // start where the shape starts, not from 0
 
     updateEnvelopes();
     ampEnv.noteOn();
@@ -155,6 +157,16 @@ float ZeroVoice::filterSample (int ch, float x, int mode, const Svf::Coeffs& res
 }
 
 float ZeroVoice::nextLfo (float increment)
+{
+    // Saw, square and sample & hold jump in one sample; through wavetable
+    // position, cutoff or pitch that jump clicks (the owner heard pops on some
+    // Generate results). About 3 ms of smoothing rounds the jumps off unheard.
+    const auto raw = rawLfo (increment);
+    lfoSmoothed += (raw - lfoSmoothed) * lfoSmoothing;
+    return lfoSmoothed;
+}
+
+float ZeroVoice::rawLfo (float increment)
 {
     const auto phase = lfoPhase;
     lfoPhase += increment;

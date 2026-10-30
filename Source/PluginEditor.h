@@ -322,7 +322,7 @@ private:
     std::array<Macro, 6> macros;
     Macro outputKnob;
     Macro panKnob; // beside Output: where the sound sits, left to right
-    std::array<Macro, 4> envelope; // attack, decay, sustain, release on the main page
+    std::array<Macro, 5> envelope; // cutoff, then attack, decay, sustain, release on the main page
     juce::ComboBox genreBox, typeBox;
     std::unique_ptr<ComboAttachment> genreAttachment, typeAttachment;
     ScopeView display;

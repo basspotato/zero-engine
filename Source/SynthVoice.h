@@ -123,7 +123,8 @@ private:
     const std::atomic<const WavetableBank*>& sampleTable; // this instance's Sample bank (null: the shared saw)
 
     void updateEnvelopes();
-    float nextLfo (float increment);
+    float nextLfo (float increment); // smoothed
+    float rawLfo (float increment);
 
     Envelope ampEnv, modEnv; // analog-style curves (Envelope.h)
     bool releasing = false; // after note-off: envelope settings must not be re-applied (see updateEnvelopes)
@@ -138,6 +139,7 @@ private:
     double subPhase = 0.0;
     float lfoPhase = 0.0f;
     float lfoHeld = 0.0f;
+    float lfoSmoothed = 0.0f, lfoSmoothing = 1.0f; // the 3 ms smoothing (set per note from the sample rate)
 };
 
 // juce::Synthesiser plus Mono and Legato play modes: one voice and a stack of

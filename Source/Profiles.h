@@ -56,6 +56,8 @@ Profile makeProfile (int genre, int type);
 // source, envelopes, filter, movement, macros and space; the finishing chain
 // and the clean-sub rules stay, so it still sounds finished.
 Profile generateProfile (int genre, int type, juce::Random& random);
+// Limits a genre/type keeps whatever Generate does (House basses stay round).
+void keepInCharacter (Profile& profile, int genre, int type);
 
 // Overwrites the five tuner-controlled values (level, OTT, tilt, Weight, width).
 void applyTrim (Profile& profile, const ProfileTrim& trim);

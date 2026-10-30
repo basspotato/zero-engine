@@ -1249,6 +1249,170 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "clickcheck")
+    {
+        // Clicks in Generate's picks: per profile, 3 picks each play two notes (on,
+        // off, on again while the first tail rings); a click is a jump between
+        // neighbouring samples far above the sound's own (the 99.9th percentile
+        // of sample-to-sample change over the steady part). Prints the worst with
+        // their envelope settings.
+        constexpr double rate = 48000.0;
+        constexpr int block = 512;
+        struct Found { float ratio; juce::String what; };
+        std::vector<Found> found;
+        int picks = 0;
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+            {
+                auto owned = std::make_unique<ZeroEngineProcessor>();
+                auto& engine = *owned;
+                engine.setUserFolder (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_clickcheck"));
+                engine.setPlayConfigDetails (0, 2, rate, block);
+                engine.prepareToPlay (rate, block);
+                auto set = [&] (const char* id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+                set (ParamIDs::genre, (float) g);
+                set (ParamIDs::type, (float) t);
+                engine.syncProfile();
+                for (int s = 0; s < 3; ++s)
+                {
+                    engine.generate (900 + 31 * g + 7 * t + s);
+                    set (ParamIDs::arpOn, 0.0f);
+                    engine.resetForRender();
+                    const auto note = t == 0 ? 36 : 60;
+                    juce::AudioBuffer<float> out (2, (int) (2.5 * rate)), chunk (2, block);
+                    juce::MidiBuffer midi;
+                    for (int pos = 0; pos + block <= out.getNumSamples(); pos += block)
+                    {
+                        midi.clear();
+                        auto at = [&] (double sec) { const auto i = (int) (sec * rate); return i >= pos && i < pos + block ? i - pos : -1; };
+                        if (const auto i = at (0.1); i >= 0) midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), i);
+                        if (const auto i = at (0.9); i >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, note), i);
+                        if (const auto i = at (1.0); i >= 0) midi.addEvent (juce::MidiMessage::noteOn (1, note + 7, (juce::uint8) 110), i);
+                        if (const auto i = at (1.6); i >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, note + 7), i);
+                        chunk.clear();
+                        engine.processBlock (chunk, midi);
+                        for (int ch = 0; ch < 2; ++ch)
+                            out.copyFrom (ch, pos, chunk, ch, 0, block);
+                    }
+                    ++picks;
+                    // A click stands out from the sound right around it: each sample-to-
+                    // sample change against the loudest change within 20 ms either side
+                    // (leaving out its own 0.1 ms), over the rendered part only.
+                    const auto* l = out.getReadPointer (0);
+                    const auto filled = (out.getNumSamples() / block) * block;
+                    std::vector<float> d ((size_t) filled, 0.0f);
+                    for (int i = 1; i < filled; ++i)
+                        d[(size_t) i] = std::abs (l[i] - l[i - 1]);
+                    const auto reach = (int) (0.02 * rate), self = 5; // longer than a low bass cycle, whose own edges aren't clicks
+                    float ratio = 0.0f;
+                    double worstAt = 0.0;
+                    for (int i = reach; i < filled - reach; ++i)
+                    {
+                        if (d[(size_t) i] < 1.0e-3f)
+                            continue;
+                        float around = 0.0f;
+                        for (int j = i - reach; j <= i + reach; ++j)
+                            if (std::abs (j - i) > self)
+                                around = juce::jmax (around, d[(size_t) j]);
+                        if (const auto r = d[(size_t) i] / juce::jmax (1.0e-4f, around); r > ratio) { ratio = r; worstAt = i / rate; }
+                    }
+                    if (ratio > 4.0f)
+                    {
+                        auto value = [&] (const char* id) { return engine.state.getRawParameterValue (id)->load(); };
+                        found.push_back ({ ratio, (genreNames[g] + " " + typeNames[t] + " pick " + juce::String (s + 1)).paddedRight (' ', 26)
+                                                  + " click " + juce::String (ratio, 1) + "x at " + juce::String (worstAt, 3) + " s"
+                                                  + "  attack " + juce::String (value (ParamIDs::ampAttack) * 1000.0f, 1) + " ms"
+                                                  + "  release " + juce::String (value (ParamIDs::ampRelease) * 1000.0f, 0) + " ms"
+                                                  + "  play " + playModeNames[(int) value (ParamIDs::playMode)]
+                                                  + "  table " + waveTableNames[(int) value (ParamIDs::waveTable)]
+                                                  + "  lfo " + lfoShapeNames[(int) value (ParamIDs::lfoShape)] + " sync " + juce::String (value (ParamIDs::lfoSync), 0)
+                                                  + " >cut " + juce::String (value (ParamIDs::lfoToCutoff), 2) + " >pos " + juce::String (value (ParamIDs::lfoToPos), 2)
+                                                  + "  modDecay " + juce::String (value (ParamIDs::modDecay) * 1000.0f, 0) + " ms env " + juce::String (value (ParamIDs::filterEnv), 1)
+                                                  + "  grit " + juce::String (value (ParamIDs::grit), 2) + " sub " + juce::String (value (ParamIDs::subOn), 0) });
+                    }
+                }
+            }
+        std::sort (found.begin(), found.end(), [] (const Found& a, const Found& b) { return a.ratio > b.ratio; });
+        std::printf ("%d of %d picks have a click (a jump over 4x anything within 20 ms):\n", (int) found.size(), picks);
+        for (size_t i = 0; i < juce::jmin<size_t> (25, found.size()); ++i)
+            std::printf ("  %s\n", found[i].what.toRawUTF8());
+        return 0;
+    }
+
+    if (command == "tastereport")
+    {
+        // What the owner's taste models have learned (read only): the trait
+        // weights, and the settings the settings taste leans towards and away from.
+        const auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Zero Engine");
+        TasteModel traits;
+        traits.load (folder.getChildFile ("Taste.xml"));
+        std::printf ("trait taste, %d judgments (+ = likes more of it):\n", traits.judgments());
+        const char* traitNames[] { "level", "width", "brightness", "bass", "body", "spread", "density(crest)", "movement", "richness" };
+        const auto w = traits.meanWeights();
+        for (int k = 1; k < TasteModel::numFeatures; ++k)
+            std::printf ("  %-15s %+5.2f\n", traitNames[k], w[(size_t) k]);
+
+        SettingsTaste settings;
+        settings.load (folder.getChildFile ("TasteSettings.xml"));
+        settings.refit();
+        juce::StringArray names { "wave position", "tilt", "air", "OTT", "grit", "stereo width", "weight", "detune", "attack", "decay", "sustain",
+                                  "release", "filter cutoff", "resonance", "filter env", "mod decay", "reverb", "delay", "LFO rate", "LFO>cutoff",
+                                  "LFO>position", "delay feedback" };
+        for (const auto& t : waveTableNames) names.add ("table " + t);
+        for (const auto& t : waveTableNames) names.add ("2nd table " + t);
+        for (const auto& m : filterModeNames) names.add ("filter " + m);
+        for (int i = 0; i < 5; ++i) names.add ("LFO shape " + juce::String (i));
+        for (const auto& t : typeNames) names.add ("type " + t);
+        for (const auto& g : genreNames) names.add ("genre " + g);
+        for (const auto* n : { "Weight macro", "Grit macro", "Punch macro", "Width macro", "Motion macro", "Air macro", "unison blend", "table mix",
+                               "keytrack", "sub on", "reverb size", "spectral", "unison voices", "mod>position", "mod>pitch", "LFO>pitch", "LFO sync",
+                               "delay time", "level trim", "mono below", "mod attack", "mod sustain" })
+            names.add (n);
+        const auto& sw = settings.weights();
+        std::vector<std::pair<float, int>> ranked;
+        for (size_t i = 0; i < sw.size(); ++i)
+            ranked.push_back ({ sw[i], (int) i });
+        std::sort (ranked.begin(), ranked.end());
+        std::printf ("\nsettings taste, %d judgments (%zu settings):\n  leans towards:", settings.judgments(), sw.size());
+        for (size_t i = ranked.size(); i-- > ranked.size() - 10 && i < ranked.size();)
+            std::printf ("\n    %+5.2f  %s", ranked[i].first, names[ranked[i].second].toRawUTF8());
+        std::printf ("\n  leans away from:");
+        for (size_t i = 0; i < 10 && i < ranked.size(); ++i)
+            std::printf ("\n    %+5.2f  %s", ranked[i].first, names[ranked[i].second].toRawUTF8());
+        std::printf ("\n");
+        return 0;
+    }
+
+    if (command == "picks" && args.size() >= 3)
+    {
+        // One genre/type: the designed sound and 8 Generate picks, with the
+        // wavetable, filter and the measured brightness of each.
+        auto owned = std::make_unique<ZeroEngineProcessor>();
+        auto& engine = *owned;
+        const auto g = genreNames.indexOf (args[1].replace ("_", " ")), t = typeNames.indexOf (args[2]);
+        if (g < 0 || t < 0)
+            return 1;
+        auto set = [&] (const char* id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+        set (ParamIDs::genre, (float) g);
+        set (ParamIDs::type, (float) t);
+        engine.syncProfile();
+        auto show = [&] (const char* what, const SoundTraits& m)
+        {
+            const auto table = (int) engine.state.getRawParameterValue (ParamIDs::waveTable)->load();
+            std::printf ("%-10s %-9s pos %.2f  cutoff %6.0f Hz  unison %.0f  centroid %6.0f Hz  side %4.1f%%\n", what, waveTableNames[table].toRawUTF8(),
+                         engine.state.getRawParameterValue (ParamIDs::wavePos)->load(), engine.state.getRawParameterValue (ParamIDs::filterCutoff)->load(),
+                         engine.state.getRawParameterValue (ParamIDs::unison)->load(), m.centroidHz, m.sidePct);
+        };
+        show ("designed", ZeroEngineProcessor::measureForTools (engine, g, t, makeProfile (g, t)));
+        for (int i = 0; i < 8; ++i)
+        {
+            engine.generate (600 + 17 * i);
+            if (const auto m = engine.getLastPickTraits())
+                show (("pick " + juce::String (i + 1)).toRawUTF8(), *m);
+        }
+        return 0;
+    }
+
     if (command == "easeab")
     {
         // The pads and chords that were squashed into the saturation, as designed

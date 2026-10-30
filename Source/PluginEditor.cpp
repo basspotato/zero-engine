@@ -1860,10 +1860,12 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     setUpMacro (outputKnob, ParamIDs::output, "Output");
     setUpMacro (panKnob, ParamIDs::pan, "Pan");
     panKnob.knob.setDoubleClickReturnValue (true, 0.0); // double-click: back to centre
-    // Clones of the Advanced page's amp envelope knobs: the same parameters, on the main page.
+    // Clones of the Advanced page's filter cutoff and amp envelope knobs: the same
+    // parameters, on the main page.
     {
-        const std::pair<const char*, const char*> adsr[] { { ParamIDs::ampAttack, "Attack" }, { ParamIDs::ampDecay, "Decay" },
-                                                           { ParamIDs::ampSustain, "Sustain" }, { ParamIDs::ampRelease, "Release" } };
+        const std::pair<const char*, const char*> adsr[] { { ParamIDs::filterCutoff, "Cutoff" }, { ParamIDs::ampAttack, "Attack" },
+                                                           { ParamIDs::ampDecay, "Decay" }, { ParamIDs::ampSustain, "Sustain" },
+                                                           { ParamIDs::ampRelease, "Release" } };
         for (size_t i = 0; i < envelope.size(); ++i)
             setUpMacro (envelope[i], adsr[i].first, adsr[i].second);
     }
@@ -2250,7 +2252,7 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
     };
 
     section (displaySection, "DISPLAY");
-    section (meterSection, "ENVELOPE");
+    section (meterSection, "CUTOFF & ENVELOPE");
     section (generateSection, "GENERATE");
     if (! favouritesSection.isEmpty())
         section (favouritesSection, "FAVOURITES");
@@ -2342,7 +2344,7 @@ void ZeroEngineEditor::resized()
     backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);
 
     levelMeter.setBounds (content (meterSection));
-    // The amp envelope's four knobs, the same parameters the Advanced page sets.
+    // Cutoff and the amp envelope's four knobs, the same parameters the Advanced page sets.
     {
         auto row = content (meterSection);
         const auto cellWidth = row.getWidth() / (int) envelope.size();

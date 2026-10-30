@@ -204,6 +204,18 @@ namespace
             p.delayMix = 0.2f; p.delayTime = 2.0f;
         }
 
+        if (genre == house && type == bass)
+        {
+            // Deep house: a round, near-sine bass (the owner heard the plain saw
+            // template as peak-time leads), mono, low-passed with a short soft pluck.
+            p.wavePos = 0.08f; p.unison = 1; p.detune = 0.0f;
+            p.ampAttack = 0.003f; p.ampDecay = 0.35f; p.ampSustain = 0.8f; p.ampRelease = 0.08f;
+            p.modAttack = 0.0f; p.modDecay = 0.18f; p.modSustain = 0.15f; p.modToPos = 0.0f;
+            p.filterCutoff = 600.0f; p.filterRes = 0.05f; p.filterEnv = 1.2f; p.velToCutoff = 0.6f;
+            p.weight = 0.8f; p.grit = 0.15f; p.punch = 0.5f; p.width = 0.05f; p.air = 0.0f;
+            p.ottDepth = 0.2f;
+        }
+
         if (genre == techHouse && type == bass)
         {
             // Fisher / Chris Lake / Stussy roller: near-sine, mono, a short plucky
@@ -736,6 +748,14 @@ Profile generateProfile (int genre, int type, juce::Random& random)
 
     if (type == bass)
         p.delayMix = p.reverbMix = 0.0f; // basses stay dry
+
+    if (genre == house && type == bass && p.waveTable != 0.0f && p.waveTable != organTable
+        && p.waveTable != analogTable && p.waveTable != jupiterTable)
+    {
+        static constexpr float roundTables[] { 0.0f, organTable, analogTable, jupiterTable };
+        p.waveTable = roundTables[random.nextInt ((int) std::size (roundTables))];
+    }
+    keepInCharacter (p, genre, type);
     p.delayFeedback = juce::jmin (p.delayFeedback, 0.35f);
 
     // Level trim is gain after the clipper: a brighter or denser variation plus
@@ -743,6 +763,25 @@ Profile generateProfile (int genre, int type, juce::Random& random)
     p.levelTrim = juce::jmin (p.levelTrim, 0.0f);
 
     return p;
+}
+
+void keepInCharacter (Profile& p, int genre, int type)
+{
+    // House basses stay deep and round: sine to triangle, organ, warm analog or
+    // Jupiter, the filter under 1.2 kHz, one or two voices, little grit (the
+    // owner heard the open growl/neuro/harsh variations as peak-time leads).
+    if (genre == house && type == bass)
+    {
+        if (p.waveTable != 0.0f && p.waveTable != organTable && p.waveTable != analogTable && p.waveTable != jupiterTable)
+            p.waveTable = analogTable;
+        if (p.waveTable == 0.0f)
+            p.wavePos = juce::jmin (p.wavePos, 0.3f); // sine to triangle
+        p.filterCutoff = juce::jmin (p.filterCutoff, 1200.0f);
+        p.filterRes = juce::jmin (p.filterRes, 0.25f);
+        p.unison = juce::jmin (p.unison, 2.0f);
+        p.lfoToPos = juce::jmin (p.lfoToPos, 0.2f);
+        p.grit = juce::jmin (p.grit, 0.3f);
+    }
 }
 
 void applyTrim (Profile& p, const ProfileTrim& trim)
