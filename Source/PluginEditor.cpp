@@ -1319,15 +1319,17 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
     struct PageSpec { const char* name; std::vector<std::vector<SectionSpec>> rows; };
 
     const std::vector<PageSpec> layout {
-        { "SOUND",  { { { "OSCILLATOR", { waveTable, waveTableB, tableMix, wavePos, unison, detune, blend } } },
-                      { { "FILTER",     { filterMode, filterCutoff, filterRes, filterEnv, filterKeytrack, velToCutoff } } } } },
-        { "MOTION", { { { "AMP ENVELOPE", { ampAttack, ampDecay, ampSustain, ampRelease } },
-                        { "MOD ENVELOPE", { modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch } } },
-                      { { "LFO",          { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } } } } },
-        { "MIX",    { { { "SUB",          { subOn, subOctave, subSplit, midHighPass } },
-                        { "PLAY",         { playMode, glide, bendRange, velSens } } },
-                      { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
-                        { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
+        // Everything but the arp on one page, a row per stage: tone, voice,
+        // movement, mix.
+        { "SOUND & MIX", { { { "OSCILLATOR",   { waveTable, waveTableB, tableMix, wavePos, unison, detune, blend } },
+                             { "FILTER",       { filterMode, filterCutoff, filterRes, filterEnv, filterKeytrack, velToCutoff } } },
+                           { { "AMP ENVELOPE", { ampAttack, ampDecay, ampSustain, ampRelease } },
+                             { "SUB",          { subOn, subOctave, subSplit, midHighPass } },
+                             { "PLAY",         { playMode, glide, bendRange, velSens } } },
+                           { { "MOD ENVELOPE", { modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch } },
+                             { "LFO",          { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } } },
+                           { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
+                             { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
         { "ARP",    { { { "ARPEGGIATOR",  { arpOn, arpLatch, arpMode, arpRate, arpOctaves, arpGate, seqLength } } },
                       { { "STEP SEQUENCER  (rests, pitch and accents for every arp mode)", {} } } } },
     };
@@ -1408,7 +1410,18 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
                 section.name = sectionSpec.name;
                 for (const auto* id : sectionSpec.ids)
                     if (auto control = makeControl (id))
+                    {
+                        // The section's title says it once: "CUTOFF" under FILTER,
+                        // "ATTACK" under AMP ENVELOPE, "TO PITCH" under LFO.
+                        auto& name = control->name;
+                        const auto lead = section.name.upToFirstOccurrenceOf (" ", true, false);
+                        if (name.startsWith (lead) && name.length() > lead.length())
+                            name = name.substring (lead.length()).trimStart();
+                        if (name.startsWith (">"))
+                            name = "TO" + name.substring (1);
+                        name = name.replace ("VELOCITY", "VEL");
                         section.controls.push_back (std::move (control));
+                    }
                 row.push_back (std::move (section));
             }
             page.rows.push_back (std::move (row));
