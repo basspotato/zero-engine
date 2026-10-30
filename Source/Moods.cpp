@@ -13,13 +13,13 @@ namespace Moods
 {
     const char* nameOf (int mood)
     {
-        constexpr const char* names[count] { "LUSH PAD", "AIRY DRONE", "WARM KEYS", "GLASSY BELL", "DARK TEXTURE", "SOFT PLUCK", "SOARING LEAD", "DEEP BASS" };
+        constexpr const char* names[count] { "LUSH PAD", "AIRY DRONE", "WARM KEYS", "GLASSY BELL", "DARK TEXTURE", "SOFT PLUCK", "SOARING LEAD", "DEEP BASS", "PLUCK BASS", "ANTHEM LEAD", "STAB CHORDS" };
         return names[juce::jlimit (0, count - 1, mood)];
     }
 
     int typeOf (int mood)
     {
-        constexpr int types[count] { pad, pad, chord, pluck, fx, pluck, lead, bass };
+        constexpr int types[count] { pad, pad, chord, pluck, fx, pluck, lead, bass, bass, lead, chord };
         return types[juce::jlimit (0, count - 1, mood)];
     }
 
@@ -36,6 +36,9 @@ namespace Moods
         baseGenre = mood == darkTexture ? pick ({ techno, dubstep, dnb })
                   : mood == warmKeys    ? pick ({ house, pop, synthwave })
                   : mood == deepBass    ? pick ({ house, techHouse, synthwave, dnb })
+                  : mood == pluckBass   ? pick ({ house, techHouse, pop, futureBass })
+                  : mood == stabChords  ? pick ({ house, techHouse, edm, pop })
+                  : mood == anthemLead  ? pick ({ trance, edm, futureBass })
                                         : pick ({ synthwave, trance, futureBass, pop });
         auto p = makeProfile (baseGenre, type);
 
@@ -259,6 +262,97 @@ namespace Moods
                 p.air = between (0.0f, 0.2f);
                 p.motion = between (0.1f, 0.3f);
                 p.tilt = between (-3.0f, -0.5f);
+                break;
+
+            case pluckBass: // short and round: a bass that bounces, dry and mono
+                p.waveTable = (float) pick ({ basic, analog, jupiter, organ });
+                p.waveTableB = (float) pick ({ basic, analog });
+                p.tableMix = between (0.0f, 0.3f);
+                p.wavePos = between (0.05f, 0.4f);
+                p.unison = (float) (1 + random.nextInt (2));
+                p.detune = between (0.0f, 0.08f);
+                p.ampAttack = logBetween (0.001f, 0.005f);
+                p.ampDecay = between (0.15f, 0.4f);
+                p.ampSustain = between (0.2f, 0.5f);
+                p.ampRelease = between (0.05f, 0.15f);
+                p.filterMode = 0.0f;
+                p.filterCutoff = logBetween (200.0f, 700.0f);
+                p.filterRes = between (0.1f, 0.35f);
+                p.filterEnv = between (1.5f, 3.0f);
+                p.modDecay = between (0.06f, 0.2f);
+                p.lfoRate = logBetween (0.1f, 0.5f);
+                p.lfoToPos = 0.0f;
+                p.lfoToCutoff = 0.0f;
+                p.reverbMix = 0.0f;
+                p.delayMix = 0.0f;
+                p.width = between (0.0f, 0.1f);
+                p.grit = between (0.05f, 0.3f);
+                p.air = 0.0f;
+                p.motion = between (0.0f, 0.2f);
+                p.tilt = between (-2.0f, 0.5f);
+                p.subOn = 1.0f;
+                p.weight = between (0.55f, 0.85f);
+                break;
+
+            case anthemLead: // big, bright supersaw in a hall: the layered, reverbed kind the owner likes
+                p.waveTable = (float) pick ({ basic, analog, jupiter });
+                p.waveTableB = (float) pick ({ analog, choir, jupiter });
+                p.tableMix = between (0.15f, 0.45f);
+                p.wavePos = between (0.4f, 0.6f); // saw
+                p.unison = 7.0f;
+                p.detune = between (0.22f, 0.35f);
+                p.ampAttack = logBetween (0.003f, 0.02f);
+                p.ampDecay = between (0.8f, 1.5f);
+                p.ampSustain = between (0.8f, 1.0f);
+                p.ampRelease = between (0.4f, 1.0f);
+                p.filterMode = 0.0f;
+                p.filterCutoff = logBetween (5000.0f, 12000.0f);
+                p.filterRes = between (0.0f, 0.15f);
+                p.filterEnv = between (0.0f, 0.6f);
+                p.lfoRate = logBetween (0.2f, 0.6f);
+                p.lfoToPos = between (0.0f, 0.1f);
+                p.lfoToCutoff = 0.0f;
+                p.reverbMix = between (0.4f, 0.6f);
+                p.reverbSize = between (0.8f, 1.0f);
+                p.delayMix = between (0.2f, 0.35f);
+                p.delayFeedback = between (0.3f, 0.45f);
+                p.width = between (0.45f, 0.65f); // big but mono-safe (wider read out of phase)
+                p.stereoWidth = juce::jmin (p.stereoWidth, 0.85f);
+                p.inputTrim = -6.0f; // seven bright voices drove the saturation to a brickwall (-1.5 LUFS)
+                p.grit = between (0.05f, 0.2f);
+                p.air = between (0.55f, 0.85f);
+                p.motion = between (0.1f, 0.3f);
+                p.tilt = between (0.0f, 2.0f);
+                break;
+
+            case stabChords: // short punchy chords: a filter snap, a little room
+                p.waveTable = (float) pick ({ organ, analog, basic, jupiter, fm });
+                p.waveTableB = (float) pick ({ organ, analog, basic });
+                p.tableMix = between (0.1f, 0.4f);
+                p.wavePos = between (0.2f, 0.6f);
+                p.unison = (float) (1 + random.nextInt (3));
+                p.detune = between (0.05f, 0.15f);
+                p.stereoWidth = between (0.6f, 0.9f); // the chain's width: the genre chords' ran a short stab out of phase
+                p.ampAttack = logBetween (0.001f, 0.005f);
+                p.ampDecay = between (0.15f, 0.4f);
+                p.ampSustain = between (0.0f, 0.25f);
+                p.ampRelease = between (0.1f, 0.3f);
+                p.filterMode = 0.0f;
+                p.filterCutoff = logBetween (800.0f, 2500.0f);
+                p.filterRes = between (0.1f, 0.3f);
+                p.filterEnv = between (1.5f, 3.0f);
+                p.modDecay = between (0.08f, 0.25f);
+                p.lfoRate = logBetween (0.2f, 1.0f);
+                p.lfoToPos = between (0.0f, 0.1f);
+                p.lfoToCutoff = 0.0f;
+                p.reverbMix = between (0.08f, 0.2f); // a short chord leaves mostly tail: more read as out of phase
+                p.reverbSize = between (0.3f, 0.55f);
+                p.delayMix = between (0.0f, 0.1f);
+                p.width = between (0.2f, 0.45f);
+                p.grit = between (0.05f, 0.25f);
+                p.air = between (0.2f, 0.45f);
+                p.motion = between (0.0f, 0.2f);
+                p.tilt = between (-1.0f, 1.0f);
                 break;
 
             default: // softPluck

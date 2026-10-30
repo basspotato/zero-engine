@@ -142,8 +142,8 @@ ZeroEngineProcessor::GeneratePlan ZeroEngineProcessor::prepareGenerate (juce::in
     // many pads, plucks and FX), the rest still turning up.
     if (moodMode && ! mutate)
     {
-        // lushPad, airyDrone, warmKeys, glassyBell, darkTexture, softPluck, soaringLead, deepBass
-        constexpr float weights[Moods::count] { 1.0f, 0.5f, 2.5f, 0.6f, 0.4f, 0.6f, 2.5f, 2.5f };
+        // lushPad, airyDrone, warmKeys, glassyBell, darkTexture, softPluck, soaringLead, deepBass, pluckBass, anthemLead, stabChords
+        constexpr float weights[Moods::count] { 1.0f, 0.5f, 1.5f, 0.6f, 0.4f, 0.6f, 1.5f, 1.5f, 1.25f, 1.25f, 1.25f };
         float total = 0.0f;
         for (int m = 0; m < Moods::count; ++m)
             total += m == lastMood ? 0.0f : weights[m];
@@ -592,7 +592,7 @@ float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTrai
     // Darker counts only where the mood is warm: in full for keys, textures and
     // the deep bass, half for pads, drones and plucks, not at all for bells (the
     // owner heard them lose their glass), so nothing is pulled dull.
-    constexpr float warmthByMood[Moods::count] { 0.5f, 0.5f, 1.0f, 0.0f, 1.0f, 0.5f, 0.0f, 1.0f };
+    constexpr float warmthByMood[Moods::count] { 0.5f, 0.5f, 1.0f, 0.0f, 1.0f, 0.5f, 0.0f, 1.0f, 1.0f, 0.0f, 0.5f };
     const auto warmth = warmthByMood[(size_t) juce::jlimit (0, Moods::count - 1, mood)]
                       * capped (-std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) / 0.8f);
     // Harsh: more than half an octave brighter than the target costs on top.
@@ -691,10 +691,12 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     }
 
     // Parents: hearts of this type; in Genre mode only this genre's (a hearted
-    // dubstep bass bred into a House bass came out a peak-time lead).
+    // dubstep bass bred into a House bass came out a peak-time lead), and none in
+    // Mood mode, whose sounds come from their recipe (bred from hearted leads, an
+    // "ANTHEM LEAD" was not one); taste still steers the pick there.
     std::vector<const Heart*> parents;
     for (const auto& h : hearts)
-        if (h.type == type && (free || h.genre == genre))
+        if (h.type == type && mood < 0 && (free || h.genre == genre))
             parents.push_back (&h);
     const auto offspring = parent != nullptr ? 0 : juce::jmin (8, 2 * (int) parents.size()); // Mutate breeds only from the sound itself
     for (int i = 0; i < offspring; ++i)
@@ -892,8 +894,9 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     auto scoreOf = [&] (const SoundTraits& m, bool print = false)
     {
         const auto a = m.asArray(), d = target.asArray();
-        // A soaring lead is scored on size like Genre mode (scored warm and calm it came out weak).
-        const auto bigAndInteresting = mood == Moods::soaringLead ? sizeAndInterest (target, m, type)
+        // The lead moods are scored on size like Genre mode (scored warm and calm they came out weak),
+        // with the moods' loudness check (a supersaw brickwalled without it).
+        const auto bigAndInteresting = mood == Moods::soaringLead || mood == Moods::anthemLead ? sizeAndInterest (target, m, type) - juce::jlimit (0.0f, 3.0f, (m.levelDb - target.levelDb - 2.0f) / 2.0f)
                                      : mood >= 0 ? moodScore (target, m, type, mood) : sizeAndInterest (target, m, type);
         auto novelty = 3.0f;
         for (const auto& r : recentGenerated)
