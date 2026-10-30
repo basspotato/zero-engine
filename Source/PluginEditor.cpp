@@ -332,7 +332,7 @@ void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
     g.drawLine ({ from, to }, thickness);
 
     // Value readout in the gap at the bottom of the travel, brighter while dragging.
-    if (size >= 56.0f) // the small Output knob in the top bar goes without
+    if (size >= 48.0f) // the small Pan and Output knobs in the top bar go without
     {
         const auto dragging = slider.isMouseButtonDown();
         g.setColour (dragging ? ramp (n).brighter (0.4f) : Palette::text.withAlpha (0.55f));
@@ -1800,27 +1800,43 @@ void AdvancedPanel::resized()
             if (section.custom != nullptr)
                 section.custom->setBounds (section.bounds.reduced (8, 8)); // no title strip
             rowArea.removeFromLeft (sectionGap);
+        }
+    }
 
-            // Controls in one line under the section title, a name above each.
-            auto inner = section.bounds.withTrimmedTop (22).reduced (6, 4);
+    // One knob size for the whole page (rows of different heights gave knobs of
+    // different sizes), the largest every section fits with a margin.
+    constexpr int nameHeight = 16, margin = 8, titleHeight = 22;
+    auto weightOf = [] (const auto& c) { return c->menu != nullptr ? 1.35f : 1.0f; };
+    int knobSize = 104;
+    for (auto& row : rows)
+        for (auto& section : row)
+        {
+            if (section.controls.empty())
+                continue;
+            float weightSum = 0.0f;
+            for (const auto& c : section.controls)
+                weightSum += weightOf (c);
+            const auto unit = (int) ((float) (section.bounds.getWidth() - 12) / juce::jmax (1.0f, weightSum));
+            knobSize = juce::jmin (knobSize, unit - 6, section.bounds.getHeight() - titleHeight - 8 - nameHeight - 2 * margin);
+        }
+
+    for (auto& row : rows)
+        for (auto& section : row)
+        {
+            // Controls in one line, a name above each, the block centred up and
+            // down in the whole section box (the owner wants true centre, not
+            // pushed down by the title), never over the title.
+            auto inner = section.bounds.reduced (6, 4);
             // Slots across: a menu a third wider than a knob or toggle (an equal slot
             // cut "1/8 Dotted" short).
-            auto weightOf = [] (const auto& c) { return c->menu != nullptr ? 1.35f : 1.0f; };
             float weightSum = 0.0f;
             for (const auto& c : section.controls)
                 weightSum += weightOf (c);
             const auto unit = (float) inner.getWidth() / juce::jmax (1.0f, weightSum);
-            const auto cellWidth = (int) unit; // a knob's slot
-            // One layout per section: the names in one row, every knob, menu and
-            // toggle centred on one line under them, and that block truly centred
-            // up and down in the section's space under its title (the owner saw
-            // controls sitting off each other and low). Knobs share one size that
-            // leaves a margin above and below.
-            constexpr int nameHeight = 16, margin = 8;
             const auto hasKnob = std::any_of (section.controls.begin(), section.controls.end(), [] (const auto& c) { return c->knob != nullptr; });
-            const auto knobSize = juce::jmin (cellWidth - 6, inner.getHeight() - nameHeight - 2 * margin, 104);
             const auto rowHeight = hasKnob ? knobSize : 22;
-            const auto blockTop = inner.getY() + (inner.getHeight() - (nameHeight + rowHeight)) / 2;
+            const auto blockTop = juce::jmax (section.bounds.getY() + titleHeight + 4,
+                                              inner.getY() + (inner.getHeight() - (nameHeight + rowHeight)) / 2);
             const auto lineY = blockTop + nameHeight + rowHeight / 2;
             float x = (float) inner.getX();
             for (int i = 0; i < (int) section.controls.size(); ++i)
@@ -1835,7 +1851,6 @@ void AdvancedPanel::resized()
                 control->nameY = blockTop;
             }
         }
-    }
 }
 
 //==============================================================================
