@@ -1432,7 +1432,7 @@ void ArpScope::update()
     g.setColour (smoke.withAlpha (0.22f));
     g.strokePath (trace, juce::PathStrokeType (1.2f));
 
-    // A new step that plays (on, not a rest): its bar and beam go into the smoke
+    // A new step that plays (on, not a rest): its bar goes into the smoke
     // (they fade with it, leaving the trail), and it flashes for a moment.
     const auto now = this->now();
     const auto step = playingStep();
@@ -1443,18 +1443,8 @@ void ArpScope::update()
     {
         if (now - h.start > 0.25)
             continue; // its trail is already laid down
-        const auto colour = h.accented ? Palette::orange : Palette::accent;
+        const auto colour = h.accented ? Palette::yellow : Palette::orange;
         const auto bar = barFor (h.step, h.height);
-        // A beam of light falling from the bar, narrowing and fading as it goes.
-        juce::Path beam;
-        const auto top = bar.getBottom(), bottom = (float) ghost.getHeight();
-        beam.startNewSubPath (bar.getX() + bar.getWidth() * 0.18f, top);
-        beam.lineTo (bar.getRight() - bar.getWidth() * 0.18f, top);
-        beam.lineTo (bar.getCentreX() + bar.getWidth() * 0.06f, bottom);
-        beam.lineTo (bar.getCentreX() - bar.getWidth() * 0.06f, bottom);
-        beam.closeSubPath();
-        g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.12f), bar.getCentreX(), top, colour.withAlpha (0.0f), bar.getCentreX(), bottom, false));
-        g.fillPath (beam);
         g.setColour (colour.withAlpha (0.06f));
         g.fillRoundedRectangle (bar.expanded (5.0f, 6.0f), 6.0f);
         g.setColour (colour.withAlpha (0.18f));
@@ -1514,7 +1504,7 @@ void ArpScope::paint (juce::Graphics& g)
     {
         const auto age = (float) (now - h.start);
         const auto heat = std::exp (-age / 0.12f);
-        const auto colour = (h.accented ? Palette::orange : Palette::accent).interpolatedWith (juce::Colours::white, 0.6f * heat);
+        const auto colour = (h.accented ? Palette::yellow : Palette::orange).interpolatedWith (juce::Colours::white, 0.6f * heat);
         auto bar = barFor (h.step, h.height).translated (plot.getX(), plot.getY());
         bar = bar.withSizeKeepingCentre (bar.getWidth() * (0.75f + 0.33f * (1.0f - heat)), bar.getHeight());
         const auto fade = std::exp (-age / 0.25f);

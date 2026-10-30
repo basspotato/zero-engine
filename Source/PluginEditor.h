@@ -136,7 +136,7 @@ private:
 // spectrum of what's playing is drawn each frame into an image that fades a
 // little every frame, so older traces linger as smoke, with a slow average as a
 // thin bright line on top. Each step that plays leaves a glowing bar in its lane
-// (height by its pitch, orange on an accent) in the same fading image, so a
+// (height by its pitch; orange, yellow on an accent) in the same fading image, so a
 // running pattern leaves a trail; a fresh hit flashes brighter for a moment.
 class ArpScope : public juce::Component,
                  private juce::Timer
