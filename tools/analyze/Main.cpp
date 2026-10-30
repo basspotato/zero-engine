@@ -1256,6 +1256,7 @@ int main (int argc, char* argv[])
         // neighbouring samples far above the sound's own (the 99.9th percentile
         // of sample-to-sample change over the steady part). Prints the worst with
         // their envelope settings.
+        const auto withArp = args.contains ("arp");
         constexpr double rate = 48000.0;
         constexpr int block = 512;
         struct Found { float ratio; juce::String what; };
@@ -1276,7 +1277,7 @@ int main (int argc, char* argv[])
                 for (int s = 0; s < 3; ++s)
                 {
                     engine.generate (900 + 31 * g + 7 * t + s);
-                    set (ParamIDs::arpOn, 0.0f);
+                    set (ParamIDs::arpOn, withArp ? 1.0f : 0.0f); // "arp": a held chord through the arp instead of two notes
                     engine.resetForRender();
                     const auto note = t == 0 ? 36 : 60;
                     juce::AudioBuffer<float> out (2, (int) (2.5 * rate)), chunk (2, block);
@@ -1285,10 +1286,21 @@ int main (int argc, char* argv[])
                     {
                         midi.clear();
                         auto at = [&] (double sec) { const auto i = (int) (sec * rate); return i >= pos && i < pos + block ? i - pos : -1; };
-                        if (const auto i = at (0.1); i >= 0) midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), i);
-                        if (const auto i = at (0.9); i >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, note), i);
-                        if (const auto i = at (1.0); i >= 0) midi.addEvent (juce::MidiMessage::noteOn (1, note + 7, (juce::uint8) 110), i);
-                        if (const auto i = at (1.6); i >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, note + 7), i);
+                        if (withArp)
+                        {
+                            for (const auto n : { note, note + 3, note + 7 })
+                            {
+                                if (const auto i = at (0.1); i >= 0) midi.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 110), i);
+                                if (const auto i = at (2.0); i >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, n), i);
+                            }
+                        }
+                        else
+                        {
+                            if (const auto i = at (0.1); i >= 0) midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), i);
+                            if (const auto i = at (0.9); i >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, note), i);
+                            if (const auto i = at (1.0); i >= 0) midi.addEvent (juce::MidiMessage::noteOn (1, note + 7, (juce::uint8) 110), i);
+                            if (const auto i = at (1.6); i >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, note + 7), i);
+                        }
                         chunk.clear();
                         engine.processBlock (chunk, midi);
                         for (int ch = 0; ch < 2; ++ch)

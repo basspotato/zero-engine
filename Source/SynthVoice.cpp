@@ -103,23 +103,32 @@ void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*
     releasing = false;
     pitch = targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
     pitchWheelMoved (pitchWheel);
-
-    for (auto& stage : filters)
-        for (auto& f : stage)
-            f = {};
     setVelocity (velocity);
 
-    // Random start phases keep unison voices from starting phase-locked (a flat, phasey attack).
-    for (auto& phase : phases)
-        phase = random.nextDouble();
-    phases[0] = 0.0; // the centre voice stays in phase with the sub, or a sine
-                     // oscillator and the sub at the same pitch would randomly
-                     // reinforce or cancel (808 level jumping note to note)
-    subPhase = 0.0;
-    lfoPhase = 0.0f;
-    lfoHeld = random.nextFloat() * 2.0f - 1.0f;
-    lfoSmoothing = 1.0f - std::exp (-1.0f / (0.003f * (float) getSampleRate()));
-    lfoSmoothed = rawLfo (0.0f); // start where the shape starts, not from 0
+    // A voice still sounding (a stolen voice, a mono retrigger, fast arp notes)
+    // carries on: its filters, oscillator phases and LFO stay, and the envelope
+    // rises from where it is, so nothing jumps (the owner heard pops on arp
+    // patches). Only a silent voice starts fresh.
+    const auto continuing = ampEnv.isActive();
+    stolen = false;
+    if (! continuing)
+    {
+        for (auto& stage : filters)
+            for (auto& f : stage)
+                f = {};
+
+        // Random start phases keep unison voices from starting phase-locked (a flat, phasey attack).
+        for (auto& phase : phases)
+            phase = random.nextDouble();
+        phases[0] = 0.0; // the centre voice stays in phase with the sub, or a sine
+                         // oscillator and the sub at the same pitch would randomly
+                         // reinforce or cancel (808 level jumping note to note)
+        subPhase = 0.0;
+        lfoPhase = 0.0f;
+        lfoHeld = random.nextFloat() * 2.0f - 1.0f;
+        lfoSmoothing = 1.0f - std::exp (-1.0f / (0.003f * (float) getSampleRate()));
+        lfoSmoothed = rawLfo (0.0f); // start where the shape starts, not from 0
+    }
 
     updateEnvelopes();
     ampEnv.noteOn();
@@ -136,8 +145,15 @@ void ZeroVoice::stopNote (float, bool allowTailOff)
     }
     else
     {
-        ampEnv.reset();
-        modEnv.reset();
+        // Stopped at once, usually to be stolen for another note this instant:
+        // the envelopes keep their level for that note to rise from (see
+        // startNote); if none comes, the next render clears them.
+        stolen = ampEnv.isActive();
+        if (! stolen)
+        {
+            ampEnv.reset();
+            modEnv.reset();
+        }
         clearCurrentNote();
     }
 }
@@ -189,7 +205,15 @@ float ZeroVoice::rawLfo (float increment)
 void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSample, int numSamples)
 {
     if (! isVoiceActive())
+    {
+        if (stolen) // stopped at once and no note took it over: silent now
+        {
+            ampEnv.reset();
+            modEnv.reset();
+            stolen = false;
+        }
         return;
+    }
 
     const auto& bank = WavetableBank::get();
     const auto sampleRate = getSampleRate();

@@ -23,7 +23,7 @@ public:
     ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& macroMap, const std::atomic<float>& hostBpm,
                const std::atomic<const WavetableBank*>& sampleTable,
                std::atomic<float>& livePosition, int index);
-    void reseed() { random.setSeed (seed); } // back to a fresh engine's phases (offline renders)
+    void reseed() { random.setSeed (seed); ampEnv.reset(); modEnv.reset(); stolen = false; } // back to a fresh engine's state (offline renders)
 
     bool canPlaySound (juce::SynthesiserSound* sound) override;
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel) override;
@@ -139,6 +139,7 @@ private:
     double subPhase = 0.0;
     float lfoPhase = 0.0f;
     float lfoHeld = 0.0f;
+    bool stolen = false; // stopped at once with its envelopes kept for the next note to rise from
     float lfoSmoothed = 0.0f, lfoSmoothing = 1.0f; // the 3 ms smoothing (set per note from the sample rate)
 };
 
