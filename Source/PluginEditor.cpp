@@ -1653,6 +1653,10 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
                         if (name.startsWith (">"))
                             name = "TO" + name.substring (1);
                         name = name.replace ("VELOCITY", "VEL");
+                        if (section.name == "OSCILLATOR") // it says what they belong to: room for the menus
+                            name = name.replace ("UNISON ", "").replace ("WAVE POSITION", "POSITION");
+                        if (section.name == "FILTER")
+                            name = name.replace ("MOD ENV > CUTOFF", "ENV AMOUNT").replace ("VEL > CUTOFF", "VELOCITY");
                         section.controls.push_back (std::move (control));
                     }
                 row.push_back (std::move (section));
@@ -1799,8 +1803,14 @@ void AdvancedPanel::resized()
 
             // Controls in one line under the section title, a name above each.
             auto inner = section.bounds.withTrimmedTop (22).reduced (6, 4);
-            const auto count = juce::jmax (1, (int) section.controls.size());
-            const auto cellWidth = inner.getWidth() / count;
+            // Slots across: a menu a third wider than a knob or toggle (an equal slot
+            // cut "1/8 Dotted" short).
+            auto weightOf = [] (const auto& c) { return c->menu != nullptr ? 1.35f : 1.0f; };
+            float weightSum = 0.0f;
+            for (const auto& c : section.controls)
+                weightSum += weightOf (c);
+            const auto unit = (float) inner.getWidth() / juce::jmax (1.0f, weightSum);
+            const auto cellWidth = (int) unit; // a knob's slot
             // One layout per section: the names in one row, every knob, menu and
             // toggle centred on one line under them, and that block truly centred
             // up and down in the section's space under its title (the owner saw
@@ -1812,9 +1822,12 @@ void AdvancedPanel::resized()
             const auto rowHeight = hasKnob ? knobSize : 22;
             const auto blockTop = inner.getY() + (inner.getHeight() - (nameHeight + rowHeight)) / 2;
             const auto lineY = blockTop + nameHeight + rowHeight / 2;
+            float x = (float) inner.getX();
             for (int i = 0; i < (int) section.controls.size(); ++i)
             {
-                const auto cell = juce::Rectangle<int> (inner.getX() + i * cellWidth, inner.getY(), cellWidth, inner.getHeight()).reduced (3, 0);
+                const auto slot = unit * weightOf (section.controls[(size_t) i]);
+                const auto cell = juce::Rectangle<int> ((int) x, inner.getY(), (int) slot, inner.getHeight()).reduced (3, 0);
+                x += slot;
                 auto& control = section.controls[(size_t) i];
                 const auto size = control->knob != nullptr ? juce::Point<int> (cell.getWidth(), knobSize)
                                                            : juce::Point<int> (juce::jmin (cell.getWidth(), 110), 22);
