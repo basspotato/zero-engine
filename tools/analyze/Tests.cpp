@@ -864,6 +864,7 @@ int runAllTests();
 
 int runTests()
 {
+    std::setvbuf (stdout, nullptr, _IONBF, 0); // progress shows as it goes (and up to a crash)
     // Never the owner's favourites, hearts or taste.
     ZeroEngineProcessor::userFolderForTools = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_tests_user");
     ZeroEngineProcessor::userFolderForTools.deleteRecursively();

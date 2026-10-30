@@ -548,7 +548,18 @@ float ZeroEngineProcessor::sizeAndInterest (const SoundTraits& target, const Sou
     // Harsh: more than half an octave brighter than the target costs (the owner
     // heard harshness as the main fault in listening tests).
     const auto harsh = juce::jmin (3.0f, 1.5f * juce::jmax (0.0f, std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) - 0.5f));
-    return big + interest - harsh;
+    return big + interest - harsh - crushedOf (m, type);
+}
+
+float ZeroEngineProcessor::crushedOf (const SoundTraits& m, int type)
+{
+    // Crushed: denser (a lower crest factor) than most of the owner's sounds of
+    // this type (their median less 1.5 spreads) costs, steeply: past it a sound
+    // is squashed into the clipper and reads as loud and distorted (A/B round 2:
+    // the picks the owner called distorted or ear-hurting measured 4-6.5 dB PLR).
+    const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
+    const auto floor = guide.median[6] - 1.5f * guide.spread[6];
+    return juce::jlimit (0.0f, 3.0f, (floor - m.crestDb) / 1.0f);
 }
 
 float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTraits& m, int type)
@@ -568,7 +579,10 @@ float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTrai
     const auto clean = capped (4.0f * (m.clarity - 0.85f)) - capped (20.0f * m.flatness);
     const auto widthNear = -0.5f * std::abs (capped (z (side)));
     const auto calm = -capped (juce::jmax (0.0f, z (movement) - 0.5f));
-    return warmth - harsh + 0.5f * capped (z (body)) + 0.5f * capped (z (richness)) + clean + widthNear + calm;
+    // Loud: more than 2 dB over the designed sound of its type costs (a mood
+    // should sit in a mix, not jump out of it).
+    const auto loud = juce::jlimit (0.0f, 3.0f, (m.levelDb - d[level] - 2.0f) / 2.0f);
+    return warmth - harsh + 0.5f * capped (z (body)) + 0.5f * capped (z (richness)) + clean + widthNear + calm - loud - crushedOf (m, type);
 }
 
 std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, int type, juce::Random& random, int mood, const Profile* parent)
@@ -676,20 +690,60 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     const auto drawn = useJudge && GenerateNet::builtIn().ready() ? drawWithJudge : candidates; // more when the judge can screen them
     for (int i = offspring; i < drawn; ++i)
     {
-        if (parent != nullptr) // Mutate: five of its searched settings moved (+-25 %; the owner heard +-5 % as nothing)
+        if (parent != nullptr)
         {
+            // Mutate: two big moves you hear (the owner couldn't hear nudges of the
+            // searched settings alone, even at +-25 %), then four small nudges.
             auto units = ReferenceMatch::unitsOf (*parent);
-            for (int n = 0; n < 5; ++n)
+            for (int n = 0; n < 4; ++n)
             {
                 auto& u = units[(size_t) random.nextInt (ReferenceMatch::numSearched)];
-                u = juce::jlimit (0.0f, 1.0f, u + 0.25f * (random.nextFloat() * 2.0f - 1.0f));
+                u = juce::jlimit (0.0f, 1.0f, u + 0.15f * (random.nextFloat() * 2.0f - 1.0f));
             }
             auto p = ReferenceMatch::withUnitsOf (*parent, units);
-            if (random.nextFloat() < 0.33f) // a third: another second wavetable blended in, the most audible change that keeps the family
-            {
-                p.waveTableB = (float) random.nextInt (WavetableBank::numBanks - 1); // not Sample (Match's)
-                p.tableMix = juce::jlimit (0.0f, 1.0f, p.tableMix + 0.15f + 0.2f * random.nextFloat());
-            }
+            auto either = [&] (float a, float b) { return random.nextBool() ? a : b; };
+            constexpr int numMoves = 7;
+            const auto first = random.nextInt (numMoves), second = (first + 1 + random.nextInt (numMoves - 1)) % numMoves;
+            for (const auto move : { first, second })
+                switch (move)
+                {
+                    case 0: // another wavetable (not Sample, Match's)
+                        p.waveTable = (float) ((juce::roundToInt (p.waveTable) + 1 + random.nextInt (WavetableBank::numBanks - 2)) % (WavetableBank::numBanks - 1));
+                        break;
+                    case 1: // elsewhere in the table, and another second table blended in
+                        p.wavePos = random.nextFloat();
+                        p.waveTableB = (float) random.nextInt (WavetableBank::numBanks - 1);
+                        p.tableMix = juce::jlimit (0.0f, 1.0f, p.tableMix + 0.2f + 0.2f * random.nextFloat());
+                        break;
+                    case 2: // the filter an octave or more up or down, its envelope with it
+                        p.filterCutoff = juce::jlimit (60.0f, 18000.0f, p.filterCutoff * std::exp2 (either (1.0f, -1.0f) * (1.0f + 0.6f * random.nextFloat())));
+                        p.filterEnv = juce::jlimit (0.0f, 4.0f, p.filterEnv * either (1.6f, 0.5f) + 0.2f);
+                        break;
+                    case 3: // another envelope: snappier or slower
+                    {
+                        const auto f = either (0.4f, 2.5f);
+                        p.ampAttack = juce::jlimit (0.001f, 2.0f, p.ampAttack * f);
+                        p.ampDecay = juce::jlimit (0.05f, 3.0f, p.ampDecay * f);
+                        p.ampRelease = juce::jlimit (0.05f, 3.0f, p.ampRelease * f);
+                        break;
+                    }
+                    case 4: // more or fewer voices in the unison
+                        p.unison = (float) juce::jlimit (1, 7, juce::roundToInt (p.unison) + (p.unison < 2.5f || random.nextBool() ? 2 : -2));
+                        p.detune = juce::jlimit (0.0f, 0.4f, p.detune + (p.unison > 2.5f ? 0.08f : -0.08f));
+                        break;
+                    case 5: // the movement: twice or half as fast, and deeper
+                        p.lfoRate = juce::jlimit (0.05f, 12.0f, p.lfoRate * either (2.0f, 0.5f));
+                        p.lfoToPos = juce::jlimit (0.0f, 1.0f, p.lfoToPos + 0.2f);
+                        p.lfoToCutoff = juce::jlimit (0.0f, 2.0f, p.lfoToCutoff + 0.3f);
+                        break;
+                    default: // more or less space
+                    {
+                        const auto more = random.nextBool() ? 0.2f : -0.2f;
+                        p.reverbMix = juce::jlimit (0.0f, 0.9f, p.reverbMix + more);
+                        p.delayMix = juce::jlimit (0.0f, 0.6f, p.delayMix + more);
+                        break;
+                    }
+                }
             profiles.push_back (capDetune (p, genre));
             sources.push_back (genre);
             continue;
@@ -804,7 +858,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         if (parent != nullptr)
         {
             // Mutate stays in its sound's family but must be heard: the distance
-            // from it (as novelty measures it, in the owner's spreads) aims at 1
+            // from it (as novelty measures it, in the owner's spreads) aims at 1.1
             // (a fresh click lands about 1.3 away; nearer read as no change); size
             // counts a little, taste fully.
             float sum = 0.0f;
@@ -812,7 +866,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
                 if (k != centroid && k != level)
                     sum += juce::square ((a[(size_t) k] - d[(size_t) k]) / spreadOf (k));
             sum += juce::square (std::log2 (juce::jmax (20.0f, a[centroid]) / juce::jmax (20.0f, d[centroid])) / 0.8f);
-            return 0.3f * bigAndInteresting - 1.5f * std::abs (std::sqrt (sum) - 1.0f) + 1.5f * tasteOf (m);
+            return 0.3f * bigAndInteresting - 1.5f * std::abs (std::sqrt (sum) - 1.1f) + 1.5f * tasteOf (m);
         }
         return bigAndInteresting + 0.7f * novelty + 1.5f * tasteOf (m);
     };

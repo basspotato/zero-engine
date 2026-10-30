@@ -124,6 +124,11 @@ target_link_libraries(ZeroAnalyze
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+# The tests and tools keep many engines (45 KB each) on the stack; inlined
+# into one function they outgrow the default 1 MB.
+if (MSVC)
+    target_link_options(ZeroAnalyze PRIVATE /STACK:16777216)
+endif()
 
 if (ZERO_SPACE_IMAGES)
     foreach (target ZeroEngine ZeroAnalyze)

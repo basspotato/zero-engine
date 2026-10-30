@@ -219,6 +219,7 @@ public:
     // size and interest. Public for tooling.
     static float strayFrom (const SoundTraits& target, const SoundTraits& m, int type, bool free);
     static float sizeAndInterest (const SoundTraits& target, const SoundTraits& m, int type);
+    static float crushedOf (const SoundTraits& m, int type); // the penalty for squashing into the clipper
     // Moods score warmth, body, smoothness and calm instead of size: darker than
     // the owner's sounds of the type, more body and partials, clean (clarity, no
     // noise), width near theirs, and no fast movement.
