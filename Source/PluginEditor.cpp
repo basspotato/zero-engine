@@ -585,6 +585,40 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.fillEllipse (d.getX() + 0.30f * d.getWidth(), d.getY() - 0.04f * d.getHeight(), 0.40f * d.getWidth(), 0.16f * d.getHeight());
     });
 
+    // A bright four-pointed star, fixed upper middle-right, half Mars's size. It
+    // scintillates like a star low in the sky: brightness and spike length flutter
+    // on a few fast unrelated rates, the colour flicking between blue, white and orange.
+    {
+        const auto c = juce::Point<float> (screen.getX() + 0.68f * screen.getWidth(), screen.getY() + 0.2f * h);
+        const auto size = 0.0225f * h;
+        const auto flutter = 0.5f + 0.2f * std::sin (t * 23.0f) + 0.17f * std::sin (t * 37.3f + 1.1f) + 0.13f * std::sin (t * 53.9f + 2.3f);
+        const auto hue = std::sin (t * 9.7f) + 0.6f * std::sin (t * 17.1f + 0.7f); // -1.6 .. 1.6: blue, white, orange
+        const auto white = juce::Colour (0xfff4f6ff), blue = juce::Colour (0xff8fb8ff), orange = juce::Colour (0xffffb36b);
+        const auto tint = hue < 0.0f ? white.interpolatedWith (blue, juce::jmin (1.0f, -hue))
+                                     : white.interpolatedWith (orange, juce::jmin (1.0f, hue));
+        const auto bright = juce::jlimit (0.25f, 1.0f, 0.45f + 0.6f * flutter);
+
+        juce::ColourGradient glow (tint.withAlpha (0.55f * bright), c.x, c.y, tint.withAlpha (0.0f), c.x + size * 1.6f, c.y, true);
+        g.setGradientFill (glow);
+        g.fillEllipse (juce::Rectangle<float> (size * 3.2f, size * 3.2f).withCentre (c));
+
+        // Spikes: long thin diamonds, up/down and left/right.
+        auto spike = [&] (float length, float thickness, bool vertical)
+        {
+            juce::Path p;
+            const auto a = vertical ? juce::Point<float> (0.0f, length) : juce::Point<float> (length, 0.0f);
+            const auto b = vertical ? juce::Point<float> (thickness, 0.0f) : juce::Point<float> (0.0f, thickness);
+            p.addQuadrilateral (c.x - a.x, c.y - a.y, c.x + b.x, c.y + b.y, c.x + a.x, c.y + a.y, c.x - b.x, c.y - b.y);
+            g.fillPath (p);
+        };
+        const auto length = size * (1.6f + 0.5f * flutter);
+        g.setColour (tint.withAlpha (0.85f * bright));
+        spike (length, size * 0.13f, true);
+        spike (length * 0.92f, size * 0.13f, false);
+        g.setColour (juce::Colours::white.withAlpha (bright));
+        g.fillEllipse (juce::Rectangle<float> (size * 0.42f, size * 0.42f).withCentre (c));
+    }
+
     // Glowing nodes spread over the whole screen, drifting round the black hole
     // on wide oval orbits (the inner ones faster), each shimmering; faint oval
     // orbit lines under them.
