@@ -819,6 +819,43 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "crushcheck")
+    {
+        // Generate picks squashed into the clipper: per profile, two clicks; a pick
+        // is crushed when its crest sits under the type's floor (the owner's median
+        // less 1.5 spreads, as Generate's score has it). The designed sounds too.
+        int picks = 0, crushed = 0, designedCrushed = 0;
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+            {
+                auto owned = std::make_unique<ZeroEngineProcessor>();
+                auto& engine = *owned;
+                auto* genre = engine.state.getParameter (ParamIDs::genre);
+                auto* type = engine.state.getParameter (ParamIDs::type);
+                genre->setValueNotifyingHost (genre->convertTo0to1 ((float) g));
+                type->setValueNotifyingHost (type->convertTo0to1 ((float) t));
+                engine.syncProfile();
+                const auto designed = ZeroEngineProcessor::measureForTools (engine, g, t, makeProfile (g, t));
+                designedCrushed += ZeroEngineProcessor::crushedOf (designed, t) > 0.0f;
+                juce::String line;
+                for (int s = 0; s < 2; ++s)
+                {
+                    engine.generate (300 + 7 * s + 11 * g + t);
+                    if (const auto m = engine.getLastPickTraits())
+                    {
+                        ++picks;
+                        const auto c = ZeroEngineProcessor::crushedOf (*m, t) > 0.0f;
+                        crushed += c;
+                        line << juce::String (m->crestDb, 1) << (c ? "* " : "  ");
+                    }
+                }
+                std::printf ("%-24s designed crest %5.1f%s  picks %s\n", (genreNames[g] + " " + typeNames[t]).toRawUTF8(), designed.crestDb,
+                             ZeroEngineProcessor::crushedOf (designed, t) > 0.0f ? "*" : " ", line.toRawUTF8());
+            }
+        std::printf ("crushed (*): %d of %d picks; %d of 72 designed sounds\n", crushed, picks, designedCrushed);
+        return 0;
+    }
+
     if (command == "idlecheck")
     {
         // Silence with no keys: a fresh engine, after Generate clicks and after
