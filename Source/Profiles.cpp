@@ -652,6 +652,12 @@ Profile makeProfile (int genre, int type)
                + ((genre == futureBass || genre == trance) && type == chord ? 0.1f : 0.0f);
     p.directions = macroDirections (genre, type);
 
+    // Seven-voice chords with grit squashed these into the clipper (crest under
+    // the owner's floor; the owner heard the Techno Chord as distorted): two
+    // thirds of their grit keeps the character and lets them breathe.
+    if ((genre == techno && (type == chord || type == pad)) || (genre == hardstyle && type == pad))
+        p.grit *= 2.0f / 3.0f;
+
     if (genre >= 0 && genre < 12 && type >= 0 && type < 6 && profileTrims[genre][type].tuned)
         applyTrim (p, profileTrims[genre][type]);
 
