@@ -1098,9 +1098,11 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     buffer.clear();
 
     // A new sound (preset, genre/type, Generate, favourite, undo, a project
-    // loading): every held note lets go with its release, on-screen keys,
-    // latched arp notes and a held sustain pedal included, so nothing carries over.
-    if (releaseHeld.exchange (false))
+    // loading): every held note lets go with its release, on-screen keys and a
+    // held sustain pedal included, so nothing carries over. Not while the arp is
+    // on: a running (or latched) pattern plays on into the new sound until it
+    // is unlatched or switched off, as it always did.
+    if (releaseHeld.exchange (false) && arpParams[0]->load() <= 0.5f)
     {
         keyboardState.allNotesOff (0);
         arp.reset();

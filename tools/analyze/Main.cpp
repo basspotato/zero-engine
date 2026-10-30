@@ -892,6 +892,21 @@ int main (int argc, char* argv[])
         type->setValueNotifyingHost (type->convertTo0to1 (1.0f));
         engine.syncProfile();
         idle ("held, then the type changed (Lead)");
+        // A latched arp plays on through a new sound until it's switched off.
+        {
+            auto set = [&] (const char* id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+            set (ParamIDs::arpOn, 1.0f);
+            set (ParamIDs::arpLatch, 1.0f);
+            engine.keyboardState.noteOn (1, 60, 0.8f);
+            idle ("latched arp, key held (should sound)");
+            engine.keyboardState.noteOff (1, 60, 0.0f);
+            engine.generate (4321);
+            idle ("latched arp after Generate (should sound)");
+            set (ParamIDs::arpOn, 0.0f);
+            set (ParamIDs::arpLatch, 0.0f);
+            engine.syncProfile();
+            idle ("arp switched off");
+        }
         for (int i = 0; i < 6; ++i)
         {
             engine.generate (900 + i, i % 2 == 1);
