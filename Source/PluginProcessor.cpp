@@ -137,12 +137,24 @@ ZeroEngineProcessor::GeneratePlan ZeroEngineProcessor::prepareGenerate (juce::in
         plan.parent = readProfile (state, plan.genre, plan.type);
 
     // Mood mode: a mood (never the last one twice running) picks the type; the
-    // genre box keeps the genre, and the display shows the mood's name.
+    // genre box keeps the genre, and the display shows the mood's name. Weighted
+    // towards basses, leads and chords (about 70 % of clicks; the owner heard too
+    // many pads, plucks and FX), the rest still turning up.
     if (moodMode && ! mutate)
     {
-        plan.mood = (lastMood + 1 + plan.random.nextInt (Moods::count - 1)) % Moods::count;
-        if (lastMood < 0)
-            plan.mood = plan.random.nextInt (Moods::count);
+        // lushPad, airyDrone, warmKeys, glassyBell, darkTexture, softPluck, soaringLead, deepBass
+        constexpr float weights[Moods::count] { 1.0f, 0.5f, 2.5f, 0.6f, 0.4f, 0.6f, 2.5f, 2.5f };
+        float total = 0.0f;
+        for (int m = 0; m < Moods::count; ++m)
+            total += m == lastMood ? 0.0f : weights[m];
+        auto pick = plan.random.nextFloat() * total;
+        plan.mood = Moods::count - 1;
+        for (int m = 0; m < Moods::count; ++m)
+            if (m != lastMood && (pick -= weights[m]) <= 0.0f)
+            {
+                plan.mood = m;
+                break;
+            }
         lastMood = plan.mood;
         plan.type = Moods::typeOf (plan.mood);
     }
