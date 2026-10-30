@@ -1563,7 +1563,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
         { "ARP",    { { { "PATTERN  (the output, and each step as it plays)", {} } },
                       { { "STEP SEQUENCER  (rests, pitch and accents for every arp mode)", {} } },
                       { { "ARPEGGIATOR",  { arpOn, arpLatch, arpMode, arpRate, arpOctaves, arpGate, seqLength } } } },
-                    { 45, 32, 23 } }, // the arp settings' border about 12 px lower than at 9 : 6 : 5
+                    { 240, 179, 116 } }, // in pixels at the design size: the arp settings' border 20 px lower than at 9 : 6 : 5
     };
 
     auto makeControl = [&] (const char* id) -> std::unique_ptr<Control>
