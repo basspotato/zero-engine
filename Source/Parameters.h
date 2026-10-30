@@ -72,6 +72,7 @@ namespace ParamIDs
 
     // Finishing chain.
     inline constexpr auto levelTrim   = "levelTrim"; // per-profile loudness match, before Output
+    inline constexpr auto inputTrim   = "inputTrim"; // per-profile: how hard the voices hit the chain (thick chords squashed into the saturation)
     inline constexpr auto ottDepth    = "ottDepth";
     inline constexpr auto spectral    = "spectral";    // many-band compression before the clipper
     inline constexpr auto arpOn       = "arpOn";       // arpeggiator: a playing setting, not part of a profile
@@ -217,6 +218,9 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
 
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::levelTrim, 1 }, "Level Trim",
                                                        NormalisableRange<float> (-18.0f, 12.0f), 0.0f,
+                                                       AudioParameterFloatAttributes().withLabel ("dB")));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::inputTrim, 1 }, "Input Trim",
+                                                       NormalisableRange<float> (-12.0f, 0.0f), 0.0f,
                                                        AudioParameterFloatAttributes().withLabel ("dB")));
     unit (ParamIDs::ottDepth, "OTT Depth", 0.35f);
     unit (ParamIDs::spectral, "Spectral", 0.0f);

@@ -310,6 +310,8 @@ private:
     std::atomic<float>& output;
     std::atomic<float>& pan;
     std::atomic<float>& levelTrim;
+    std::atomic<float>& inputTrim;
+    float lastInputGain = 1.0f; // audio thread: the Input Trim ramp's start
     std::atomic<float>& subSplit;
     std::atomic<float>& subOn;
     std::atomic<float>& midHighPass;

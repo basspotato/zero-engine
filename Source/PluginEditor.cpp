@@ -1554,7 +1554,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
                            { { "MOD ENVELOPE", { modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch } },
                              { "LFO",          { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } } },
                            { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
-                             { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
+                             { "FINISH",       { inputTrim, ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
         // The pattern on top (the output and each step as it plays), the steps,
         // then the arp's settings.
         { "ARP",    { { { "PATTERN  (the output, and each step as it plays)", {} } },

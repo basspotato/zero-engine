@@ -42,6 +42,7 @@ struct Profile
 
     // Finishing chain.
     float levelTrim, ottDepth, tilt, monoFreq, stereoWidth;
+    float inputTrim = 0.0f; // dB into the chain: below 0 for chords too thick for the saturation
     float spectral; // the many-band stage, 0..1
 
     // What each macro pushes besides its main job.

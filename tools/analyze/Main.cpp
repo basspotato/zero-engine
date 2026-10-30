@@ -1249,6 +1249,59 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "easeab")
+    {
+        // The pads and chords that were squashed into the saturation, as designed
+        // now (with their Input Trim) and before (none): a held chord pair each, to
+        // analysis/ease_ab, with numbers.
+        constexpr double rate = 48000.0;
+        constexpr int block = 512;
+        const auto folder = juce::File::getCurrentWorkingDirectory().getChildFile ("analysis/ease_ab");
+        folder.createDirectory();
+        const std::pair<const char*, const char*> presets[] { { "Hardstyle", "Pad" }, { "Dubstep", "Chord" }, { "Drum & Bass", "Pad" },
+                                                              { "Hardstyle", "Chord" }, { "Techno", "Pad" }, { "Dubstep", "Pad" } };
+        for (const auto& [genreName, typeName] : presets)
+            for (const auto before : { true, false })
+            {
+                auto owned = std::make_unique<ZeroEngineProcessor>();
+                auto& engine = *owned;
+                engine.setPlayConfigDetails (0, 2, rate, block);
+                engine.prepareToPlay (rate, block);
+                const auto g = genreNames.indexOf (genreName), t = typeNames.indexOf (typeName);
+                auto p = makeProfile (g, t);
+                if (before)
+                    p.inputTrim = 0.0f;
+                engine.loadProfile (g, t, p);
+                juce::AudioBuffer<float> out (2, (int) (5.0 * rate)), chunk (2, block);
+                juce::MidiBuffer midi;
+                const int chords[2][3] { { 60, 63, 67 }, { 56, 60, 63 } };
+                for (int pos = 0; pos + block <= out.getNumSamples(); pos += block)
+                {
+                    midi.clear();
+                    for (int c = 0; c < 2; ++c)
+                        for (const auto n : chords[c])
+                        {
+                            const auto on = (int) (c * 2.0 * rate), off = on + (int) (1.8 * rate);
+                            if (on >= pos && on < pos + block) midi.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 105), on - pos);
+                            if (off >= pos && off < pos + block) midi.addEvent (juce::MidiMessage::noteOff (1, n), off - pos);
+                        }
+                    chunk.clear();
+                    engine.processBlock (chunk, midi);
+                    for (int ch = 0; ch < 2; ++ch)
+                        out.copyFrom (ch, pos, chunk, ch, 0, block);
+                }
+                const auto d = analyse (out, rate);
+                const auto file = folder.getChildFile (juce::String (genreName).removeCharacters (" &") + "_" + typeName
+                                                       + (before ? "_before.wav" : "_now.wav"));
+                juce::WavAudioFormat wav;
+                std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (new juce::FileOutputStream (file), rate, 2, 24, {}, 0));
+                if (writer != nullptr)
+                    writer->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
+                std::printf ("%-36s LUFS %6.1f  PLR %5.1f  centroid %5.0f\n", file.getFileName().toRawUTF8(), d.lufs, d.plr, d.centroidHz);
+            }
+        return 0;
+    }
+
     if (command == "delayab")
     {
         // The delay before and after it stopped leaning left: delay-heavy presets

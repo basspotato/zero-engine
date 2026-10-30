@@ -657,6 +657,13 @@ Profile makeProfile (int genre, int type)
     // thirds of their grit keeps the character and lets them breathe.
     if ((genre == techno && (type == chord || type == pad)) || (genre == hardstyle && type == pad))
         p.grit *= 2.0f / 3.0f;
+    // The thickest pads and chords hit the saturation so hard they came out a
+    // wall (5-6 dB PLR at -5 to -6 LUFS); a softer input gives them their
+    // dynamics back (about 9.5 dB) at the same brightness, level with other pads.
+    if (((genre == hardstyle || genre == dubstep) && (type == pad || type == chord)) || (genre == drumAndBass && type == pad))
+        p.inputTrim = -8.0f;
+    if (genre == techno && type == pad)
+        p.inputTrim = -5.0f;
 
     if (genre >= 0 && genre < 12 && type >= 0 && type < 6 && profileTrims[genre][type].tuned)
         applyTrim (p, profileTrims[genre][type]);
@@ -820,6 +827,7 @@ void applyProfile (juce::AudioProcessorValueTreeState& state, const Profile& p)
     set (ParamIDs::reverbSize,    p.reverbSize);
 
     set (ParamIDs::levelTrim,   p.levelTrim);
+    set (ParamIDs::inputTrim,   p.inputTrim);
     set (ParamIDs::ottDepth,    p.ottDepth);
     set (ParamIDs::spectral,    p.spectral);
     set (ParamIDs::tilt,        p.tilt);
@@ -893,6 +901,7 @@ Profile readProfile (const juce::AudioProcessorValueTreeState& state, int genre,
     get (ParamIDs::reverbSize,    p.reverbSize);
 
     get (ParamIDs::levelTrim,   p.levelTrim);
+    get (ParamIDs::inputTrim,   p.inputTrim);
     get (ParamIDs::ottDepth,    p.ottDepth);
     get (ParamIDs::spectral,    p.spectral);
     get (ParamIDs::tilt,        p.tilt);

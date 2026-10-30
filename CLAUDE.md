@@ -40,7 +40,7 @@ Output goes to `analysis/` by default (git-ignored).
 - `Source/Profiles.*`: the 72 designed profiles (type template, genre shift, signatures, `applyResearchedGaps`), `generateProfile` for Generate
 - `Source/SynthVoice.*`, `Source/Envelope.h`: voice DSP (wavetables, unison, filter, tempo-synced LFO); analog-style exponential envelopes (fall stages stretched 1.9x so presets kept their length when they replaced the linear ones)
 - `Source/Wavetable.*`: wavetable banks, including the Jupiter bank from `JupiterHarmonics.h`
-- `Source/FinishingChain.*`: saturation, OTT, EQ, width, spectral stage, clipper, meters
+- `Source/FinishingChain.*`: saturation, OTT, EQ, width, spectral stage, clipper, meters; Input Trim (per profile, before the chain) lets the thickest pads and chords hit the saturation softer. `ZeroAnalyze easeab`: those presets before and now; `delayab`: the delay before and after it stopped leaning left
 - `Source/SpectralCompressor.*`: our own many-band (512-point STFT) up/down compressor, level-neutral, leaves < 150 Hz alone, lifts only bins within 30 dB of the loudest and never the gaps between harmonics, gains smoothed over 9 bins; adds 512 samples of latency
 - `Source/MacroMap.h`: what each macro pushes per profile; the mod wheel adds to Motion
 - `Source/Arpeggiator.*`: tempo-synced arp with a 16-step pattern that shapes every mode (rests, transpose, accent); mode "Sequence" plays all held keys per step. Runs on the MIDI before the synth; its settings are not part of profiles

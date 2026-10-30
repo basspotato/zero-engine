@@ -23,6 +23,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
       output (*state.getRawParameterValue (ParamIDs::output)),
       pan (*state.getRawParameterValue (ParamIDs::pan)),
       levelTrim (*state.getRawParameterValue (ParamIDs::levelTrim)),
+      inputTrim (*state.getRawParameterValue (ParamIDs::inputTrim)),
       subSplit (*state.getRawParameterValue (ParamIDs::subSplit)),
       subOn (*state.getRawParameterValue (ParamIDs::subOn)),
       midHighPass (*state.getRawParameterValue (ParamIDs::midHighPass)),
@@ -1263,6 +1264,12 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.delayFeedback = delayFeedback.load();
     settings.reverbMix     = juce::jlimit (0.0f, 1.0f, reverbMix.load() + macroMap.offset (MacroTarget::reverbMix));
     settings.reverbSize    = reverbSize.load();
+
+    // Input Trim: how hard the voices hit the chain (the clean sub, on its own
+    // channel, keeps its level), ramped across the block so a change never clicks.
+    const auto inputGain = juce::Decibels::decibelsToGain (inputTrim.load());
+    buffer.applyGainRamp (0, numSamples, lastInputGain, inputGain);
+    lastInputGain = inputGain;
 
     finishing.process (buffer, settings, sub);
 
