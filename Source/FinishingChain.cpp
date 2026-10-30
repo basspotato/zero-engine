@@ -382,8 +382,16 @@ void FinishingChain::space (juce::AudioBuffer<float>& buffer, int numSamples, co
         fbLpState[1] = outL + fbLpCoeff * (fbLpState[1] - outL);
 
         constexpr auto entry = 0.7071f; // two lines in: the echoes as loud in all as the one-line ping-pong's
-        lineL[delayWrite] = entry * sendL[i] + feedback * fbLpState[0];
-        lineR[delayWrite] = entry * sendR[i] + feedback * fbLpState[1];
+        if (legacyPingPong)
+        {
+            lineL[delayWrite] = 0.5f * (sendL[i] + sendR[i]) + feedback * fbLpState[0];
+            lineR[delayWrite] = feedback * fbLpState[1];
+        }
+        else
+        {
+            lineL[delayWrite] = entry * sendL[i] + feedback * fbLpState[0];
+            lineR[delayWrite] = entry * sendR[i] + feedback * fbLpState[1];
+        }
         delayWrite = (delayWrite + 1) % lineLength;
 
         const auto mix = delayMix.getNextValue();

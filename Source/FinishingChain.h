@@ -28,6 +28,8 @@ struct FinishingSettings
 class FinishingChain
 {
 public:
+    static inline bool legacyPingPong = false; // tooling: the old delay (left line first) for before/after renders
+
     void prepare (double sampleRate, int maxBlockSize, int numChannels);
     void reset();
 

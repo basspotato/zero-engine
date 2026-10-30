@@ -29,6 +29,7 @@
 #include "Tuner.h"
 #include "Harmonics.h"
 #include "../../Source/PluginProcessor.h"
+#include "../../Source/FinishingChain.h"
 #include "../../Source/PluginEditor.h"
 #include "../../Source/Parameters.h"
 #include "../../Source/SoundPrint.h"
@@ -1245,6 +1246,58 @@ int main (int argc, char* argv[])
         out.truncate();
         juce::PNGImageFormat().writeImageToStream (strip, out);
         std::printf ("Wrote %s\n", argFile (args, 1, {}).getFullPathName().toRawUTF8());
+        return 0;
+    }
+
+    if (command == "delayab")
+    {
+        // The delay before and after it stopped leaning left: delay-heavy presets
+        // playing a short line, once with the old ping-pong (left line first) and
+        // once with the cross-fed stereo delay, to analysis/delay_ab.
+        constexpr double rate = 48000.0;
+        constexpr int block = 512;
+        const auto folder = juce::File::getCurrentWorkingDirectory().getChildFile ("analysis/delay_ab");
+        folder.deleteRecursively();
+        folder.createDirectory();
+        const std::pair<const char*, const char*> presets[] { { "Trance", "Lead" }, { "Trance", "Pluck" }, { "Synthwave", "Lead" }, { "Future Bass", "Chord" } };
+        constexpr int line[] { 72, 75, 79, 77, 75, 72, 70, 72 };
+        for (const auto& [genreName, typeName] : presets)
+            for (const auto old : { true, false })
+            {
+                FinishingChain::legacyPingPong = old;
+                auto owned = std::make_unique<ZeroEngineProcessor>();
+                auto& engine = *owned;
+                engine.setPlayConfigDetails (0, 2, rate, block);
+                engine.prepareToPlay (rate, block);
+                auto set = [&] (const char* id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+                set (ParamIDs::genre, (float) genreNames.indexOf (genreName));
+                set (ParamIDs::type, (float) typeNames.indexOf (typeName));
+                engine.syncProfile();
+                juce::AudioBuffer<float> out (2, (int) (6.0 * rate)), chunk (2, block);
+                juce::MidiBuffer midi;
+                const auto down = juce::String (typeName) == "Chord" ? 12 : 0;
+                for (int pos = 0; pos + block <= out.getNumSamples(); pos += block)
+                {
+                    midi.clear();
+                    for (int n = 0; n < 8; ++n)
+                    {
+                        const auto on = (int) (n * 0.375 * rate), off = on + (int) (0.3 * rate);
+                        if (on >= pos && on < pos + block) midi.addEvent (juce::MidiMessage::noteOn (1, line[n] - down, (juce::uint8) 105), on - pos);
+                        if (off >= pos && off < pos + block) midi.addEvent (juce::MidiMessage::noteOff (1, line[n] - down), off - pos);
+                    }
+                    chunk.clear();
+                    engine.processBlock (chunk, midi);
+                    for (int ch = 0; ch < 2; ++ch)
+                        out.copyFrom (ch, pos, chunk, ch, 0, block);
+                }
+                const auto file = folder.getChildFile (juce::String (genreName).removeCharacters (" ") + "_" + typeName + (old ? "_old_pingpong.wav" : "_new_centred.wav"));
+                juce::WavAudioFormat wav;
+                std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (new juce::FileOutputStream (file), rate, 2, 24, {}, 0));
+                if (writer != nullptr)
+                    writer->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
+                std::printf ("%s\n", file.getFileName().toRawUTF8());
+            }
+        FinishingChain::legacyPingPong = false;
         return 0;
     }
 
