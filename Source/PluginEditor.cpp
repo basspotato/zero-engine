@@ -2,6 +2,7 @@
 #include "Parameters.h"
 #include "Wavetable.h"
 #include "BinaryData.h"
+#include <numeric>
 #if ZERO_SPACE_IMAGES
  #include "SpaceImages.h"
 #endif
@@ -1303,6 +1304,126 @@ void SequencerGrid::mouseDoubleClick (const juce::MouseEvent& e)
 }
 
 //==============================================================================
+ArpScope::ArpScope (juce::AudioProcessorValueTreeState& state, std::function<int()> step, std::function<void (float*, int)> scope)
+    : playingStep (std::move (step)), copyScope (std::move (scope))
+{
+    for (int s = 0; s < steps; ++s)
+    {
+        on[(size_t) s] = state.getRawParameterValue (SeqIDs::on (s));
+        pitch[(size_t) s] = state.getRawParameterValue (SeqIDs::pitch (s));
+        accent[(size_t) s] = state.getRawParameterValue (SeqIDs::accent (s));
+    }
+    length = state.getRawParameterValue (ParamIDs::seqLength);
+    setInterceptsMouseClicks (false, false);
+    startTimerHz (60);
+}
+
+void ArpScope::timerCallback()
+{
+    if (! isShowing())
+        return;
+    // A new step that plays (on, not a rest) leaves a hit.
+    const auto now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+    const auto step = playingStep();
+    if (step != lastStep && step >= 0 && step < steps && on[(size_t) step]->load() > 0.5f)
+        hits.push_back ({ step, now, juce::jlimit (-1.0f, 1.0f, pitch[(size_t) step]->load() / 12.0f), accent[(size_t) step]->load() > 0.5f });
+    lastStep = step;
+    hits.erase (std::remove_if (hits.begin(), hits.end(), [now] (const Hit& h) { return now - h.start > 1.4; }), hits.end());
+
+    copyScope (samples.data(), scopeSamples);
+    float peak = 0.0f;
+    for (const auto v : samples)
+        peak = juce::jmax (peak, std::abs (v));
+    level += 0.2f * (peak - level);
+    repaint();
+}
+
+void ArpScope::paint (juce::Graphics& g)
+{
+    const auto box = getLocalBounds().toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (box, 4.0f);
+    auto area = box.reduced (6.0f, 6.0f);
+    const auto labels = area.removeFromBottom (12.0f);
+    const auto laneWidth = area.getWidth() / steps;
+    const auto active = juce::jlimit (1, steps, juce::roundToInt (length->load()));
+    const auto now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+
+    // Lanes: a faint line between steps (brighter every four), the steps past
+    // Seq Length dimmed, the playing step's lane lit.
+    for (int s = 0; s < steps; ++s)
+    {
+        const auto lane = juce::Rectangle<float> (area.getX() + s * laneWidth, area.getY(), laneWidth, area.getHeight());
+        if (s >= active)
+        {
+            g.setColour (Palette::panel.withAlpha (0.45f));
+            g.fillRect (lane);
+        }
+        if (s == lastStep)
+        {
+            g.setColour (Palette::accent.withAlpha (0.07f));
+            g.fillRect (lane);
+        }
+        if (s > 0)
+        {
+            g.setColour (Palette::panelEdge.withAlpha (s % 4 == 0 ? 0.7f : 0.3f));
+            g.drawVerticalLine (juce::roundToInt (lane.getX()), lane.getY(), lane.getBottom());
+        }
+        g.setColour ((s == lastStep ? Palette::accent : Palette::text).withAlpha (s < active ? 0.8f : 0.3f));
+        g.setFont (Fonts::mono (9.0f));
+        g.drawText (juce::String (s + 1), juce::Rectangle<float> (lane.getX(), labels.getY(), laneWidth, labels.getHeight()), juce::Justification::centred);
+    }
+
+    // Hits: a glow down the lane and a dot at the step's pitch, fading over
+    // about a second, so the steps just played leave a trail.
+    for (const auto& h : hits)
+    {
+        const auto age = (float) (now - h.start);
+        const auto fade = std::exp (-age / 0.32f) * (h.accented ? 1.0f : 0.7f);
+        const auto colour = h.accented ? Palette::orange : Palette::accent;
+        const auto lane = juce::Rectangle<float> (area.getX() + h.step * laneWidth, area.getY(), laneWidth, area.getHeight());
+        const auto y = area.getCentreY() - h.height * area.getHeight() * 0.38f;
+        juce::ColourGradient column (colour.withAlpha (0.35f * fade), lane.getCentreX(), y,
+                                     colour.withAlpha (0.0f), lane.getCentreX(), y + area.getHeight() * 0.5f, true);
+        g.setGradientFill (column);
+        g.fillRect (lane.reduced (1.0f, 0.0f));
+        const auto radius = laneWidth * (0.16f + 0.5f * (1.0f - std::exp (-age / 0.25f))); // a ring spreading out
+        g.setColour (colour.withAlpha (0.5f * fade));
+        g.drawEllipse (lane.getCentreX() - radius, y - radius, 2.0f * radius, 2.0f * radius, 1.5f);
+        g.setColour (colour.withAlpha (fade));
+        g.fillEllipse (lane.getCentreX() - 4.0f, y - 4.0f, 8.0f, 8.0f);
+    }
+
+    // The output on top: from a rising zero crossing so it stands still, scaled
+    // to the window (a quiet signal is lifted, but never more than 4x), with a
+    // wide faint pass under it for glow.
+    int startAt = 0;
+    for (int i = 1; i < scopeSamples / 2; ++i)
+        if (samples[(size_t) i - 1] < 0.0f && samples[(size_t) i] >= 0.0f)
+        {
+            startAt = i;
+            break;
+        }
+    const auto shown = scopeSamples - scopeSamples / 2;
+    const auto gain = 0.45f * area.getHeight() * juce::jmin (4.0f, 0.9f / juce::jmax (1.0e-3f, level));
+    juce::Path trace;
+    for (int i = 0; i < shown; i += 2)
+    {
+        const auto x = area.getX() + area.getWidth() * (float) i / (float) (shown - 1);
+        const auto y = area.getCentreY() - juce::jlimit (-area.getHeight() * 0.5f, area.getHeight() * 0.5f, samples[(size_t) (startAt + i)] * gain);
+        if (i == 0)
+            trace.startNewSubPath (x, y);
+        else
+            trace.lineTo (x, y);
+    }
+    const auto glow = juce::jlimit (0.3f, 1.0f, 0.3f + 2.0f * level);
+    g.setColour (Palette::accent.withAlpha (0.15f * glow));
+    g.strokePath (trace, juce::PathStrokeType (5.0f));
+    g.setColour (Palette::accent.withAlpha (0.85f * glow));
+    g.strokePath (trace, juce::PathStrokeType (1.4f));
+}
+
+//==============================================================================
 juce::Component* AdvancedPanel::Control::widget() const
 {
     if (knob != nullptr)   return knob.get();
@@ -1310,13 +1431,14 @@ juce::Component* AdvancedPanel::Control::widget() const
     return toggle.get();
 }
 
-AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::function<int()> playingStep)
-    : grid (std::make_unique<SequencerGrid> (state, std::move (playingStep)))
+AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::function<int()> playingStep, std::function<void (float*, int)> scope)
+    : grid (std::make_unique<SequencerGrid> (state, playingStep)),
+      arpScope (std::make_unique<ArpScope> (state, playingStep, std::move (scope)))
 {
     using namespace ParamIDs;
     using Ids = std::vector<const char*>;
     struct SectionSpec { const char* name; Ids ids; };
-    struct PageSpec { const char* name; std::vector<std::vector<SectionSpec>> rows; };
+    struct PageSpec { const char* name; std::vector<std::vector<SectionSpec>> rows; std::vector<int> weights {}; };
 
     const std::vector<PageSpec> layout {
         // Everything but the arp on one page, a row per stage: tone, voice,
@@ -1330,8 +1452,12 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
                              { "LFO",          { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } } },
                            { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
                              { "FINISH",       { ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
-        { "ARP",    { { { "ARPEGGIATOR",  { arpOn, arpLatch, arpMode, arpRate, arpOctaves, arpGate, seqLength } } },
-                      { { "STEP SEQUENCER  (rests, pitch and accents for every arp mode)", {} } } } },
+        // The pattern on top (the output and each step as it plays), the steps,
+        // then the arp's settings.
+        { "ARP",    { { { "PATTERN  (the output, and each step as it plays)", {} } },
+                      { { "STEP SEQUENCER  (rests, pitch and accents for every arp mode)", {} } },
+                      { { "ARPEGGIATOR",  { arpOn, arpLatch, arpMode, arpRate, arpOctaves, arpGate, seqLength } } } },
+                    { 9, 6, 5 } },
     };
 
     auto makeControl = [&] (const char* id) -> std::unique_ptr<Control>
@@ -1401,6 +1527,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
     {
         Page page;
         page.name = pageSpec.name;
+        page.rowWeights = pageSpec.weights;
         for (const auto& rowSpec : pageSpec.rows)
         {
             std::vector<Section> row;
@@ -1436,13 +1563,18 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
         pages.push_back (std::move (page));
     }
 
-    // The step grid draws its own section.
+    // The step grid and the pattern display draw their own sections.
     addChildComponent (grid.get());
+    addChildComponent (arpScope.get());
     for (auto& page : pages)
         for (auto& row : page.rows)
             for (auto& section : row)
+            {
                 if (section.name.startsWith ("STEP SEQUENCER"))
                     section.custom = grid.get();
+                if (section.name.startsWith ("PATTERN"))
+                    section.custom = arpScope.get();
+            }
 
     show (0);
 }
@@ -1530,11 +1662,15 @@ void AdvancedPanel::resized()
     auto area = getLocalBounds().withTrimmedTop (22).reduced (12, 10);
     auto& rows = pages[current].rows;
     const auto rowGap = 10, sectionGap = 10;
-    const auto rowHeight = (area.getHeight() - rowGap * ((int) rows.size() - 1)) / juce::jmax (1, (int) rows.size());
+    const auto& weights = pages[current].rowWeights;
+    const auto rowSpace = area.getHeight() - rowGap * ((int) rows.size() - 1);
+    const auto totalWeight = weights.size() == rows.size() ? std::accumulate (weights.begin(), weights.end(), 0) : (int) rows.size();
 
-    for (auto& row : rows)
+    for (size_t r = 0; r < rows.size(); ++r)
     {
-        auto rowArea = area.removeFromTop (rowHeight);
+        auto& row = rows[r];
+        const auto weight = weights.size() == rows.size() ? weights[r] : 1;
+        auto rowArea = area.removeFromTop (r + 1 == rows.size() ? area.getHeight() : rowSpace * weight / juce::jmax (1, totalWeight));
         area.removeFromTop (rowGap);
 
         int total = 0;
@@ -1583,7 +1719,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
       processor (p),
       display (p),
       levelMeter (p.getMeters()),
-      advancedPanel (p.state, [&p] { return p.getSequenceStep(); }),
+      advancedPanel (p.state, [&p] { return p.getSequenceStep(); }, [&p] (float* dest, int n) { p.copyScope (dest, n); }),
       keyboard (p)
 {
     setLookAndFeel (&lookAndFeel);

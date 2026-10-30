@@ -132,6 +132,31 @@ private:
     int dragStep = -1, dragStartPitch = 0;
 };
 
+// The arp page's display: the output waveform across 16 step lanes; each step
+// that plays leaves a hit in its lane (height by its pitch, brighter on an
+// accent) that fades over about a second, so a running pattern leaves a trail.
+class ArpScope : public juce::Component,
+                 private juce::Timer
+{
+public:
+    ArpScope (juce::AudioProcessorValueTreeState&, std::function<int()> playingStep, std::function<void (float*, int)> scope);
+    void paint (juce::Graphics&) override;
+
+private:
+    void timerCallback() override;
+
+    static constexpr int steps = 16, scopeSamples = 2048;
+    std::function<int()> playingStep;
+    std::function<void (float*, int)> copyScope;
+    std::array<std::atomic<float>*, steps> on {}, pitch {}, accent {};
+    std::atomic<float>* length = nullptr;
+    struct Hit { int step; double start; float height; bool accented; };
+    std::vector<Hit> hits;
+    int lastStep = -1;
+    std::vector<float> samples = std::vector<float> ((size_t) scopeSamples);
+    float level = 0.0f; // eased, for the trace's glow
+};
+
 // Every engine parameter in the console style: knobs for numbers, slim menus
 // for choices, toggles for switches. Three pages, each with bordered sections
 // arranged in rows (small sections share a row). Covers the panels between the
@@ -139,7 +164,7 @@ private:
 class AdvancedPanel : public juce::Component
 {
 public:
-    AdvancedPanel (juce::AudioProcessorValueTreeState&, std::function<int()> playingStep);
+    AdvancedPanel (juce::AudioProcessorValueTreeState&, std::function<int()> playingStep, std::function<void (float*, int)> scope);
     void paint (juce::Graphics&) override;
     void resized() override;
 
@@ -169,6 +194,7 @@ private:
     {
         juce::String name;
         std::vector<std::vector<Section>> rows; // sections side by side within a row
+        std::vector<int> rowWeights;            // the rows' shares of the height (empty: equal)
         std::unique_ptr<juce::TextButton> button;
     };
 
@@ -177,6 +203,7 @@ private:
     std::vector<Page> pages;
     size_t current = 0;
     std::unique_ptr<SequencerGrid> grid;
+    std::unique_ptr<ArpScope> arpScope;
 };
 
 // A small chevron button for stepping through Generate's history.
