@@ -1,6 +1,6 @@
 # Zero Engine
 
-A VST3 instrument that produces finished, release-ready electronic sounds (EDM, dubstep, techno, tech-house, trap, synthwave, plus DnB, pop, house, trance, future bass, hardstyle) out of the box. Personal studio tool, not for sale. UI: genre + type selectors, six macro knobs (Weight, Grit, Punch, Width, Motion, Air), a display (live wavetable / waveform / spectrum), an output meter, a Generate tesseract with history and favourites (MUTATE / MOOD / GENRE under it, and a heart and thumbs-down that teach Generate your taste), and an Advanced page with every parameter.
+A VST3 instrument that produces finished, release-ready electronic sounds (EDM, dubstep, techno, tech-house, trap, synthwave, plus DnB, pop, house, trance, future bass, hardstyle) out of the box. Personal studio tool, not for sale. UI: genre + type selectors, six macro knobs (Weight, Grit, Punch, Width, Motion, Air), a display (live wavetable / waveform / spectrum), Pan and Output knobs, an output meter, a Generate tesseract with history and favourites (MUTATE / MOOD / GENRE under it, and a heart and thumbs-down that teach Generate your taste), and an Advanced page with every parameter.
 
 Background and decisions: `reports/AI finished sound VST engine.md` (original research), `reports/Artist sound design targets.md` (per genre/type targets the profiles are built from), `Build notes.md` (what the owner wants to use), `research_notes/` (sources).
 
