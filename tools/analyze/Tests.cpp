@@ -308,6 +308,71 @@ namespace
         return problems;
     }
 
+    // Mode and Octaves: each gives its own order, and a change while keys are held
+    // takes effect at once (it used to wait for a new key).
+    juce::StringArray checkArpSettings()
+    {
+        // The first 8 notes of a held C E G (pressed E C G), switched to `later` after 4.
+        auto notesFor = [] (int mode, int octaves, int laterMode, int laterOctaves)
+        {
+            Arpeggiator arp;
+            arp.prepare (48000.0, 512);
+            Arpeggiator::Settings s;
+            s.on = true;
+            s.mode = mode;
+            s.octaves = octaves;
+            s.beatsPerStep = 0.25;
+            s.bpm = 120.0;
+            juce::MidiBuffer keys;
+            juce::Array<int> ons;
+            for (int block = 0; block < 128 && ons.size() < 8; ++block)
+            {
+                keys.clear();
+                if (block == 0)
+                    for (auto note : { 64, 60, 67 })
+                        keys.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+                if (ons.size() >= 4)
+                {
+                    s.mode = laterMode;
+                    s.octaves = laterOctaves;
+                }
+                for (const auto m : arp.process (keys, 512, s))
+                    if (m.getMessage().isNoteOn())
+                        ons.add (m.getMessage().getNoteNumber());
+            }
+            return ons;
+        };
+        auto text = [] (const juce::Array<int>& a)
+        {
+            juce::StringArray parts;
+            for (auto n : a)
+                parts.add (juce::String (n));
+            return parts.joinIntoString (" ");
+        };
+
+        juce::StringArray problems;
+        auto expect = [&] (const char* what, const juce::Array<int>& got, std::initializer_list<int> want)
+        {
+            if (got != juce::Array<int> (want))
+                problems.add (juce::String (what) + ": " + text (got));
+        };
+        using A = Arpeggiator;
+        expect ("up", notesFor (A::up, 1, A::up, 1), { 60, 64, 67, 60, 64, 67, 60, 64 });
+        expect ("down", notesFor (A::down, 1, A::down, 1), { 67, 64, 60, 67, 64, 60, 67, 64 });
+        expect ("up/down", notesFor (A::upDown, 1, A::upDown, 1), { 60, 64, 67, 64, 60, 64, 67, 64 });
+        expect ("as played", notesFor (A::asPlayed, 1, A::asPlayed, 1), { 64, 60, 67, 64, 60, 67, 64, 60 });
+        expect ("2 octaves", notesFor (A::up, 2, A::up, 2), { 60, 64, 67, 72, 76, 79, 60, 64 });
+        // Up for 4 notes (60 64 67 60), then Down over 2 octaves while held.
+        const auto changed = notesFor (A::up, 1, A::down, 2);
+        if (changed.size() < 8 || ! juce::Array<int> ({ 79, 76, 72, 67, 64, 60 }).contains (changed[4])
+            || juce::jmax (changed[4], changed[5], changed[6], changed[7]) < 72)
+            problems.add ("changed while held: " + text (changed));
+        const auto randomNotes = notesFor (A::random, 2, A::random, 2);
+        if (randomNotes == notesFor (A::up, 2, A::up, 2))
+            problems.add ("random played in order");
+        return problems;
+    }
+
     // Latch: the pattern keeps playing after the keys lift; a fresh key replaces it.
     juce::StringArray checkLatch()
     {
@@ -913,6 +978,17 @@ int runAllTests()
                 std::printf ("    %s\n", line.toRawUTF8());
             failures += report.size();
         }
+    }
+
+    std::printf ("Arp Mode and Octaves (also changed while held)... ");
+    if (const auto problems = checkArpSettings(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
     }
 
     std::printf ("Arpeggiator (order, timing, stop)... ");

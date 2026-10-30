@@ -60,6 +60,7 @@ private:
     std::array<bool, 128> keyDown {};          // keys physically held (latch keeps others in the pattern)
     int numDown = 0;
     bool wasLatched = false;
+    int builtMode = -1, builtOctaves = -1;     // the settings the pattern was built with
 
     std::array<int, maxHeld * 4> pattern {}; // the arp pattern, octaves included
     int sequenceLength = 0, step = -1, direction = 1, seqStep = -1;

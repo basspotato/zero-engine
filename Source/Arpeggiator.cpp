@@ -137,6 +137,8 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
                 pattern[(size_t) sequenceLength++] = pattern[(size_t) i];
         }
         direction = s.mode == random ? 0 : 1;
+        builtMode = s.mode;
+        builtOctaves = octaves;
         if (step >= sequenceLength)
             step = -1;
     };
@@ -145,7 +147,9 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
     auto events = midi.begin();
     for (int pos = 0; pos <= numSamples; ++pos)
     {
-        bool changed = pos == 0 && latchReleased; // rebuild the pattern without the dropped notes
+        // Rebuild without the dropped notes, or when Mode or Octaves changed under
+        // held keys (the pattern was only rebuilt on a key, so they seemed to do nothing).
+        bool changed = pos == 0 && (latchReleased || s.mode != builtMode || octaves != builtOctaves);
         while (events != midi.end() && (*events).samplePosition <= pos)
         {
             const auto message = (*events).getMessage();
