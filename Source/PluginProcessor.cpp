@@ -692,7 +692,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     {
         if (parent != nullptr)
         {
-            // Mutate: two big moves you hear (the owner couldn't hear nudges of the
+            // Mutate: three big moves you hear (the owner couldn't hear nudges of the
             // searched settings alone, even at +-25 %), then four small nudges.
             auto units = ReferenceMatch::unitsOf (*parent);
             for (int n = 0; n < 4; ++n)
@@ -703,8 +703,11 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             auto p = ReferenceMatch::withUnitsOf (*parent, units);
             auto either = [&] (float a, float b) { return random.nextBool() ? a : b; };
             constexpr int numMoves = 7;
-            const auto first = random.nextInt (numMoves), second = (first + 1 + random.nextInt (numMoves - 1)) % numMoves;
-            for (const auto move : { first, second })
+            std::vector<int> moves (numMoves); // three of them, all different
+            std::iota (moves.begin(), moves.end(), 0);
+            for (int k = 0; k < 3; ++k)
+                std::swap (moves[(size_t) k], moves[(size_t) (k + random.nextInt (numMoves - k))]);
+            for (const auto move : { moves[0], moves[1], moves[2] })
                 switch (move)
                 {
                     case 0: // another wavetable (not Sample, Match's)
@@ -796,7 +799,7 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     // "still the same kind of sound"), or a large value when it is near silent.
     // In Free the bounds are looser (twice the owner's spread, a wider brightness
     // range) and loudness is left to the profile's own trim.
-    auto strayOf = [&] (const SoundTraits& m) { return strayFrom (target, m, type, free); };
+    auto strayOf = [&] (const SoundTraits& m) { return strayFrom (target, m, type, free || parent != nullptr); }; // Mutate: the looser bounds, or it can't be heard
     // Size + interest + novelty (see above).
     // The owner's taste (TasteModel), once it has a few judgments: one draw of
     // it per click (Thompson sampling: unsure early, so clicks explore), capped,
@@ -858,15 +861,15 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
         if (parent != nullptr)
         {
             // Mutate stays in its sound's family but must be heard: the distance
-            // from it (as novelty measures it, in the owner's spreads) aims at 1.1
-            // (a fresh click lands about 1.3 away; nearer read as no change); size
+            // from it (as novelty measures it, in the owner's spreads) aims at 1.5
+            // (a fresh click lands about 1.2-1.3 away; the owner heard 1 as too subtle); size
             // counts a little, taste fully.
             float sum = 0.0f;
             for (int k = 0; k < SoundTraits::count; ++k)
                 if (k != centroid && k != level)
                     sum += juce::square ((a[(size_t) k] - d[(size_t) k]) / spreadOf (k));
             sum += juce::square (std::log2 (juce::jmax (20.0f, a[centroid]) / juce::jmax (20.0f, d[centroid])) / 0.8f);
-            return 0.3f * bigAndInteresting - 1.5f * std::abs (std::sqrt (sum) - 1.1f) + 1.5f * tasteOf (m);
+            return 0.3f * bigAndInteresting - 1.5f * std::abs (std::sqrt (sum) - 1.5f) + 1.5f * tasteOf (m);
         }
         return bigAndInteresting + 0.7f * novelty + 1.5f * tasteOf (m);
     };
