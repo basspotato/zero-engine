@@ -503,19 +503,74 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
                        s.size, s.size);
     }
 
-    // Two planets, drifting a few pixels over minutes: lit from the upper left.
-    auto planet = [&] (float x, float y, float radius, juce::Colour colour, float drift)
+    // Jupiter and Mars, drifting a few pixels over minutes, lit from the upper
+    // left and kept faint like the rest of the screen.
+    auto planet = [&] (float x, float y, float radius, float drift, float opacity, auto&& surface)
     {
         const auto centre = juce::Point<float> (screen.getX() + (x + 0.01f * std::sin (t * drift)) * screen.getWidth(),
                                                 screen.getY() + (y + 0.008f * std::cos (t * drift * 0.7f)) * screen.getHeight());
-        juce::ColourGradient lit (colour.withAlpha (0.38f), centre.x - radius * 0.4f, centre.y - radius * 0.4f,
-                                  colour.darker (0.8f).withAlpha (0.05f), centre.x + radius, centre.y + radius, true);
-        g.setGradientFill (lit);
-        g.fillEllipse (centre.x - radius, centre.y - radius, 2.0f * radius, 2.0f * radius);
+        const auto disc = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (centre);
+        g.beginTransparencyLayer (opacity);
+        {
+            juce::Graphics::ScopedSaveState clipped (g);
+            juce::Path round;
+            round.addEllipse (disc);
+            g.reduceClipRegion (round);
+            surface (disc);
+            // Night side: dark towards the lower right, a soft lit edge upper left.
+            juce::ColourGradient shade (juce::Colours::white.withAlpha (0.12f), centre.x - radius * 0.55f, centre.y - radius * 0.55f,
+                                        juce::Colours::black.withAlpha (0.85f), centre.x + radius * 0.9f, centre.y + radius * 0.9f, true);
+            shade.addColour (0.45, juce::Colours::transparentBlack);
+            g.setGradientFill (shade);
+            g.fillEllipse (disc);
+        }
+        g.endTransparencyLayer();
     };
+
     const auto h = screen.getHeight();
-    planet (0.13f, 0.28f, 0.075f * h, Palette::accent, 0.031f);
-    planet (0.86f, 0.70f, 0.045f * h, Palette::magenta, 0.023f);
+    planet (0.13f, 0.30f, 0.15f * h, 0.031f, 0.5f, [&] (juce::Rectangle<float> d)
+    {
+        // Jupiter: cream zones and rust-brown belts, the Great Red Spot below the middle.
+        const juce::Colour zone (0xffe8d6b4), belt (0xffb07a4f), darkBelt (0xff8c5a3a), pale (0xffd8bd92);
+        g.setColour (zone);
+        g.fillRect (d);
+        const std::array<std::tuple<float, float, juce::Colour>, 8> bands { {
+            { 0.06f, 0.08f, pale }, { 0.18f, 0.06f, belt }, { 0.30f, 0.05f, pale }, { 0.38f, 0.10f, darkBelt },
+            { 0.56f, 0.09f, belt }, { 0.70f, 0.04f, pale }, { 0.80f, 0.06f, belt }, { 0.92f, 0.08f, darkBelt } } };
+        for (const auto& [top, height, colour] : bands)
+        {
+            // Slightly wavy edges, so the belts read as cloud.
+            juce::Path band;
+            const auto y0 = d.getY() + top * d.getHeight(), y1 = y0 + height * d.getHeight();
+            band.startNewSubPath (d.getX(), y0);
+            for (int i = 1; i <= 12; ++i)
+                band.lineTo (d.getX() + d.getWidth() * (float) i / 12.0f, y0 + 0.012f * d.getHeight() * std::sin ((float) i * 1.7f + top * 20.0f));
+            for (int i = 12; i >= 0; --i)
+                band.lineTo (d.getX() + d.getWidth() * (float) i / 12.0f, y1 + 0.012f * d.getHeight() * std::sin ((float) i * 1.3f + top * 31.0f));
+            band.closeSubPath();
+            g.setColour (colour.withAlpha (0.85f));
+            g.fillPath (band);
+        }
+        const auto spot = juce::Rectangle<float> (0.24f * d.getWidth(), 0.13f * d.getHeight())
+                              .withCentre ({ d.getX() + 0.62f * d.getWidth(), d.getY() + 0.66f * d.getHeight() });
+        g.setColour (juce::Colour (0xfff2e2c4));
+        g.fillEllipse (spot.expanded (2.0f, 1.5f));
+        g.setColour (juce::Colour (0xffc0573a));
+        g.fillEllipse (spot);
+    });
+    planet (0.86f, 0.70f, 0.045f * h, 0.023f, 0.55f, [&] (juce::Rectangle<float> d)
+    {
+        // Mars: rust red, darker uplands, a white polar cap.
+        g.setColour (juce::Colour (0xffc1502e));
+        g.fillRect (d);
+        g.setColour (juce::Colour (0xff7e3020).withAlpha (0.7f));
+        constexpr std::array<std::array<float, 4>, 3> patches { { { 0.20f, 0.42f, 0.45f, 0.18f }, { 0.55f, 0.55f, 0.35f, 0.22f },
+                                                                  { 0.10f, 0.68f, 0.30f, 0.14f } } };
+        for (auto [px, py, pw, ph] : patches)
+            g.fillEllipse (d.getX() + px * d.getWidth(), d.getY() + py * d.getHeight(), pw * d.getWidth(), ph * d.getHeight());
+        g.setColour (juce::Colour (0xfff4ece6));
+        g.fillEllipse (d.getX() + 0.30f * d.getWidth(), d.getY() - 0.04f * d.getHeight(), 0.40f * d.getWidth(), 0.16f * d.getHeight());
+    });
 
     // Glowing nodes spread over the whole screen, drifting round the black hole
     // on wide oval orbits (the inner ones faster), each shimmering; faint oval
