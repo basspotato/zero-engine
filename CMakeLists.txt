@@ -66,7 +66,7 @@ juce_add_binary_data(ZeroEngineFonts SOURCES
     Resources/Fonts/BarlowCondensed-Bold.ttf
     Resources/Fonts/ShareTechMono-Regular.ttf)
 
-# Space pictures for the Generate screen (the owner's photos, kept out of git):
+# Space pictures for the Generate screen (the owner's photos, in git):
 # whatever is in Resources/Space is built in; without them the screen draws its
 # own planets.
 file(GLOB ZERO_SPACE_IMAGES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Space/*.jpg" "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Space/*.png")
