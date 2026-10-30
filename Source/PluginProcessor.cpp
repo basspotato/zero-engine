@@ -730,6 +730,8 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             for (size_t k = 0; k < count; ++k)
                 std::swap (moves[k], moves[k + (size_t) random.nextInt ((int) (moves.size() - k))]);
             moves.resize (count);
+            if (type == 3 && std::find (moves.begin(), moves.end(), (int) table) == moves.end())
+                moves[0] = table; // a pad always changes its wavetable: through the wash and OTT the rest went unheard
             for (const auto move : moves)
                 switch (move)
                 {
@@ -901,7 +903,9 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
                 if (k != centroid && k != level)
                     sum += juce::square ((a[(size_t) k] - d[(size_t) k]) / spreadOf (k));
             sum += juce::square (std::log2 (juce::jmax (20.0f, a[centroid]) / juce::jmax (20.0f, d[centroid])) / 0.8f);
-            return 0.3f * bigAndInteresting - 1.5f * std::abs (std::sqrt (sum) - 1.5f) + 1.5f * tasteOf (m);
+            // Under 0.8 costs steeply on top: a near-copy wins only when nothing else fits.
+            const auto distance = std::sqrt (sum);
+            return 0.3f * bigAndInteresting - 1.5f * std::abs (distance - 1.5f) - 4.0f * juce::jmax (0.0f, 0.8f - distance) + 1.5f * tasteOf (m);
         }
         return bigAndInteresting + 0.7f * novelty + 1.5f * tasteOf (m);
     };

@@ -647,7 +647,12 @@ int main (int argc, char* argv[])
         // owner's spreads), against how far a fresh Generate click lands.
         ZeroEngineProcessor engine;
         auto* type = engine.state.getParameter (ParamIDs::type);
-        type->setValueNotifyingHost (type->convertTo0to1 (1.0f)); // Lead
+        type->setValueNotifyingHost (type->convertTo0to1 (args.size() > 2 ? (float) typeNames.indexOf (args[2]) : 1.0f)); // Lead unless given
+        if (args.size() > 2)
+        {
+            auto* genre = engine.state.getParameter (ParamIDs::genre);
+            genre->setValueNotifyingHost (genre->convertTo0to1 ((float) genreNames.indexOf (args[1].replace ("_", " "))));
+        }
         engine.syncProfile();
         auto distance = [] (const TasteModel::Features& a, const TasteModel::Features& b)
         {
