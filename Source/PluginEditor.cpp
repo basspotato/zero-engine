@@ -1765,6 +1765,8 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     setWantsKeyboardFocus (true);
 
     setUpMacro (outputKnob, ParamIDs::output, "Output");
+    setUpMacro (panKnob, ParamIDs::pan, "Pan");
+    panKnob.knob.setDoubleClickReturnValue (true, 0.0); // double-click: back to centre
     // Clones of the Advanced page's amp envelope knobs: the same parameters, on the main page.
     {
         const std::pair<const char*, const char*> adsr[] { { ParamIDs::ampAttack, "Attack" }, { ParamIDs::ampDecay, "Decay" },
@@ -2176,18 +2178,22 @@ void ZeroEngineEditor::resized()
     auto outputArea = top.removeFromRight (104);
     outputKnob.label.setBounds (outputArea.removeFromLeft (60));
     outputKnob.knob.setBounds (outputArea);
-    top.removeFromRight (12);
+    top.removeFromRight (6);
+    auto panArea = top.removeFromRight (78);
+    panKnob.label.setBounds (panArea.removeFromLeft (34));
+    panKnob.knob.setBounds (panArea);
+    top.removeFromRight (10);
     advancedButton.setBounds (top.removeFromRight (74).withSizeKeepingCentre (74, 22));
     top.removeFromRight (4);
     mainButton.setBounds (top.removeFromRight (50).withSizeKeepingCentre (50, 22));
     top.removeFromRight (8);
     // Each menu sits between its back / forward arrows.
     typeNext.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
-    typeBox.setBounds (top.removeFromRight (112).withSizeKeepingCentre (112, 22));
+    typeBox.setBounds (top.removeFromRight (100).withSizeKeepingCentre (100, 22));
     typePrev.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
     top.removeFromRight (8);
     genreNext.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
-    genreBox.setBounds (top.removeFromRight (130).withSizeKeepingCentre (130, 22));
+    genreBox.setBounds (top.removeFromRight (112).withSizeKeepingCentre (112, 22));
     genrePrev.setBounds (top.removeFromRight (16).withSizeKeepingCentre (16, 22));
 
     area.removeFromTop (10);

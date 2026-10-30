@@ -15,6 +15,7 @@ namespace ParamIDs
     inline constexpr auto genre  = "genre";
     inline constexpr auto type   = "type";
     inline constexpr auto output = "output";
+    inline constexpr auto pan    = "pan";
 
     // Engine parameters (set by profiles later; exposed in the dev panel for now).
     inline constexpr auto waveTable = "waveTable";
@@ -140,6 +141,13 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::type, 1 },  "Type",  typeNames, 0));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::output, 1 }, "Output",
                                                        NormalisableRange<float> (-24.0f, 6.0f), 0.0f));
+    // Pan: where the finished sound sits, left (-1) to right (+1); the far side eases out.
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::pan, 1 }, "Pan", NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
+                                                       AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+                                                       {
+                                                           const auto amount = juce::roundToInt (std::abs (v) * 100.0f);
+                                                           return amount == 0 ? juce::String ("C") : (v < 0.0f ? "L " : "R ") + juce::String (amount);
+                                                       })));
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::waveTable, 1 }, "Wave Table", waveTableNames, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::waveTableB, 1 }, "Wave Table B", waveTableNames, 1));

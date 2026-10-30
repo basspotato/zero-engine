@@ -86,6 +86,7 @@ void FinishingChain::prepare (double fs, int maxBlockSize, int numChannels)
     bias.reset (fs * 2.0, 0.02);
     sideGain.reset (fs, 0.02);
     outputGain.reset (fs, 0.02);
+    panPosition.reset (fs, 0.02);
     dcCoeff = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / fs);
     rmsCoeff = coeffFor (0.3, fs);
 
@@ -204,6 +205,7 @@ void FinishingChain::process (juce::AudioBuffer<float>& buffer, const FinishingS
     reverbParams.width = 1.0f;
     reverb.setParameters (reverbParams);
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (s.outputDb));
+    panPosition.setTargetValue (juce::jlimit (-1.0f, 1.0f, s.pan));
 
     if (s.monoFreq != lastMonoFreq)
     {
@@ -357,7 +359,10 @@ void FinishingChain::space (juce::AudioBuffer<float>& buffer, int numSamples, co
         }
     }
 
-    // Ping-pong: the input enters the left line, each line feeds the other.
+    // Cross-fed stereo delay: each side enters its own line and each line feeds
+    // the other, so a stereo sound's echoes trade sides each repeat while a
+    // centred one echoes in the centre (the old ping-pong fed the left line only:
+    // every first echo came from the left and the owner heard sounds lean left).
     // Reverb runs on the same send afterwards, so it isn't fed the echoes twice.
     for (int i = 0; i < numSamples; ++i)
     {
@@ -376,8 +381,9 @@ void FinishingChain::space (juce::AudioBuffer<float>& buffer, int numSamples, co
         fbLpState[0] = outR + fbLpCoeff * (fbLpState[0] - outR);
         fbLpState[1] = outL + fbLpCoeff * (fbLpState[1] - outL);
 
-        lineL[delayWrite] = 0.5f * (sendL[i] + sendR[i]) + feedback * fbLpState[0];
-        lineR[delayWrite] = feedback * fbLpState[1];
+        constexpr auto entry = 0.7071f; // two lines in: the echoes as loud in all as the one-line ping-pong's
+        lineL[delayWrite] = entry * sendL[i] + feedback * fbLpState[0];
+        lineR[delayWrite] = entry * sendR[i] + feedback * fbLpState[1];
         delayWrite = (delayWrite + 1) % lineLength;
 
         const auto mix = delayMix.getNextValue();
@@ -537,6 +543,11 @@ void FinishingChain::clipAndGain (juce::AudioBuffer<float>& buffer, int numSampl
     for (int i = 0; i < numSamples; ++i)
     {
         const auto gain = outputGain.getNextValue();
+        // Pan as a balance: the side it moves away from eases out (cos law), the
+        // other stays at full level, so centre is unchanged.
+        const auto p = panPosition.getNextValue();
+        const float panGain[2] { p > 0.0f ? std::cos (p * juce::MathConstants<float>::halfPi) : 1.0f,
+                                 p < 0.0f ? std::cos (-p * juce::MathConstants<float>::halfPi) : 1.0f };
         auto square = 0.0f;
 
         for (int ch = 0; ch < numCh; ++ch)
@@ -551,7 +562,7 @@ void FinishingChain::clipAndGain (juce::AudioBuffer<float>& buffer, int numSampl
                 clipPeakDb = juce::jmax (clipPeakDb, juce::Decibels::gainToDecibels (ax / std::abs (x)));
             }
 
-            const auto y = x * gain;
+            const auto y = x * gain * (numCh > 1 ? panGain[juce::jmin (ch, 1)] : 1.0f);
             buffer.setSample (ch, i, y);
             square += y * y;
             outPeak = juce::jmax (outPeak, std::abs (y));

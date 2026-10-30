@@ -64,7 +64,7 @@ namespace Moods
                 p.ampSustain = between (0.7f, 1.0f);
                 p.ampRelease = between (1.5f, 3.0f);
                 p.filterMode = (float) pick ({ 0, 1 });
-                p.filterCutoff = logBetween (1500.0f, 5000.0f);
+                p.filterCutoff = logBetween (2500.0f, 7000.0f); // a little more top (owner)
                 p.filterRes = between (0.0f, 0.2f);
                 p.filterEnv = between (0.0f, 1.0f);
                 p.lfoRate = logBetween (0.1f, 0.6f);
@@ -75,7 +75,7 @@ namespace Moods
                 p.delayMix = between (0.0f, 0.2f);
                 p.width = between (0.5f, 0.8f);
                 p.grit = between (0.0f, 0.15f);
-                p.air = between (0.4f, 0.7f);
+                p.air = between (0.5f, 0.75f);
                 p.motion = between (0.3f, 0.6f);
                 p.tilt = between (-2.0f, 1.0f);
                 break;
@@ -138,6 +138,7 @@ namespace Moods
                 p.air = between (0.2f, 0.5f);
                 p.motion = between (0.1f, 0.3f);
                 p.tilt = between (-3.0f, 0.0f);
+                p.weight = between (0.45f, 0.75f); // weight in 80-300 Hz (owner)
                 break;
 
             case glassyBell:
@@ -152,7 +153,7 @@ namespace Moods
                 p.ampSustain = between (0.0f, 0.2f);
                 p.ampRelease = between (0.8f, 2.0f);
                 p.filterMode = 0.0f;
-                p.filterCutoff = logBetween (3500.0f, 9000.0f); // softer top: the owner found bells too much
+                p.filterCutoff = logBetween (5000.0f, 11000.0f); // between the first (too much) and the second (glass lost)
                 p.filterRes = between (0.0f, 0.15f);
                 p.filterEnv = between (0.0f, 1.0f);
                 p.lfoRate = logBetween (0.2f, 1.0f);
@@ -164,7 +165,7 @@ namespace Moods
                 p.delayFeedback = between (0.2f, 0.35f);
                 p.width = between (0.4f, 0.7f);
                 p.grit = 0.0f;
-                p.air = between (0.3f, 0.55f);
+                p.air = between (0.4f, 0.65f);
                 p.motion = between (0.1f, 0.3f);
                 p.tilt = between (-1.0f, 1.0f);
                 break;
@@ -202,14 +203,14 @@ namespace Moods
                 p.waveTableB = (float) pick ({ jupiter, analog, choir });
                 p.tableMix = between (0.1f, 0.4f);
                 p.wavePos = between (0.2f, 0.7f);
-                p.unison = (float) (3 + random.nextInt (4));
-                p.detune = between (0.1f, 0.25f);
+                p.unison = (float) (5 + random.nextInt (3)); // big: the owner heard the first leads as weak
+                p.detune = between (0.18f, 0.3f);
                 p.ampAttack = logBetween (0.005f, 0.06f);
                 p.ampDecay = between (0.6f, 1.5f);
                 p.ampSustain = between (0.7f, 0.95f);
                 p.ampRelease = between (0.4f, 1.2f);
                 p.filterMode = 0.0f;
-                p.filterCutoff = logBetween (1800.0f, 5500.0f);
+                p.filterCutoff = logBetween (3500.0f, 9000.0f);
                 p.filterRes = between (0.05f, 0.25f);
                 p.filterEnv = between (0.3f, 1.2f);
                 p.modDecay = between (0.2f, 0.6f);
@@ -220,11 +221,13 @@ namespace Moods
                 p.reverbSize = between (0.6f, 0.9f);
                 p.delayMix = between (0.15f, 0.35f);
                 p.delayFeedback = between (0.25f, 0.45f);
-                p.width = between (0.4f, 0.7f);
-                p.grit = between (0.0f, 0.15f);
-                p.air = between (0.3f, 0.6f);
+                p.width = between (0.6f, 0.85f);
+                p.grit = between (0.05f, 0.2f);
+                p.air = between (0.5f, 0.8f);
                 p.motion = between (0.2f, 0.4f);
-                p.tilt = between (-2.0f, 0.5f);
+                p.tilt = between (-0.5f, 1.5f);
+                p.playMode = 2.0f; // legato: notes glide into each other
+                p.glide = between (0.04f, 0.12f);
                 break;
 
             case deepBass: // round and warm: little reverb, no delay, narrow
@@ -239,7 +242,9 @@ namespace Moods
                 p.ampSustain = between (0.6f, 0.9f);
                 p.ampRelease = between (0.1f, 0.3f);
                 p.filterMode = 0.0f;
-                p.filterCutoff = logBetween (250.0f, 1200.0f);
+                p.filterCutoff = logBetween (150.0f, 600.0f); // deeper: the owner heard a regular bass
+                p.subOn = 1.0f;
+                p.weight = between (0.6f, 0.9f);
                 p.filterRes = between (0.1f, 0.35f);
                 p.filterEnv = between (0.5f, 2.0f);
                 p.modDecay = between (0.08f, 0.35f);

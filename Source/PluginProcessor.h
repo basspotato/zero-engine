@@ -223,7 +223,7 @@ public:
     // Moods score warmth, body, smoothness and calm instead of size: darker than
     // the owner's sounds of the type, more body and partials, clean (clarity, no
     // noise), width near theirs, and no fast movement.
-    static float moodScore (const SoundTraits& target, const SoundTraits& m, int type);
+    static float moodScore (const SoundTraits& target, const SoundTraits& m, int type, int mood);
 private:
 public:
     static SoundTraits measureForTools (ZeroEngineProcessor& engine, int genre, int type, const Profile& p) { return measureProfile (engine, genre, type, p); }
@@ -308,6 +308,7 @@ private:
     std::atomic<float>& air;
     std::atomic<float>& width;
     std::atomic<float>& output;
+    std::atomic<float>& pan;
     std::atomic<float>& levelTrim;
     std::atomic<float>& subSplit;
     std::atomic<float>& subOn;

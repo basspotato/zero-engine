@@ -21,6 +21,7 @@ struct FinishingSettings
     float monoFreq  = 120.0f;
     float sideGain  = 1.0f; // side level above monoFreq
     float outputDb  = 0.0f;
+    float pan       = 0.0f; // -1 left .. +1 right, after everything
     float midHighPassHz = 120.0f; // used when a separate sub is passed to process()
 };
 
@@ -93,7 +94,7 @@ private:
 
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
     SpectralCompressor spectral;
-    juce::SmoothedValue<float> drive, bias, sideGain, outputGain;
+    juce::SmoothedValue<float> drive, bias, sideGain, outputGain, panPosition;
     juce::SmoothedValue<float> ottDepth; // glides, so turning the knob doesn't crackle
     juce::SmoothedValue<float> tiltSmooth, airSmooth; // dB, likewise
     float dcState[2] {}, dcPrev[2] {}, dcCoeff = 0.999f;

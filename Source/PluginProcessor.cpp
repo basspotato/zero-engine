@@ -21,6 +21,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
       air (*state.getRawParameterValue (ParamIDs::air)),
       width (*state.getRawParameterValue (ParamIDs::width)),
       output (*state.getRawParameterValue (ParamIDs::output)),
+      pan (*state.getRawParameterValue (ParamIDs::pan)),
       levelTrim (*state.getRawParameterValue (ParamIDs::levelTrim)),
       subSplit (*state.getRawParameterValue (ParamIDs::subSplit)),
       subOn (*state.getRawParameterValue (ParamIDs::subOn)),
@@ -564,7 +565,7 @@ float ZeroEngineProcessor::crushedOf (const SoundTraits& m, int type)
     return juce::jlimit (0.0f, 3.0f, (floor - m.crestDb) / 1.0f);
 }
 
-float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTraits& m, int type)
+float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTraits& m, int type, int mood)
 {
     // Warm: darker than the target (octaves), more body, partials; clean: the
     // energy on the notes' harmonics and no noise; width near the target's
@@ -575,7 +576,12 @@ float ZeroEngineProcessor::moodScore (const SoundTraits& target, const SoundTrai
     auto z = [&] (int k) { return (a[(size_t) k] - d[(size_t) k]) / juce::jmax (1.0e-3f, guide.spread[(size_t) k]); };
     auto capped = [] (float v) { return juce::jlimit (-2.0f, 1.5f, v); };
     enum { level, side, centroid, bass, body, spread, crest, movement, richness };
-    const auto warmth = capped (-std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) / 0.8f);
+    // Darker counts only where the mood is warm: in full for keys, textures and
+    // the deep bass, half for pads, drones and plucks, not at all for bells (the
+    // owner heard them lose their glass), so nothing is pulled dull.
+    constexpr float warmthByMood[Moods::count] { 0.5f, 0.5f, 1.0f, 0.0f, 1.0f, 0.5f, 0.0f, 1.0f };
+    const auto warmth = warmthByMood[(size_t) juce::jlimit (0, Moods::count - 1, mood)]
+                      * capped (-std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) / 0.8f);
     // Harsh: more than half an octave brighter than the target costs on top.
     const auto harsh = juce::jmin (3.0f, 1.5f * juce::jmax (0.0f, std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) - 0.5f));
     const auto clean = capped (4.0f * (m.clarity - 0.85f)) - capped (20.0f * m.flatness);
@@ -718,9 +724,13 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             std::vector<int> moves = type == 0 ? std::vector<int> { table, position, filter, movement, drive }
                                    : type == 3 ? std::vector<int> { table, position, filter, movement, voices, drive }
                                                : std::vector<int> { table, position, filter, envelope, voices, movement, space, drive };
-            for (size_t k = 0; k < 3; ++k) // three of them, all different
+            // Three of them, all different; four for pads and plucks (the owner still
+            // heard three as too close there).
+            const auto count = (size_t) (type == 3 || type == 4 ? 4 : 3);
+            for (size_t k = 0; k < count; ++k)
                 std::swap (moves[k], moves[k + (size_t) random.nextInt ((int) (moves.size() - k))]);
-            for (const auto move : { moves[0], moves[1], moves[2] })
+            moves.resize (count);
+            for (const auto move : moves)
                 switch (move)
                 {
                     case table: // another wavetable (not Sample, Match's)
@@ -863,7 +873,9 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
     auto scoreOf = [&] (const SoundTraits& m, bool print = false)
     {
         const auto a = m.asArray(), d = target.asArray();
-        const auto bigAndInteresting = mood >= 0 ? moodScore (target, m, type) : sizeAndInterest (target, m, type);
+        // A soaring lead is scored on size like Genre mode (scored warm and calm it came out weak).
+        const auto bigAndInteresting = mood == Moods::soaringLead ? sizeAndInterest (target, m, type)
+                                     : mood >= 0 ? moodScore (target, m, type, mood) : sizeAndInterest (target, m, type);
         auto novelty = 3.0f;
         for (const auto& r : recentGenerated)
         {
@@ -1239,6 +1251,7 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
     settings.outputDb = output.load() + levelTrim.load();
+    settings.pan = pan.load();
 
     const auto beats = delayTimeBeats[juce::jlimit (0, (int) std::size (delayTimeBeats) - 1, (int) delayTime.load())];
     settings.delaySeconds  = (float) (beats * 60.0 / bpm);
