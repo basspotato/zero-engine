@@ -532,9 +532,11 @@ float ZeroEngineProcessor::sizeAndInterest (const SoundTraits& target, const Sou
 {
     // Each trait's gain over the target (the designed sound, or the owner's
     // sounds in any genre), in spreads of the owner's sounds of this type,
-    // capped at 1.5 (no reward for extremes) and -2. Size: wider, more body,
-    // denser; interest: more movement (half weight: wobble and beating earn it
-    // too easily) and more partials.
+    // capped at 1.5 (no reward for extremes) and -2. Size: wider (half weight),
+    // more body, denser; interest: more partials. In the owner's A/B rounds 2
+    // and 3 (23 pairs) the sound they chose was no wider (11 of 23) and moved
+    // less (15 of 23) than the one passed over, so width counts half and
+    // movement not at all.
     const auto& guide = GenerateTargets::byType[(size_t) juce::jlimit (0, 5, type)];
     const auto a = m.asArray(), d = target.asArray();
     auto gain = [&] (int k, bool lowerIsMore)
@@ -543,8 +545,8 @@ float ZeroEngineProcessor::sizeAndInterest (const SoundTraits& target, const Sou
         return juce::jlimit (-2.0f, 1.5f, lowerIsMore ? -z : z);
     };
     enum { level, side, centroid, bass, body, spread, crest, movement, richness };
-    const auto big = gain (side, false) + 0.5f * gain (body, false) + 0.5f * gain (crest, true);
-    const auto interest = 0.5f * gain (movement, false) + gain (richness, false);
+    const auto big = 0.5f * gain (side, false) + 0.5f * gain (body, false) + 0.5f * gain (crest, true);
+    const auto interest = gain (richness, false);
     // Harsh: more than half an octave brighter than the target costs (the owner
     // heard harshness as the main fault in listening tests).
     const auto harsh = juce::jmin (3.0f, 1.5f * juce::jmax (0.0f, std::log2 (juce::jmax (20.0f, m.centroidHz) / juce::jmax (20.0f, target.centroidHz)) - 0.5f));

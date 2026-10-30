@@ -819,6 +819,28 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "traits" && args.size() >= 2)
+    {
+        // SoundTraits (as Generate measures them, no notes) of every WAV in a folder, as CSV.
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::printf ("file,level,side,centroid,bass,body,spread,crest,movement,richness\n");
+        for (const auto& file : juce::File::getCurrentWorkingDirectory().getChildFile (args[1]).findChildFiles (juce::File::findFiles, false, "*.wav"))
+        {
+            std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+            if (reader == nullptr)
+                continue;
+            juce::AudioBuffer<float> audio (2, (int) reader->lengthInSamples);
+            reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
+            const auto t = SoundTraits::of (audio, reader->sampleRate);
+            std::printf ("%s", file.getFileName().toRawUTF8());
+            for (const auto v : t.asArray())
+                std::printf (",%.3f", v);
+            std::printf ("\n");
+        }
+        return 0;
+    }
+
     if (command == "crushcheck")
     {
         // Generate picks squashed into the clipper: per profile, two clicks; a pick
