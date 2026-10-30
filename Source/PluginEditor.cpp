@@ -1188,12 +1188,14 @@ juce::Rectangle<float> SequencerGrid::cell (int step, Row row) const
     const auto x = area.getX() + (float) step * columnWidth + (float) (step / 4) * groupGap;
     const auto column = juce::Rectangle<float> (x, area.getY(), columnWidth, area.getHeight()).reduced (2.0f, 0.0f);
 
-    const auto padHeight = juce::jmin (column.getWidth(), area.getHeight() * 0.45f);
+    // Pad on top, the pitch slider filling the middle, the accent dot below.
+    const auto padHeight = juce::jmin (column.getWidth(), area.getHeight() * 0.3f);
+    const auto accentHeight = 14.0f, gap = 6.0f;
     switch (row)
     {
         case padRow:    return column.withHeight (padHeight);
-        case pitchRow:  return column.withY (column.getY() + padHeight + 6.0f).withHeight (22.0f);
-        case accentRow: return column.withY (column.getY() + padHeight + 34.0f).withHeight (14.0f);
+        case pitchRow:  return column.withY (column.getY() + padHeight + gap).withBottom (column.getBottom() - accentHeight - gap);
+        case accentRow: return column.withTop (column.getBottom() - accentHeight);
         default:        return {};
     }
 }
@@ -1239,24 +1241,33 @@ void SequencerGrid::paint (juce::Graphics& g)
             g.drawText (juce::String (s + 1), pad.withHeight (12.0f).translated (3.0f, 2.0f), juce::Justification::topLeft);
         }
 
-        // Pitch: drag up or down.
+        // Pitch: a vertical slider, -12 at the bottom to +12 at the top, filled
+        // solid blue from the centre line to the value; the value written on it.
         auto box = cell (s, pitchRow);
         g.setColour (Palette::screen.withAlpha (0.8f));
         g.fillRoundedRectangle (box, 3.0f);
-        g.setColour ((pitch[s] == 0 ? Palette::text.withAlpha (0.45f) : Palette::accent).withMultipliedAlpha (dim));
-        g.setFont (Fonts::mono (10.5f));
-        g.drawText (pitch[s] > 0 ? "+" + juce::String (pitch[s]) : juce::String (pitch[s]), box, juce::Justification::centred);
+        const auto centreY = box.getCentreY();
+        const auto valueY = centreY - (float) pitch[s] / 12.0f * (box.getHeight() * 0.5f - 2.0f);
+        if (pitch[s] != 0)
+        {
+            const auto fill = juce::Rectangle<float> (box.getX() + 3.0f, juce::jmin (centreY, valueY), box.getWidth() - 6.0f, std::abs (valueY - centreY));
+            g.setColour (Palette::accent.withMultipliedAlpha (0.9f * dim));
+            g.fillRoundedRectangle (fill, 2.0f);
+        }
+        g.setColour (Palette::panelEdge.withMultipliedAlpha (dim)); // the zero line
+        g.drawHorizontalLine (juce::roundToInt (centreY), box.getX() + 2.0f, box.getRight() - 2.0f);
+        g.setColour (Palette::accent.brighter (0.4f).withMultipliedAlpha (dim)); // the handle
+        g.fillRoundedRectangle (juce::Rectangle<float> (box.getX() + 2.0f, valueY - 1.5f, box.getWidth() - 4.0f, 3.0f), 1.5f);
+        g.setColour ((pitch[s] == 0 ? Palette::text.withAlpha (0.45f) : Palette::text).withMultipliedAlpha (dim));
+        g.setFont (Fonts::mono (10.0f));
+        g.drawText (pitch[s] > 0 ? "+" + juce::String (pitch[s]) : juce::String (pitch[s]),
+                    box.withHeight (14.0f).withY (pitch[s] >= 0 ? box.getBottom() - 15.0f : box.getY() + 1.0f), juce::Justification::centred);
 
         // Accent dot.
         const auto dot = juce::Rectangle<float> (8.0f, 8.0f).withCentre (cell (s, accentRow).getCentre());
         g.setColour ((accent[s] ? Palette::yellow : Palette::track.brighter (0.4f)).withMultipliedAlpha (dim));
         g.fillEllipse (dot);
     }
-
-    g.setColour (Palette::text.withAlpha (0.4f));
-    g.setFont (Fonts::ui (9.0f, true, 0.06f));
-    const auto legend = cell (0, accentRow).withX (0.0f).withWidth ((float) getWidth()).translated (0.0f, 16.0f);
-    g.drawText ("PAD: ON / OFF    PITCH: DRAG, DOUBLE-CLICK = 0    DOT: ACCENT", legend, juce::Justification::centredLeft);
 }
 
 
@@ -1274,9 +1285,10 @@ void SequencerGrid::mouseDown (const juce::MouseEvent& e)
         accentAttachments[s]->setValueAsCompleteGesture (accent[s] ? 0.0f : 1.0f);
     else if (row == pitchRow)
     {
+        // Click or drag on the slider: the value where the mouse is.
         dragStep = s;
-        dragStartPitch = pitch[s];
         pitchAttachments[s]->beginGesture();
+        mouseDrag (e);
     }
 }
 
@@ -1284,7 +1296,8 @@ void SequencerGrid::mouseDrag (const juce::MouseEvent& e)
 {
     if (dragStep < 0)
         return;
-    const auto semitones = juce::jlimit (-12, 12, dragStartPitch - e.getDistanceFromDragStartY() / 6);
+    const auto box = cell (dragStep, pitchRow);
+    const auto semitones = juce::jlimit (-12, 12, juce::roundToInt ((box.getCentreY() - e.position.y) / (box.getHeight() * 0.5f - 2.0f) * 12.0f));
     pitchAttachments[dragStep]->setValueAsPartOfGesture ((float) semitones);
 }
 
@@ -1550,7 +1563,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
         { "ARP",    { { { "PATTERN  (the output, and each step as it plays)", {} } },
                       { { "STEP SEQUENCER  (rests, pitch and accents for every arp mode)", {} } },
                       { { "ARPEGGIATOR",  { arpOn, arpLatch, arpMode, arpRate, arpOctaves, arpGate, seqLength } } } },
-                    { 9, 6, 5 } },
+                    { 45, 32, 23 } }, // the arp settings' border about 12 px lower than at 9 : 6 : 5
     };
 
     auto makeControl = [&] (const char* id) -> std::unique_ptr<Control>
@@ -1719,14 +1732,17 @@ void AdvancedPanel::paint (juce::Graphics& g)
             g.setColour (Palette::panelEdge);
             g.drawRoundedRectangle (box.reduced (0.5f), 5.0f, 1.0f);
 
-            const auto led = juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ box.getX() + 12.0f, box.getY() + 11.0f });
-            g.setColour (Palette::accent.withAlpha (0.25f));
-            g.fillEllipse (led.expanded (2.5f));
-            g.setColour (Palette::accent);
-            g.fillEllipse (led);
-            g.setFont (Fonts::ui (10.5f, true, 0.08f));
-            g.setColour (Palette::orange);
-            g.drawText (section.name, box.withHeight (22.0f).withTrimmedLeft (22.0f), juce::Justification::centredLeft);
+            if (section.custom == nullptr) // the pattern display and the step grid speak for themselves: no title
+            {
+                const auto led = juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ box.getX() + 12.0f, box.getY() + 11.0f });
+                g.setColour (Palette::accent.withAlpha (0.25f));
+                g.fillEllipse (led.expanded (2.5f));
+                g.setColour (Palette::accent);
+                g.fillEllipse (led);
+                g.setFont (Fonts::ui (10.5f, true, 0.08f));
+                g.setColour (Palette::orange);
+                g.drawText (section.name, box.withHeight (22.0f).withTrimmedLeft (22.0f), juce::Justification::centredLeft);
+            }
 
             // Parameter names above each control.
             g.setFont (Fonts::ui (9.5f, true, 0.05f));
@@ -1778,7 +1794,7 @@ void AdvancedPanel::resized()
                                                    : usable * juce::jmax (1, (int) section.controls.size()) / total;
             section.bounds = rowArea.removeFromLeft (width);
             if (section.custom != nullptr)
-                section.custom->setBounds (section.bounds.withTrimmedTop (22).reduced (8, 6));
+                section.custom->setBounds (section.bounds.reduced (8, 8)); // no title strip
             rowArea.removeFromLeft (sectionGap);
 
             // Controls in one line under the section title, a name above each.

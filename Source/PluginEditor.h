@@ -83,7 +83,7 @@ private:
     std::vector<float> spectrumDb = std::vector<float> ((size_t) fftSize / 2, -100.0f);
 };
 
-// The 16-step sequencer: per step a lit on/off pad, a pitch you drag up or down
+// The 16-step sequencer: per step a lit on/off pad, a vertical pitch slider
 // (double-click for 0) and an accent dot; steps past Seq Length are dimmed and
 // the playing step is lit.
 // The on-screen keyboard, lit by what the synth is actually playing: keys held
@@ -129,7 +129,7 @@ private:
     std::unique_ptr<juce::ParameterAttachment> onAttachments[steps], pitchAttachments[steps], accentAttachments[steps], lengthAttachment;
     bool on[steps] {}, accent[steps] {};
     int pitch[steps] {}, length = steps, lit = -1;
-    int dragStep = -1, dragStartPitch = 0;
+    int dragStep = -1;
 };
 
 // The arp page's display, after the owner's Magic Touch "Spectral Cloud": the
