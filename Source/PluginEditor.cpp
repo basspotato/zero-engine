@@ -1803,20 +1803,15 @@ void AdvancedPanel::resized()
             const auto cellWidth = inner.getWidth() / count;
             for (int i = 0; i < (int) section.controls.size(); ++i)
             {
-                auto cell = juce::Rectangle<int> (inner.getX() + i * cellWidth, inner.getY(), cellWidth, inner.getHeight()).reduced (3, 0);
-                cell.removeFromTop (16); // the name
+                // Each control with its name above it as one block, centred up and
+                // down in the box under the title.
+                const auto cell = juce::Rectangle<int> (inner.getX() + i * cellWidth, inner.getY(), cellWidth, inner.getHeight()).reduced (3, 0);
+                constexpr int nameHeight = 16;
                 auto& control = section.controls[(size_t) i];
-
-                if (control->knob != nullptr)
-                {
-                    const auto size = juce::jmin (cell.getWidth(), cell.getHeight(), 104);
-                    control->knob->setBounds (cell.withSizeKeepingCentre (cell.getWidth(), size)); // centred in the section
-                }
-                else
-                {
-                    control->widget()->setBounds (cell.withSizeKeepingCentre (juce::jmin (cell.getWidth(), 110), 22)
-                                                      .withY (cell.getY() + juce::jmax (0, (cell.getHeight() - 22) / 2 - 6)));
-                }
+                const auto height = control->knob != nullptr ? juce::jmin (cell.getWidth(), cell.getHeight() - nameHeight, 104) : 22;
+                const auto top = cell.getCentreY() - (nameHeight + height) / 2 + nameHeight;
+                const auto width = control->knob != nullptr ? cell.getWidth() : juce::jmin (cell.getWidth(), 110);
+                control->widget()->setBounds (juce::Rectangle<int> (width, height).withCentre ({ cell.getCentreX(), top + height / 2 }));
             }
         }
     }
