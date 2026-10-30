@@ -505,7 +505,15 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
 
     // Jupiter and Mars, drifting a few pixels over minutes, lit from the upper
     // left and kept faint like the rest of the screen.
-    auto planet = [&] (float x, float y, float radius, float drift, float opacity, auto&& surface)
+    auto hasPhoto = [] ([[maybe_unused]] const char* fileName)
+    {
+       #if ZERO_SPACE_IMAGES
+        return spaceImage (fileName).isValid();
+       #else
+        return false;
+       #endif
+    };
+    auto planet = [&] (float x, float y, float radius, float drift, float opacity, float night, auto&& surface)
     {
         const auto centre = juce::Point<float> (screen.getX() + (x + 0.01f * std::sin (t * drift)) * screen.getWidth(),
                                                 screen.getY() + (y + 0.008f * std::cos (t * drift * 0.7f)) * screen.getHeight());
@@ -514,12 +522,12 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         {
             juce::Graphics::ScopedSaveState clipped (g);
             juce::Path round;
-            round.addEllipse (disc);
+            round.addEllipse (disc.reduced (radius * 0.02f)); // inside the photos' edge, no rim of their backdrop
             g.reduceClipRegion (round);
             surface (disc);
             // Night side: dark towards the lower right, a soft lit edge upper left.
             juce::ColourGradient shade (juce::Colours::white.withAlpha (0.12f), centre.x - radius * 0.55f, centre.y - radius * 0.55f,
-                                        juce::Colours::black.withAlpha (0.85f), centre.x + radius * 0.9f, centre.y + radius * 0.9f, true);
+                                        juce::Colours::black.withAlpha (night), centre.x + radius * 0.9f, centre.y + radius * 0.9f, true);
             shade.addColour (0.45, juce::Colours::transparentBlack);
             g.setGradientFill (shade);
             g.fillEllipse (disc);
@@ -527,9 +535,27 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.endTransparencyLayer();
     };
 
-    const auto h = screen.getHeight();
-    planet (0.13f, 0.30f, 0.15f * h, 0.031f, 0.5f, [&] (juce::Rectangle<float> d)
+    // The owner's photos (Resources/Space, kept out of git) when built in; drawn ones otherwise.
+    auto photo = [&] ([[maybe_unused]] const char* fileName, [[maybe_unused]] juce::Rectangle<float> d)
     {
+       #if ZERO_SPACE_IMAGES
+        if (const auto image = spaceImage (fileName); image.isValid())
+        {
+            g.setOpacity (1.0f); // drawImage takes the last colour's alpha (a faint star's)
+            g.drawImage (image, d, juce::RectanglePlacement::stretchToFit);
+            return true;
+        }
+       #endif
+        return false;
+    };
+
+    const auto h = screen.getHeight();
+    // Photos clearer than the drawn planets, with a lighter night side (Mars's photo has its own).
+    const auto jupiterPhoto = hasPhoto ("jupiter.png"), marsPhoto = hasPhoto ("mars.png");
+    planet (0.13f, 0.30f, 0.15f * h, 0.031f, jupiterPhoto ? 0.85f : 0.5f, jupiterPhoto ? 0.55f : 0.85f, [&] (juce::Rectangle<float> d)
+    {
+        if (photo ("jupiter.png", d))
+            return;
         // Jupiter: cream zones and rust-brown belts, the Great Red Spot below the middle.
         const juce::Colour zone (0xffe8d6b4), belt (0xffb07a4f), darkBelt (0xff8c5a3a), pale (0xffd8bd92);
         g.setColour (zone);
@@ -558,8 +584,10 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.setColour (juce::Colour (0xffc0573a));
         g.fillEllipse (spot);
     });
-    planet (0.86f, 0.70f, 0.045f * h, 0.023f, 0.55f, [&] (juce::Rectangle<float> d)
+    planet (0.86f, 0.70f, 0.045f * h, 0.023f, marsPhoto ? 0.9f : 0.55f, marsPhoto ? 0.3f : 0.85f, [&] (juce::Rectangle<float> d)
     {
+        if (photo ("mars.png", d))
+            return;
         // Mars: rust red, darker uplands, a white polar cap.
         g.setColour (juce::Colour (0xffc1502e));
         g.fillRect (d);
