@@ -1750,7 +1750,7 @@ void AdvancedPanel::paint (juce::Graphics& g)
             for (auto& control : section.controls)
             {
                 const auto r = control->widget()->getBounds();
-                g.drawFittedText (control->name, juce::Rectangle<int> (r.getX() - 8, r.getY() - 16, r.getWidth() + 16, 14),
+                g.drawFittedText (control->name, juce::Rectangle<int> (r.getX() - 8, control->nameY, r.getWidth() + 16, 14),
                                   juce::Justification::centredBottom, 1);
             }
         }
@@ -1801,17 +1801,25 @@ void AdvancedPanel::resized()
             auto inner = section.bounds.withTrimmedTop (22).reduced (6, 4);
             const auto count = juce::jmax (1, (int) section.controls.size());
             const auto cellWidth = inner.getWidth() / count;
+            // One layout per section: the names in one row, every knob, menu and
+            // toggle centred on one line under them, and that block truly centred
+            // up and down in the section's space under its title (the owner saw
+            // controls sitting off each other and low). Knobs share one size that
+            // leaves a margin above and below.
+            constexpr int nameHeight = 16, margin = 8;
+            const auto hasKnob = std::any_of (section.controls.begin(), section.controls.end(), [] (const auto& c) { return c->knob != nullptr; });
+            const auto knobSize = juce::jmin (cellWidth - 6, inner.getHeight() - nameHeight - 2 * margin, 104);
+            const auto rowHeight = hasKnob ? knobSize : 22;
+            const auto blockTop = inner.getY() + (inner.getHeight() - (nameHeight + rowHeight)) / 2;
+            const auto lineY = blockTop + nameHeight + rowHeight / 2;
             for (int i = 0; i < (int) section.controls.size(); ++i)
             {
-                // Each control with its name above it as one block, centred up and
-                // down in the box under the title.
                 const auto cell = juce::Rectangle<int> (inner.getX() + i * cellWidth, inner.getY(), cellWidth, inner.getHeight()).reduced (3, 0);
-                constexpr int nameHeight = 16;
                 auto& control = section.controls[(size_t) i];
-                const auto height = control->knob != nullptr ? juce::jmin (cell.getWidth(), cell.getHeight() - nameHeight, 104) : 22;
-                const auto top = cell.getCentreY() - (nameHeight + height) / 2 + nameHeight;
-                const auto width = control->knob != nullptr ? cell.getWidth() : juce::jmin (cell.getWidth(), 110);
-                control->widget()->setBounds (juce::Rectangle<int> (width, height).withCentre ({ cell.getCentreX(), top + height / 2 }));
+                const auto size = control->knob != nullptr ? juce::Point<int> (cell.getWidth(), knobSize)
+                                                           : juce::Point<int> (juce::jmin (cell.getWidth(), 110), 22);
+                control->widget()->setBounds (juce::Rectangle<int> (size.x, size.y).withCentre ({ cell.getCentreX(), lineY }));
+                control->nameY = blockTop;
             }
         }
     }

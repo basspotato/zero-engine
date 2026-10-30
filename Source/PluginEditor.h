@@ -194,6 +194,7 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> toggleAttachment;
         std::unique_ptr<juce::ParameterAttachment> stepAttachment; // a menu over a small integer range
         juce::Component* widget() const;
+        int nameY = 0; // where its name sits: one row for the whole section
     };
 
     struct Section
