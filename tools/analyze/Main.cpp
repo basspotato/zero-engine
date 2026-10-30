@@ -1395,6 +1395,55 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "sweep")
+    {
+        // Off-style picks across every genre/type: 8 Generate picks each against
+        // the designed sound; flags types whose picks drift brighter (median over
+        // an octave), wider, louder or squashed, with the tables they used.
+        struct Row { float drift; juce::String text; };
+        std::vector<Row> rows;
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+            {
+                auto owned = std::make_unique<ZeroEngineProcessor>();
+                auto& engine = *owned;
+                engine.setUserFolder (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_sweep"));
+                auto set = [&] (const char* id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+                set (ParamIDs::genre, (float) g);
+                set (ParamIDs::type, (float) t);
+                engine.syncProfile();
+                const auto designed = ZeroEngineProcessor::measureForTools (engine, g, t, makeProfile (g, t));
+                std::vector<float> octaves, width, crest;
+                std::map<juce::String, int> tables;
+                for (int i = 0; i < 8; ++i)
+                {
+                    engine.generate (700 + 13 * i + g);
+                    if (const auto m = engine.getLastPickTraits())
+                    {
+                        octaves.push_back (std::log2 (juce::jmax (20.0f, m->centroidHz) / juce::jmax (20.0f, designed.centroidHz)));
+                        width.push_back (m->sidePct - designed.sidePct);
+                        crest.push_back (m->crestDb);
+                        ++tables[waveTableNames[(int) engine.state.getRawParameterValue (ParamIDs::waveTable)->load()]];
+                    }
+                }
+                if (octaves.empty())
+                    continue;
+                auto median = [] (std::vector<float> v) { std::sort (v.begin(), v.end()); return v[v.size() / 2]; };
+                const auto bright = median (octaves), wider = median (width);
+                juce::String used;
+                for (const auto& [name, n] : tables)
+                    used << name << " " << n << "  ";
+                const auto drift = juce::jmax (bright, wider / 20.0f);
+                rows.push_back ({ drift, (genreNames[g] + " " + typeNames[t]).paddedRight (' ', 20) + " brighter " + juce::String (bright, 2) + " oct"
+                                         + "  wider " + juce::String (wider, 1) + " pts  crest " + juce::String (median (crest), 1) + " dB  tables: " + used });
+            }
+        std::sort (rows.begin(), rows.end(), [] (const Row& a, const Row& b) { return a.drift > b.drift; });
+        std::printf ("Generate picks against the designed sound (median of 8), most drifted first:\n");
+        for (const auto& r : rows)
+            std::printf ("  %s\n", r.text.toRawUTF8());
+        return 0;
+    }
+
     if (command == "picks" && args.size() >= 3)
     {
         // One genre/type: the designed sound and 8 Generate picks, with the

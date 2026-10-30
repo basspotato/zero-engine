@@ -204,6 +204,30 @@ namespace
             p.delayMix = 0.2f; p.delayTime = 2.0f;
         }
 
+        if (genre == pop && type == bass)
+        {
+            // Pop: round and plucky (it had the open 3-voice saw template, which the
+            // owner heard as peak-time leads on House): near-triangle, one voice,
+            // low-passed with a short pluck, a little brighter than House.
+            p.wavePos = 0.2f; p.unison = 1; p.detune = 0.0f;
+            p.ampAttack = 0.002f; p.ampDecay = 0.3f; p.ampSustain = 0.75f; p.ampRelease = 0.08f;
+            p.modAttack = 0.0f; p.modDecay = 0.15f; p.modSustain = 0.1f; p.modToPos = 0.0f;
+            p.filterCutoff = 900.0f; p.filterRes = 0.1f; p.filterEnv = 1.5f; p.velToCutoff = 0.6f;
+            p.weight = 0.75f; p.grit = 0.15f; p.width = 0.05f; p.air = 0.0f;
+            p.ottDepth = 0.25f;
+        }
+
+        if (genre == trance && type == bass)
+        {
+            // Trance: the rolling offbeat bass is a filtered saw pluck, not an open
+            // saw: two voices, low-pass at 1.2 kHz with a snappy envelope.
+            p.wavePos = 0.5f; p.unison = 2; p.detune = 0.08f;
+            p.ampAttack = 0.002f; p.ampDecay = 0.2f; p.ampSustain = 0.6f; p.ampRelease = 0.06f;
+            p.modAttack = 0.0f; p.modDecay = 0.12f; p.modSustain = 0.05f; p.modToPos = 0.0f;
+            p.filterCutoff = 1200.0f; p.filterRes = 0.2f; p.filterEnv = 2.0f; p.velToCutoff = 0.5f;
+            p.width = 0.05f; p.air = 0.0f;
+        }
+
         if (genre == house && type == bass)
         {
             // Deep house: a round, near-sine bass (the owner heard the plain saw
@@ -781,6 +805,16 @@ void keepInCharacter (Profile& p, int genre, int type)
         p.unison = juce::jmin (p.unison, 2.0f);
         p.lfoToPos = juce::jmin (p.lfoToPos, 0.2f);
         p.grit = juce::jmin (p.grit, 0.3f);
+    }
+
+    // Pop basses round too, a little looser: no growl, neuro, harsh or digital
+    // tables, two voices at most, the filter under 2 kHz.
+    if (genre == pop && type == bass)
+    {
+        if (p.waveTable == growlTable || p.waveTable == 7.0f /* Neuro */ || p.waveTable == harshTable || p.waveTable == digitalTable)
+            p.waveTable = analogTable;
+        p.filterCutoff = juce::jmin (p.filterCutoff, 2000.0f);
+        p.unison = juce::jmin (p.unison, 2.0f);
     }
 }
 
