@@ -709,27 +709,31 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
             }
             auto p = ReferenceMatch::withUnitsOf (*parent, units);
             auto either = [&] (float a, float b) { return random.nextBool() ? a : b; };
-            constexpr int numMoves = 7;
-            std::vector<int> moves (numMoves); // three of them, all different
-            std::iota (moves.begin(), moves.end(), 0);
-            for (int k = 0; k < 3; ++k)
-                std::swap (moves[(size_t) k], moves[(size_t) (k + random.nextInt (numMoves - k))]);
+            // Moves that can be heard on this type: a mono bass hides width, space and
+            // unison, a washy pad hides envelope and space (the owner heard those
+            // mutations as the same sound).
+            enum { table, position, filter, envelope, voices, movement, space, drive };
+            std::vector<int> moves = type == 0 ? std::vector<int> { table, position, filter, movement, drive }
+                                   : type == 3 ? std::vector<int> { table, position, filter, movement, voices, drive }
+                                               : std::vector<int> { table, position, filter, envelope, voices, movement, space, drive };
+            for (size_t k = 0; k < 3; ++k) // three of them, all different
+                std::swap (moves[k], moves[k + (size_t) random.nextInt ((int) (moves.size() - k))]);
             for (const auto move : { moves[0], moves[1], moves[2] })
                 switch (move)
                 {
-                    case 0: // another wavetable (not Sample, Match's)
+                    case table: // another wavetable (not Sample, Match's)
                         p.waveTable = (float) ((juce::roundToInt (p.waveTable) + 1 + random.nextInt (WavetableBank::numBanks - 2)) % (WavetableBank::numBanks - 1));
                         break;
-                    case 1: // elsewhere in the table, and another second table blended in
+                    case position: // elsewhere in the table, and another second table blended in
                         p.wavePos = random.nextFloat();
                         p.waveTableB = (float) random.nextInt (WavetableBank::numBanks - 1);
                         p.tableMix = juce::jlimit (0.0f, 1.0f, p.tableMix + 0.2f + 0.2f * random.nextFloat());
                         break;
-                    case 2: // the filter an octave or more up or down, its envelope with it
+                    case filter: // the filter an octave or more up or down, its envelope with it
                         p.filterCutoff = juce::jlimit (60.0f, 18000.0f, p.filterCutoff * std::exp2 (either (1.0f, -1.0f) * (1.0f + 0.6f * random.nextFloat())));
                         p.filterEnv = juce::jlimit (0.0f, 4.0f, p.filterEnv * either (1.6f, 0.5f) + 0.2f);
                         break;
-                    case 3: // another envelope: snappier or slower
+                    case envelope: // another envelope: snappier or slower
                     {
                         const auto f = either (0.4f, 2.5f);
                         p.ampAttack = juce::jlimit (0.001f, 2.0f, p.ampAttack * f);
@@ -737,20 +741,27 @@ std::pair<Profile, int> ZeroEngineProcessor::pickGeneratedProfile (int genre, in
                         p.ampRelease = juce::jlimit (0.05f, 3.0f, p.ampRelease * f);
                         break;
                     }
-                    case 4: // more or fewer voices in the unison
+                    case voices: // more or fewer voices in the unison
                         p.unison = (float) juce::jlimit (1, 7, juce::roundToInt (p.unison) + (p.unison < 2.5f || random.nextBool() ? 2 : -2));
                         p.detune = juce::jlimit (0.0f, 0.4f, p.detune + (p.unison > 2.5f ? 0.08f : -0.08f));
                         break;
-                    case 5: // the movement: twice or half as fast, and deeper
+                    case movement: // the movement: twice or half as fast, and deeper (a bass's wobble)
                         p.lfoRate = juce::jlimit (0.05f, 12.0f, p.lfoRate * either (2.0f, 0.5f));
                         p.lfoToPos = juce::jlimit (0.0f, 1.0f, p.lfoToPos + 0.2f);
                         p.lfoToCutoff = juce::jlimit (0.0f, 2.0f, p.lfoToCutoff + 0.3f);
                         break;
-                    default: // more or less space
+                    case space: // more or less space
                     {
                         const auto more = random.nextBool() ? 0.2f : -0.2f;
                         p.reverbMix = juce::jlimit (0.0f, 0.9f, p.reverbMix + more);
                         p.delayMix = juce::jlimit (0.0f, 0.6f, p.delayMix + more);
+                        break;
+                    }
+                    default: // drive: grit and OTT up or down together
+                    {
+                        const auto more = random.nextBool() ? 0.2f : -0.2f;
+                        p.grit = juce::jlimit (0.0f, 1.0f, p.grit + more);
+                        p.ottDepth = juce::jlimit (0.0f, 1.0f, p.ottDepth + more);
                         break;
                     }
                 }
