@@ -1882,15 +1882,15 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
     struct PageSpec { const char* name; std::vector<std::vector<SectionSpec>> rows; std::vector<int> weights {}; };
 
     const std::vector<PageSpec> layout {
-        // Everything but the arp on one page, a row per stage: tone, voice,
-        // movement, mix.
+        // Everything but the arp on one page, a row per stage: tone, movement,
+        // voice, mix.
         { "SOUND & MIX", { { { "OSCILLATOR",   { waveTable, waveTableB, tableMix, wavePos, unison, detune, blend } },
                              { "FILTER",       { filterMode, filterCutoff, filterRes, filterEnv, filterKeytrack, velToCutoff } } },
+                           { { "MOD ENVELOPE", { modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch } },
+                             { "LFO",          { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } } },
                            { { "AMP ENVELOPE", { ampAttack, ampDecay, ampSustain, ampRelease } },
                              { "SUB",          { subOn, subOctave, subSplit, midHighPass } },
                              { "PLAY",         { playMode, glide, bendRange, velSens } } },
-                           { { "MOD ENVELOPE", { modAttack, modDecay, modSustain, modRelease, modToPos, modToPitch } },
-                             { "LFO",          { lfoShape, lfoSync, lfoRate, lfoToPos, lfoToPitch, lfoToCutoff } } },
                            { { "SPACE",        { delayTime, delayMix, delayFeedback, reverbMix, reverbSize } },
                              { "FINISH",       { inputTrim, ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
         // The pattern on top (the output and each step as it plays), the steps,
@@ -2051,6 +2051,19 @@ void AdvancedPanel::paint (juce::Graphics& g)
     g.setGradientFill (juce::ColourGradient (Palette::panel.brighter (0.03f), 0.0f, plate.getY(),
                                              Palette::panel.darker (0.08f), 0.0f, plate.getBottom(), false));
     g.fillRoundedRectangle (plate, 7.0f);
+   #if ZERO_SPACE_IMAGES
+    // The owner's mixing-desk photo behind the SOUND & MIX page, faint.
+    if (current == 0)
+        if (const auto photo = spaceImage ("mixer.jpg"); photo.isValid())
+        {
+            juce::Graphics::ScopedSaveState saved (g);
+            juce::Path round;
+            round.addRoundedRectangle (plate, 7.0f);
+            g.reduceClipRegion (round);
+            g.setOpacity (0.25f);
+            g.drawImage (photo, plate, juce::RectanglePlacement::fillDestination); // covers, cropping the sides
+        }
+   #endif
     g.setColour (Palette::panelEdge);
     g.drawRoundedRectangle (plate.reduced (0.5f), 7.0f, 1.0f);
 
@@ -2069,18 +2082,33 @@ void AdvancedPanel::paint (juce::Graphics& g)
             const auto box = section.bounds.toFloat();
             g.setColour (Palette::screen.withAlpha (0.35f));
             g.fillRoundedRectangle (box, 5.0f);
-            g.setColour (Palette::panelEdge);
+
+            // Each row its own colour, top to bottom yellow, orange, magenta, blue
+            // (the owner's order): tone, movement, voice, mix read as groups.
+            const auto stage = section.name == "OSCILLATOR" || section.name == "FILTER"     ? Palette::yellow
+                             : section.name == "MOD ENVELOPE" || section.name == "LFO"      ? Palette::orange
+                             : section.name == "SPACE" || section.name == "FINISH"          ? Palette::accent
+                                                                                            : Palette::magenta;
+            const auto tinted = section.custom == nullptr; // the ARP page's displays keep their own look
+            if (tinted)
+            {
+                g.setGradientFill (juce::ColourGradient (stage.withAlpha (0.11f), 0.0f, box.getY(), stage.withAlpha (0.02f), 0.0f, box.getBottom(), false));
+                g.fillRoundedRectangle (box, 5.0f);
+            }
+
+            g.setColour (tinted ? stage.withAlpha (0.45f) : Palette::panelEdge);
             g.drawRoundedRectangle (box.reduced (0.5f), 5.0f, 1.0f);
 
             if (section.custom == nullptr) // the pattern display and the step grid speak for themselves: no title
             {
+                const auto ledColour = tinted ? stage : Palette::accent;
                 const auto led = juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ box.getX() + 12.0f, box.getY() + 11.0f });
-                g.setColour (Palette::accent.withAlpha (0.25f));
+                g.setColour (ledColour.withAlpha (0.25f));
                 g.fillEllipse (led.expanded (2.5f));
-                g.setColour (Palette::accent);
+                g.setColour (ledColour);
                 g.fillEllipse (led);
                 g.setFont (Fonts::ui (10.5f, true, 0.08f));
-                g.setColour (Palette::orange);
+                g.setColour (tinted ? stage.brighter (0.2f) : Palette::orange);
                 g.drawText (section.name, box.withHeight (22.0f).withTrimmedLeft (22.0f), juce::Justification::centredLeft);
             }
 
