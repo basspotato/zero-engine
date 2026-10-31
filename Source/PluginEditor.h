@@ -343,7 +343,7 @@ private:
     juce::Rectangle<int> box303;   // their bordered box
     juce::TextButton filter303Button { "303 MODE" }; // the box's tag: switches on 303 mode
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> filter303Attachment;
-    juce::TextButton arpJumpButton { "ARPEGGIATOR" }; // in the Macros header, over the 303 box: opens the ARP page
+    juce::TextButton arpJumpButton { "SEQUENCER" }; // in the Macros header, over the 303 box: opens the ARP page
     juce::TextButton wave303Button { "SAW" };        // top right of the box: 303 mode's saw or square
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> wave303Attachment;
     juce::ComboBox genreBox, typeBox;
