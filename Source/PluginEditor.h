@@ -338,6 +338,8 @@ private:
     Macro outputKnob;
     Macro panKnob; // beside Output: where the sound sits, left to right
     std::array<Macro, 5> envelope; // cutoff, then attack, decay, sustain, release on the main page
+    std::array<Macro, 5> acid;     // the 303 knobs in Macros: cutoff, reso, env mod, decay, accent
+    juce::Rectangle<int> box303;   // their bordered box
     juce::ComboBox genreBox, typeBox;
     std::unique_ptr<ComboAttachment> genreAttachment, typeAttachment;
     ScopeView display;

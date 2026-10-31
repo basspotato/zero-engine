@@ -121,6 +121,15 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
     setChoice (ParamIDs::type, type);
     applyProfile (state, profile);
     loadMacroMap (macroMap, profile);
+    resetAcid();
+}
+
+void ZeroEngineProcessor::resetAcid()
+{
+    // The 303 row tweaks the sound in front of you: a new one starts it at neutral.
+    for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent })
+        if (auto* param = state.getParameter (id))
+            param->setValueNotifyingHost (param->getDefaultValue());
 }
 
 ZeroEngineProcessor::GeneratePlan ZeroEngineProcessor::prepareGenerate (juce::int64 seed, bool moodMode, bool mutate)
@@ -1343,7 +1352,7 @@ void ZeroEngineProcessor::setStateInformation (const void* data, int sizeInBytes
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
     {
-        restoreState (*xml);
+        restoreState (*xml, true); // a project reopening keeps its 303 settings
         const auto ccs = juce::StringArray::fromTokens (xml->getStringAttribute ("macroCCs"), ",", {});
         for (size_t m = 0; m < macroCC.size(); ++m)
             macroCC[m] = m < (size_t) ccs.size() ? ccs[(int) m].getIntValue() : -1;
@@ -1561,19 +1570,21 @@ void ZeroEngineProcessor::adoptCurrentGenreAndType()
     loadMacroMap (macroMap, makeProfile (appliedGenre, appliedType));
 }
 
-bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml)
+bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml, bool keep303)
 {
     if (! xml.hasTagName (state.state.getType()))
         return false;
 
-    restoreTree (juce::ValueTree::fromXml (xml));
+    restoreTree (juce::ValueTree::fromXml (xml), keep303);
     return true;
 }
 
-void ZeroEngineProcessor::restoreTree (const juce::ValueTree& tree)
+void ZeroEngineProcessor::restoreTree (const juce::ValueTree& tree, bool keep303)
 {
     releaseHeld.store (true);
     state.replaceState (tree.createCopy());
+    if (! keep303) // history, a favourite, undo or redo: a sound to start fresh on
+        resetAcid();
 
     adoptCurrentGenreAndType(); // the saved values already include any tweaks; keep them
     showingLatest = false;

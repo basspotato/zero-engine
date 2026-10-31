@@ -2249,6 +2249,17 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
         for (size_t i = 0; i < envelope.size(); ++i)
             setUpMacro (envelope[i], adsr[i].first, adsr[i].second);
     }
+    // The 303 row: smaller knobs that tweak the loaded sound.
+    {
+        const std::pair<const char*, const char*> knobs303[] { { ParamIDs::acidCutoff, "Cutoff" }, { ParamIDs::acidRes, "Reso" },
+                                                               { ParamIDs::acidEnvMod, "Env Mod" }, { ParamIDs::acidDecay, "Decay" },
+                                                               { ParamIDs::acidAccent, "Accent" } };
+        for (size_t i = 0; i < acid.size(); ++i)
+        {
+            setUpMacro (acid[i], knobs303[i].first, knobs303[i].second);
+            acid[i].label.setFont (Fonts::ui (10.5f, true));
+        }
+    }
 
     genreBox.addItemList (genreNames, 1);
     typeBox.addItemList (typeNames, 1);
@@ -2637,6 +2648,19 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
     if (! favouritesSection.isEmpty())
         section (favouritesSection, "FAVOURITES");
     section (macroSection, "MACROS");
+
+    // The 303 box inside Macros: a recessed border with an orange "303" tag.
+    if (! box303.isEmpty())
+    {
+        const auto box = box303.toFloat().expanded (0.0f, 4.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.18f));
+        g.fillRoundedRectangle (box, 6.0f);
+        g.setColour (Palette::panelEdge);
+        g.drawRoundedRectangle (box.reduced (0.5f), 6.0f, 1.0f);
+        g.setColour (Palette::orange);
+        g.setFont (Fonts::ui (12.0f, true));
+        g.drawText ("303", box.reduced (8.0f, 3.0f).withHeight (14.0f), juce::Justification::centredLeft);
+    }
 }
 
 void ZeroEngineEditor::resized()
@@ -2680,12 +2704,27 @@ void ZeroEngineEditor::resized()
 
     macroSection = area.removeFromBottom (140);
     auto knobRow = content (macroSection);
+    // The 303 row on the right of Macros, in its own bordered box.
+    box303 = knobRow.removeFromRight (340);
+    knobRow.removeFromRight (12);
     const auto knobWidth = knobRow.getWidth() / (int) macros.size();
     for (auto& macro : macros)
     {
         auto cell = knobRow.removeFromLeft (knobWidth);
         macro.label.setBounds (cell.removeFromBottom (18));
         macro.knob.setBounds (cell.reduced (4));
+    }
+    {
+        auto inside = box303.withTrimmedTop (14).reduced (6, 2); // under the box's "303" tag
+        const auto smallWidth = inside.getWidth() / (int) acid.size();
+        for (auto& knob : acid)
+        {
+            auto cell = inside.removeFromLeft (smallWidth);
+            knob.label.setBounds (cell.removeFromBottom (16));
+            const auto size = juce::jmin (cell.getWidth(), cell.getHeight());
+            // On the same centre line as the macro knobs beside them.
+            knob.knob.setBounds (juce::Rectangle<int> (size, size).withCentre ({ cell.getCentreX(), macros[0].knob.getBounds().getCentreY() }));
+        }
     }
     area.removeFromBottom (10);
 

@@ -81,6 +81,13 @@ namespace ParamIDs
     inline constexpr auto arpRate     = "arpRate";
     inline constexpr auto arpOctaves  = "arpOctaves";
     inline constexpr auto arpGate     = "arpGate";
+    // The 303 row on the main page: tweaks on top of whatever sound is loaded,
+    // back to neutral whenever a new sound loads; not part of profiles.
+    inline constexpr auto acidCutoff  = "acidCutoff";  // octaves up or down from the sound's cutoff
+    inline constexpr auto acidRes     = "acidRes";     // resonance up or down from the sound's
+    inline constexpr auto acidEnvMod  = "acidEnvMod";  // depth of the 303 sweep (0 = none)
+    inline constexpr auto acidDecay   = "acidDecay";   // the sweep's decay
+    inline constexpr auto acidAccent  = "acidAccent";  // how hard accented notes hit (0 = none)
     inline constexpr auto seqLength   = "seqLength";   // step sequencer (arp mode "Sequence")
     inline constexpr auto tilt        = "tilt";
     inline constexpr auto monoFreq    = "monoFreq";
@@ -232,6 +239,18 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::arpOctaves, 1 }, "Arp Octaves", 1, 4, 1));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::arpGate, 1 }, "Arp Gate",
                                                        NormalisableRange<float> (0.05f, 1.0f), 0.6f));
+
+    // 303 row: neutral by default (centre for Cutoff and Reso, none for Env Mod and Accent).
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::acidCutoff, 1 }, "303 Cutoff",
+                                                       NormalisableRange<float> (-4.0f, 4.0f), 0.0f,
+                                                       AudioParameterFloatAttributes().withLabel ("oct")));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::acidRes, 1 }, "303 Resonance",
+                                                       NormalisableRange<float> (-1.0f, 1.0f), 0.0f));
+    unit (ParamIDs::acidEnvMod, "303 Env Mod", 0.0f);
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::acidDecay, 1 }, "303 Decay",
+                                                       NormalisableRange<float> (0.2f, 2.0f, 0.0f, 0.5f), 0.5f,
+                                                       AudioParameterFloatAttributes().withLabel ("s")));
+    unit (ParamIDs::acidAccent, "303 Accent", 0.0f);
 
     // Step sequencer: every step on, accents on the beats, so it plays at once.
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::seqLength, 1 }, "Seq Length", 1, 16, 16));

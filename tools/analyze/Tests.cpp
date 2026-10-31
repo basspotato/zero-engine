@@ -888,6 +888,186 @@ namespace
         return problems;
     }
 
+    // The 303 row: each knob does its 303 job on a bass line, accents build the
+    // wow, and a new sound or an undo puts the row back to neutral.
+    juce::StringArray checkAcid()
+    {
+        struct Knobs { float cutoff = 0.0f, res = 0.0f, envMod = 0.0f, decay = 0.5f, accent = 0.0f; };
+        // The output runs late by the processor's latency (the spectral stage):
+        // moved back, sample n lines up with the MIDI at n.
+        auto alignedBy = [] (const juce::AudioBuffer<float>& out, int latency)
+        {
+            juce::AudioBuffer<float> aligned (1, out.getNumSamples());
+            aligned.clear();
+            aligned.copyFrom (0, 0, out, 0, latency, out.getNumSamples() - latency);
+            return aligned;
+        };
+        // Sixteen 1/16 notes at 120 BPM (6000 samples apart, held 4500), C2,
+        // velocity 90 or 127 by the pattern; mono, without the finishing chain's squash.
+        auto render = [&alignedBy] (Knobs k, std::function<bool (int)> accented)
+        {
+            ZeroEngineProcessor engine;
+            loadProfile (engine, genreNames.indexOf ("Techno"), typeNames.indexOf ("Lead")); // harmonic-rich, like a 303 saw
+            auto set = [&] (const char* id, float v) { auto* q = engine.state.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+            set (ParamIDs::ottDepth, 0.0f);
+            set (ParamIDs::spectral, 0.0f);
+            set (ParamIDs::levelTrim, -12.0f);
+            set (ParamIDs::reverbMix, 0.0f);
+            set (ParamIDs::delayMix, 0.0f);
+            set (ParamIDs::grit, 0.0f);      // the saturation would even out the accent's level
+            set (ParamIDs::subOn, 0.0f);     // the unfiltered sub would hide the filter
+            set (ParamIDs::inputTrim, -12.0f);
+            set (ParamIDs::acidCutoff, k.cutoff);
+            set (ParamIDs::acidRes, k.res);
+            set (ParamIDs::acidEnvMod, k.envMod);
+            set (ParamIDs::acidDecay, k.decay);
+            set (ParamIDs::acidAccent, k.accent);
+            engine.setPlayConfigDetails (0, 2, 48000.0, 500);
+            engine.prepareToPlay (48000.0, 500);
+
+            juce::AudioBuffer<float> block (2, 500), out (1, 6000 * 17);
+            juce::MidiBuffer midi;
+            for (int b = 0; b < out.getNumSamples() / 500; ++b)
+            {
+                midi.clear();
+                const auto start = b * 500;
+                if (start % 6000 == 0 && start / 6000 < 16)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, 36, (juce::uint8) (accented (start / 6000) ? 127 : 90)), 0);
+                if ((start - 4500) % 6000 == 0 && start > 0 && (start - 4500) / 6000 < 16)
+                    midi.addEvent (juce::MidiMessage::noteOff (1, 36), 0);
+                block.clear();
+                engine.processBlock (block, midi);
+                out.copyFrom (0, start, block, 0, 0, 500);
+            }
+            return alignedBy (out, engine.getLatencySamples());
+        };
+        // Brightness of a stretch: energy of the slope over energy (higher = brighter).
+        auto bright = [] (const juce::AudioBuffer<float>& a, int from, int length)
+        {
+            double slope = 0.0, energy = 1.0e-12;
+            for (int i = from + 1; i < from + length; ++i)
+            {
+                const auto x = a.getSample (0, i), d = x - a.getSample (0, i - 1);
+                slope += d * d;
+                energy += x * x;
+            }
+            return slope / energy;
+        };
+        auto level = [] (const juce::AudioBuffer<float>& a, int from, int length)
+        {
+            return a.getRMSLevel (0, from, length);
+        };
+        auto none = [] (int) { return false; };
+        auto all = [] (int) { return true; };
+
+        juce::StringArray problems;
+        const auto plain = render ({}, none);
+        if (bright (render ({ -3.0f }, none), 6000, 4000) > 0.5 * bright (plain, 6000, 4000))
+            problems.add ("Cutoff down 3 octaves did not darken the line");
+
+        Knobs sweep;
+        sweep.cutoff = -2.0f; sweep.envMod = 1.0f; sweep.decay = 0.2f;
+        const auto swept = render (sweep, none);
+        if (bright (swept, 6000, 480) < 2.0 * bright (swept, 6000 + 3000, 480))
+            problems.add ("Env Mod: a note's start not much brighter than its tail");
+
+        Knobs accentOn;
+        accentOn.accent = 1.0f;
+        auto everyOther = [] (int n) { return n % 2 == 0; };
+        const auto withAccent = render (accentOn, everyOther), withoutAccent = render ({}, everyOther);
+        // The same accented note with Accent up and at zero (a plain note after an
+        // accent is brighter too, from the wow's charge, as on the 303).
+        const auto boost = level (withAccent, 6000 * 4, 3000) / level (withoutAccent, 6000 * 4, 3000);
+        if (boost < 1.4f)
+            problems.add ("Accent: an accented note only " + juce::String (boost, 2) + "x louder");
+
+        Knobs wow;
+        wow.cutoff = -2.5f; wow.accent = 1.0f; wow.res = 0.4f;
+        const auto building = render (wow, all);
+        if (bright (building, 6000 * 3, 3000) < 1.15 * bright (building, 0, 3000))
+            problems.add ("Accent wow: back-to-back accents did not climb");
+
+        // Through the arp: one key held at velocity 90, the default pattern's
+        // accent steps (on the beats) hit harder with Accent up, and every arp
+        // note starts its own Env Mod sweep.
+        auto arpRender = [&alignedBy] (Knobs k)
+        {
+            ZeroEngineProcessor engine;
+            loadProfile (engine, genreNames.indexOf ("Techno"), typeNames.indexOf ("Lead")); // harmonic-rich, like a 303 saw
+            auto set = [&] (const char* id, float v) { auto* q = engine.state.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+            set (ParamIDs::ottDepth, 0.0f);
+            set (ParamIDs::spectral, 0.0f);
+            set (ParamIDs::levelTrim, -12.0f);
+            set (ParamIDs::reverbMix, 0.0f);
+            set (ParamIDs::delayMix, 0.0f);
+            set (ParamIDs::grit, 0.0f);
+            set (ParamIDs::subOn, 0.0f);
+            set (ParamIDs::inputTrim, -12.0f);
+            set (ParamIDs::arpOn, 1.0f);
+            set (ParamIDs::arpRate, 3.0f); // 1/16
+            set (ParamIDs::arpGate, 0.75f);
+            set (ParamIDs::acidCutoff, k.cutoff);
+            set (ParamIDs::acidEnvMod, k.envMod);
+            set (ParamIDs::acidDecay, k.decay);
+            set (ParamIDs::acidAccent, k.accent);
+            engine.setPlayConfigDetails (0, 2, 48000.0, 500);
+            engine.prepareToPlay (48000.0, 500);
+            juce::AudioBuffer<float> block (2, 500), out (1, 6000 * 8);
+            juce::MidiBuffer midi;
+            for (int b = 0; b < out.getNumSamples() / 500; ++b)
+            {
+                midi.clear();
+                if (b == 0)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, 36, (juce::uint8) 90), 0);
+                block.clear();
+                engine.processBlock (block, midi);
+                out.copyFrom (0, b * 500, block, 0, 0, 500);
+            }
+            return alignedBy (out, engine.getLatencySamples());
+        };
+        {
+            Knobs arpAccent;
+            arpAccent.accent = 1.0f;
+            const auto on = arpRender (arpAccent), off = arpRender ({});
+            // Steps 4 (accent) and 5 (plain), 6000 samples each at 120 BPM.
+            const auto arpBoost = level (on, 6000 * 4, 3000) / level (off, 6000 * 4, 3000);
+            const auto plainStep = level (on, 6000 * 6, 3000) / level (off, 6000 * 6, 3000); // step 6: no accent
+            if (arpBoost < 1.4f || arpBoost < 1.25f * plainStep)
+                problems.add ("Accent through the arp: accent step " + juce::String (arpBoost, 2) + "x, plain step " + juce::String (plainStep, 2) + "x");
+
+            Knobs arpSweep;
+            arpSweep.cutoff = -2.0f; arpSweep.envMod = 1.0f; arpSweep.decay = 0.2f;
+            const auto swept = arpRender (arpSweep);
+            for (int step = 5; step <= 6; ++step)
+                if (bright (swept, 6000 * step, 480) < 2.0 * bright (swept, 6000 * step + 3000, 480))
+                    problems.add ("Env Mod through the arp: step " + juce::String (step) + " did not sweep");
+        }
+
+        // Neutral again on a new sound and after an undo; a project keeps it (checkState).
+        ZeroEngineProcessor a;
+        loadProfile (a, genreNames.indexOf ("Trap"), typeNames.indexOf ("Lead"));
+        auto set = [&] (const char* id, float v) { auto* q = a.state.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+        auto atNeutral = [&]
+        {
+            for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent })
+                if (auto* q = a.state.getParameter (id); std::abs (q->getValue() - q->getDefaultValue()) > 1.0e-5f)
+                    return false;
+            return true;
+        };
+        set (ParamIDs::acidCutoff, 2.0f);
+        set (ParamIDs::acidEnvMod, 0.8f);
+        loadProfile (a, genreNames.indexOf ("Trap"), typeNames.indexOf ("Bass"));
+        if (! atNeutral())
+            problems.add ("a new sound kept the 303 row's settings");
+        set (ParamIDs::grit, 0.3f);
+        a.undo(); a.redo();
+        set (ParamIDs::acidAccent, 0.9f);
+        a.undo();
+        if (! atNeutral())
+            problems.add ("undo kept the 303 row's settings");
+        return problems;
+    }
+
     juce::StringArray checkState()
     {
         ZeroEngineProcessor a;
@@ -902,6 +1082,8 @@ namespace
         setValue (ParamIDs::grit, 0.123f);
         setValue (ParamIDs::filterCutoff, 1234.0f);
         setValue (ParamIDs::reverbMix, 0.42f);
+        setValue (ParamIDs::acidCutoff, -1.5f); // a project keeps its 303 row
+        setValue (ParamIDs::acidAccent, 0.7f);
 
         juce::MemoryBlock saved;
         a.getStateInformation (saved);
@@ -978,6 +1160,17 @@ int runAllTests()
                 std::printf ("    %s\n", line.toRawUTF8());
             failures += report.size();
         }
+    }
+
+    std::printf ("303 row (cutoff, env mod, accent, wow, back to neutral)... ");
+    if (const auto problems = checkAcid(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
     }
 
     std::printf ("Arp Mode and Octaves (also changed while held)... ");
@@ -1271,4 +1464,15 @@ int runAllTests()
 
     std::printf (failures == 0 ? "All tests passed.\n" : "%d failures.\n", failures);
     return failures == 0 ? 0 : 1;
+}
+
+// Just the 303 row's check (quick, while working on it).
+int runAcidCheck()
+{
+    ZeroEngineProcessor::userFolderForTools = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_tests_user");
+    const auto problems = checkAcid();
+    std::printf ("303 row... %s\n", problems.isEmpty() ? "ok" : "FAILED");
+    for (const auto& p : problems)
+        std::printf ("    %s\n", p.toRawUTF8());
+    return problems.isEmpty() ? 0 : 1;
 }

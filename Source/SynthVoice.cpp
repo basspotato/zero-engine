@@ -34,7 +34,16 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::filterMode), get (ParamIDs::filterCutoff), get (ParamIDs::filterRes), get (ParamIDs::filterEnv),
           get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff), get (ParamIDs::velToCutoff), get (ParamIDs::velSens),
           get (ParamIDs::waveTable), get (ParamIDs::waveTableB), get (ParamIDs::tableMix), get (ParamIDs::subOn),
-          get (ParamIDs::lfoSync) };
+          get (ParamIDs::lfoSync),
+          get (ParamIDs::acidCutoff), get (ParamIDs::acidRes), get (ParamIDs::acidEnvMod), get (ParamIDs::acidDecay), get (ParamIDs::acidAccent) };
+}
+
+void ZeroVoice::startAcid() noexcept
+{
+    acidSweep = 1.0f;
+    acidAccented = noteVelocity >= 100.0f / 127.0f;
+    if (acidAccented)
+        acidPulse = 1.0f;
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -95,6 +104,7 @@ void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger, bool jump
         updateEnvelopes();
         ampEnv.noteOn();
         modEnv.noteOn();
+        startAcid(); // a slide (no retrigger) keeps the 303 sweep going, as on the 303
     }
 }
 
@@ -130,9 +140,12 @@ void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*
         lfoSmoothed = rawLfo (0.0f); // start where the shape starts, not from 0
     }
 
+    if (! continuing)
+        acidCharge = 0.0f; // a fresh voice has no accent charge left over
     updateEnvelopes();
     ampEnv.noteOn();
     modEnv.noteOn();
+    startAcid();
 }
 
 void ZeroVoice::stopNote (float, bool allowTailOff)
@@ -281,9 +294,29 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto filterEnv = p.filterEnv->load() + macroMap.offset (MacroTarget::filterEnv);
     const auto keytrack = p.filterKeytrack->load();
     const auto lfoToCutoff = p.lfoToCutoff->load();
+    // The 303 row, on top of the sound. At neutral (Cutoff and Reso centred,
+    // Env Mod and Accent at zero) none of it runs and the sound is untouched.
+    const auto acidOctaves = p.acidCutoff->load();
+    const auto acidResOffset = p.acidRes->load();
+    const auto envMod = p.acidEnvMod->load();
+    const auto accent = p.acidAccent->load();
+    const auto acidOn = std::abs (acidOctaves) > 1.0e-4f || envMod > 1.0e-4f || accent > 1.0e-4f;
+    const auto resonance = std::abs (acidResOffset) > 1.0e-4f ? juce::jlimit (0.0f, 0.95f, p.filterRes->load() + acidResOffset) // short of a scream
+                                                             : p.filterRes->load();
+    // Env Mod sweeps up to 4.5 octaves and, as on the 303, lowers the resting
+    // cutoff as it rises; an accent's own sweep and its wow grow with resonance.
+    const auto sweepFall = (float) std::exp (-3.0 / ((acidAccented ? 0.2 : (double) p.acidDecay->load()) * sampleRate)); // ~95 % down at Decay
+    const auto pulseFall = (float) std::exp (-3.0 / (0.2 * sampleRate));
+    // The charge fills slowly, so one accent only part fills it and accents in
+    // a row climb (the 303's wow); it lets go over about a second.
+    const auto chargeRise = (float) (1.0 - std::exp (-1.0 / (0.1 * sampleRate)));
+    const auto chargeFall = (float) (1.0 - std::exp (-1.0 / (0.35 * sampleRate)));
+    const auto accentGain = acidAccented ? 1.0f + 0.8f * accent : 1.0f; // about +5 dB at full Accent
+    const auto wowDepth = accent * (1.5f + 7.0f * resonance);
+
     const auto filterOn = filterMode > 1 || cutoff < 19000.0f || std::abs (filterEnv) > 1.0e-3f
-                       || lfoToCutoff > 1.0e-3f || keytrack > 1.0e-3f;
-    const auto k = 2.0f * (1.0f - 0.97f * p.filterRes->load());
+                       || lfoToCutoff > 1.0e-3f || keytrack > 1.0e-3f || acidOn || std::abs (acidResOffset) > 1.0e-4f;
+    const auto k = 2.0f * (1.0f - 0.97f * resonance);
     const auto maxCutoff = (float) (0.45 * sampleRate);
     const auto middleC = std::log2 (261.63);
     Svf::Coeffs resonant, flat;
@@ -312,11 +345,19 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
                 phases[v] -= 1.0;
         }
 
+        // The 303 sweeps run even at neutral, so turning Env Mod up mid-note
+        // joins the sweep where it is.
+        const auto acidShift = acidOn ? acidOctaves + envMod * (4.5f * acidSweep - 1.2f) + accent * 2.0f * acidPulse + wowDepth * acidCharge
+                                      : 0.0f;
+        acidSweep *= sweepFall;
+        acidPulse *= pulseFall;
+        acidCharge += (acidPulse - acidCharge) * (acidPulse > acidCharge ? chargeRise : chargeFall);
+
         if (filterOn)
         {
             if ((i & 7) == 0) // cutoff modulation at 1/8 rate is plenty and saves the tan()
             {
-                const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC);
+                const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC) + acidShift;
                 const auto fc = juce::jlimit (20.0f, maxCutoff, cutoff * std::exp2 (octaves));
                 const auto g = std::tan (juce::MathConstants<float>::pi * fc / (float) sampleRate);
                 resonant = Svf::make (g, k);
@@ -334,7 +375,9 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
 
         // With a third channel the processor keeps the sub separate (Sub Split);
         // otherwise it is mixed into both sides as before.
-        const auto gain = ampEnv.getNextSample() * level;
+        auto gain = ampEnv.getNextSample() * level;
+        if (acidOn)
+            gain *= accentGain;
         if (output.getNumChannels() > 2)
         {
             output.addSample (0, startSample + i, l * gain);

@@ -280,6 +280,9 @@ int main (int argc, char* argv[])
     if (command == "test")
         return runTests();
 
+    if (command == "acidcheck")
+        return runAcidCheck();
+
     if (command == "tunetest")
         return tuneTest();
 

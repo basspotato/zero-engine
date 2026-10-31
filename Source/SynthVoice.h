@@ -78,6 +78,11 @@ private:
         std::atomic<float>* tableMix;
         std::atomic<float>* subOn;
         std::atomic<float>* lfoSync;
+        std::atomic<float>* acidCutoff;
+        std::atomic<float>* acidRes;
+        std::atomic<float>* acidEnvMod;
+        std::atomic<float>* acidDecay;
+        std::atomic<float>* acidAccent;
     } p;
 
     void setVelocity (float velocity);
@@ -141,6 +146,16 @@ private:
     float lfoHeld = 0.0f;
     bool stolen = false; // stopped at once with its envelopes kept for the next note to rise from
     float lfoSmoothed = 0.0f, lfoSmoothing = 1.0f; // the 3 ms smoothing (set per note from the sample rate)
+
+    // The 303 row (main page). Like the TB-303: its own filter sweep, restarted
+    // by each note but not by a slide; accented notes (velocity 100+) get a
+    // short fixed sweep, a louder note, and charge the accent "wow" that climbs
+    // over back-to-back accents and relaxes after.
+    void startAcid() noexcept;
+    float acidSweep = 0.0f;   // 1 at a note, falling by the Decay knob (fixed and short on an accent)
+    float acidPulse = 0.0f;   // an accented note's own sweep
+    float acidCharge = 0.0f;  // the accent sweep capacitor: rises fast, lets go slowly
+    bool acidAccented = false;
 };
 
 // juce::Synthesiser plus Mono and Legato play modes: one voice and a stack of
