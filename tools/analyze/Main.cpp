@@ -283,6 +283,9 @@ int main (int argc, char* argv[])
     if (command == "acidcheck")
         return runAcidCheck();
 
+    if (command == "arpsync")
+        return runArpSyncCheck();
+
     if (command == "tunetest")
         return tuneTest();
 

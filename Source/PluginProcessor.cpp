@@ -1195,10 +1195,19 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     // Host tempo for the delay and synced LFOs; the fallback (120 BPM unless set) when
     // there is none (standalone, offline renders).
     auto bpm = (double) fallbackBpm.load();
+    bool hostPlaying = false;
+    double hostPpq = 0.0;
     if (auto* host = getPlayHead())
         if (const auto position = host->getPosition())
+        {
             if (const auto hostTempo = position->getBpm())
                 bpm = juce::jlimit (40.0, 300.0, *hostTempo);
+            if (const auto ppq = position->getPpqPosition(); ppq.hasValue() && position->getIsPlaying())
+            {
+                hostPlaying = true; // the arp locks to the DAW's grid
+                hostPpq = *ppq;
+            }
+        }
     hostBpm.store ((float) bpm);
     livePosition.store (-1.0f, std::memory_order_relaxed); // voices that play this block overwrite it
 
@@ -1211,6 +1220,8 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     arpSettings.octaves = (int) arpParams[3]->load();
     arpSettings.gate = arpParams[4]->load();
     arpSettings.bpm = bpm;
+    arpSettings.hostPlaying = hostPlaying;
+    arpSettings.hostPpq = hostPpq;
     arpSettings.length = (int) seqLengthParam->load();
     for (int step = 0; step < Arpeggiator::maxSteps; ++step)
     {

@@ -373,6 +373,63 @@ namespace
         return problems;
     }
 
+    // In a DAW: while it plays, steps land on its beat grid (1/16 at 120 BPM:
+    // every 6000 samples from the bar), the pattern's steps count from the bar,
+    // and pressing play again starts the note order from the top.
+    juce::StringArray checkArpHostSync()
+    {
+        Arpeggiator arp;
+        arp.prepare (48000.0, 512);
+        Arpeggiator::Settings s;
+        s.on = true;
+        s.mode = Arpeggiator::up;
+        s.beatsPerStep = 0.25;
+        s.bpm = 120.0;
+        constexpr double samplesPerBeat = 24000.0;
+
+        juce::StringArray problems;
+        juce::MidiBuffer keys;
+        std::vector<std::pair<double, int>> ons; // (beat, note)
+        auto run = [&] (double startBeat, int blocks, bool pressKeys, bool playing)
+        {
+            for (int b = 0; b < blocks; ++b)
+            {
+                keys.clear();
+                if (b == 0 && pressKeys)
+                    for (auto note : { 64, 60, 67 })
+                        keys.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+                const auto blockBeat = startBeat + b * 512 / samplesPerBeat;
+                s.hostPlaying = playing;
+                s.hostPpq = blockBeat;
+                for (const auto m : arp.process (keys, 512, s))
+                    if (m.getMessage().isNoteOn())
+                        ons.push_back ({ blockBeat + m.samplePosition / samplesPerBeat, m.getMessage().getNoteNumber() });
+            }
+        };
+
+        // Play from beat 0.1 (off the grid), keys held from the start: notes at
+        // beats 0.25, 0.5, 0.75... (within a sample), in order C E G from the first.
+        run (0.1, 200, true, true);
+        if (ons.size() < 10)
+            problems.add ("only " + juce::String ((int) ons.size()) + " notes");
+        for (size_t i = 0; i < ons.size(); ++i)
+        {
+            const auto onGrid = std::abs (ons[i].first * 4.0 - std::round (ons[i].first * 4.0)) * 0.25 * samplesPerBeat;
+            if (onGrid > 1.01)
+                problems.add ("note " + juce::String ((int) i) + " off the grid by " + juce::String (onGrid, 1) + " samples");
+        }
+        if (! ons.empty() && (std::abs (ons[0].first - 0.25) > 1.0e-4 || ons[0].second != 60))
+            problems.add ("first note at beat " + juce::String (ons[0].first, 3) + ", note " + juce::String (ons[0].second));
+
+        // Stop for a while (keys still held), then press play at beat 8: the note order starts again from C.
+        run (4.0, 20, false, false);
+        ons.clear();
+        run (8.0, 30, false, true);
+        if (ons.empty() || ons[0].second != 60 || std::abs (ons[0].first - 8.0) > 1.0e-4)
+            problems.add ("pressing play again did not start from the top on the beat");
+        return problems;
+    }
+
     // Latch: the pattern keeps playing after the keys lift; a fresh key replaces it.
     juce::StringArray checkLatch()
     {
@@ -1254,6 +1311,17 @@ int runAllTests()
         ++failures;
     }
 
+    std::printf ("Arp in a DAW (on its grid, play starts from the top)... ");
+    if (const auto problems = checkArpHostSync(); problems.isEmpty())
+        std::printf ("ok\n");
+    else
+    {
+        std::printf ("FAILED\n");
+        for (const auto& p : problems)
+            std::printf ("    %s\n", p.toRawUTF8());
+        ++failures;
+    }
+
     std::printf ("Arp Mode and Octaves (also changed while held)... ");
     if (const auto problems = checkArpSettings(); problems.isEmpty())
         std::printf ("ok\n");
@@ -1553,6 +1621,16 @@ int runAcidCheck()
     ZeroEngineProcessor::userFolderForTools = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_tests_user");
     const auto problems = checkAcid();
     std::printf ("303 row... %s\n", problems.isEmpty() ? "ok" : "FAILED");
+    for (const auto& p : problems)
+        std::printf ("    %s\n", p.toRawUTF8());
+    return problems.isEmpty() ? 0 : 1;
+}
+
+// Just the arp's DAW sync check.
+int runArpSyncCheck()
+{
+    const auto problems = checkArpHostSync();
+    std::printf ("Arp in a DAW... %s\n", problems.isEmpty() ? "ok" : "FAILED");
     for (const auto& p : problems)
         std::printf ("    %s\n", p.toRawUTF8());
     return problems.isEmpty() ? 0 : 1;

@@ -112,6 +112,23 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
     const auto latchReleased = wasLatched && ! s.latch;
     wasLatched = s.latch;
 
+    // The DAW playing: every block the next step is put where its beat grid
+    // says (so the arp can't drift from the track), and the pattern's steps
+    // count from the bar (step 1 on the downbeat at 1/16). Pressing play starts
+    // the note order from the top too.
+    const auto synced = s.hostPlaying;
+    if (synced)
+    {
+        if (! wasHostPlaying)
+            step = -1;
+        const auto stepsNow = s.hostPpq / s.beatsPerStep;
+        const auto next = std::ceil (stepsNow - 1.0e-6);
+        samplesToNextStep = (next - stepsNow) * stepSamples;
+        const auto index = (long long) next - 1; // the step before the next one
+        seqStep = (int) (((index % length) + length) % length);
+    }
+    wasHostPlaying = synced;
+
     auto rebuild = [&]
     {
         // Sorted (or as played) notes, repeated up the octaves.
@@ -171,8 +188,12 @@ const juce::MidiBuffer& Arpeggiator::process (const juce::MidiBuffer& midi, int 
                 changed = true;
                 if (wasEmpty)
                 {
-                    step = seqStep = -1;
-                    samplesToNextStep = 0.0; // the first key starts the pattern at once
+                    step = -1;
+                    if (! synced) // with the DAW playing the grid decides; otherwise the first key starts the pattern at once
+                    {
+                        seqStep = -1;
+                        samplesToNextStep = 0.0;
+                    }
                 }
             }
             else if (message.isNoteOff())

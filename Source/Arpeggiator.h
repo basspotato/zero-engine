@@ -28,6 +28,12 @@ public:
         int octaves = 1;
         float gate = 0.6f;          // fraction of a step each note sounds
         double bpm = 120.0;
+        // The DAW's transport: while it plays, the steps sit on its beat grid
+        // (hostPpq: the block's start in quarter notes) and pressing play starts
+        // the pattern from the top. Not playing (or standalone): steps run from
+        // the first key.
+        bool hostPlaying = false;
+        double hostPpq = 0.0;
 
         int length = maxSteps;      // sequence mode
         std::array<bool, maxSteps> stepOn { true, true, true, true, true, true, true, true,
@@ -70,6 +76,7 @@ private:
 
     double sampleRate = 48000.0, samplesToNextStep = 0.0, samplesToNoteOff = -1.0;
     bool wasOn = false;
+    bool wasHostPlaying = false;
     std::atomic<int> currentStep { -1 };
     juce::Random rng;
     juce::MidiBuffer out;
