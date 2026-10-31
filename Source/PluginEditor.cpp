@@ -2266,6 +2266,14 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
         filter303Attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.state, ParamIDs::acidFilter, filter303Button);
         addAndMakeVisible (filter303Button);
 
+        arpJumpButton.setTooltip ("The arpeggiator and step sequencer (the Advanced page's ARP tab).");
+        arpJumpButton.onClick = [this]
+        {
+            showAdvanced (true);
+            advancedPanel.showArpPage();
+        };
+        addAndMakeVisible (arpJumpButton);
+
         wave303Button.setClickingTogglesState (true);
         wave303Button.setTooltip ("303 mode's waveform: saw or square.");
         wave303Button.onStateChange = [this] { wave303Button.setButtonText (wave303Button.getToggleState() ? "SQUARE" : "SAW"); };
@@ -2724,6 +2732,8 @@ void ZeroEngineEditor::resized()
         macro.knob.setBounds (cell.reduced (4));
     }
     filter303Button.setBounds (box303.getX() + 4, box303.getY() - 2, 78, 16); // the box's tag, top left
+    // In the Macros header strip, centred over the 303 box.
+    arpJumpButton.setBounds (juce::Rectangle<int> (110, 16).withCentre ({ box303.getCentreX(), macroSection.getY() + 11 }));
     wave303Button.setBounds (box303.getRight() - 4 - 62, box303.getY() - 2, 62, 16); // its waveform, top right
     {
         auto inside = box303.withTrimmedTop (14).reduced (6, 2); // under the box's tag
