@@ -946,6 +946,43 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     // brightens through a fold (the owner had the tilted disc rings taken out).
     const auto flare = std::sin (MathConstants<float>::pi * foldProgress);
     const auto r = 0.36f * juce::jmin (screen.getWidth(), screen.getHeight());
+
+   #if ZERO_SPACE_IMAGES
+    // The owner's black hole picture: a ring of light round a dark core, turning
+    // counter-clockwise at about the pace of the rest of the movement (a turn in
+    // about 20 seconds), the ring brightening through a fold.
+    if (const auto ring = spaceImage ("blackhole.png"); ring.isValid())
+    {
+        constexpr float holeOfWidth = 0.211f; // the dark hole's radius as a share of the picture's width
+        const auto holeRadius = 0.105f * juce::jmin (screen.getWidth(), screen.getHeight()); // the old black hole's dark core (r x 0.28 x 1.6 x 0.62 = 0.28 of the height), so the same size
+        const auto width = holeRadius / holeOfWidth;
+
+        // The void itself: dark, with a soft edge just inside the ring (the stars and glowing nodes pass behind it).
+        juce::ColourGradient dark (juce::Colour (0xff04050a), c.x, c.y, juce::Colour (0x0004050a), c.x + holeRadius * 1.08f, c.y, true);
+        dark.addColour (0.8, juce::Colour (0xff04050a));
+        g.setGradientFill (dark);
+        g.fillEllipse (c.x - holeRadius * 1.08f, c.y - holeRadius * 1.08f, holeRadius * 2.16f, holeRadius * 2.16f);
+
+        const auto turn = -0.32f * t; // negative is counter-clockwise on screen
+        g.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
+        g.setOpacity (0.88f + 0.12f * flare);
+        g.drawImageTransformed (ring, juce::AffineTransform::translation (-0.5f * (float) ring.getWidth(), -0.5f * (float) ring.getHeight())
+                                          .scaled (width / (float) ring.getWidth())
+                                          .rotated (turn)
+                                          .translated (c.x, c.y));
+        g.setOpacity (1.0f);
+        if (flare > 0.01f) // a flash of light on the rim as the tesseract folds in
+        {
+            juce::ColourGradient glow (Palette::accent.withAlpha (0.0f), c.x, c.y, Palette::accent.withAlpha (0.0f), c.x + holeRadius * 1.9f, c.y, true);
+            glow.addColour (0.5, Palette::accent.withAlpha (0.0f));
+            glow.addColour (0.62, Palette::accent.withAlpha (0.35f * flare));
+            g.setGradientFill (glow);
+            g.fillEllipse (c.x - holeRadius * 1.9f, c.y - holeRadius * 1.9f, holeRadius * 3.8f, holeRadius * 3.8f);
+        }
+        return;
+    }
+   #endif
+
     const auto core = r * 0.28f;
     juce::ColourGradient rim (juce::Colour (0xff05060c), c.x, c.y, Palette::accent.withAlpha (0.0f), c.x + core * 1.6f, c.y, true);
     rim.addColour (0.62, juce::Colour (0xff05060c));
@@ -2908,12 +2945,12 @@ void ZeroEngineEditor::resized()
     generateArea.removeFromBottom (6);
     generateButton.setBounds (generateArea);
     const auto modeWidth = 96;
-    // One row, centred under the tesseract: the sound's name, SAVE, the heart and
+    // One row from the left edge: the sound's name, SAVE, the heart and
     // the thumbs down, the Favourites menu, then [MUTATE][MOOD][GENRE].
     {
         constexpr int nameWidth = 150, saveWidth = 50, favouritesWidth = 150, small = 22;
         const auto total = nameWidth + 6 + saveWidth + 6 + small + 2 + small + 10 + favouritesWidth + 12 + 3 * modeWidth + 12;
-        auto row = controls.withSizeKeepingCentre (total, 24);
+        auto row = controls.removeFromLeft (total).withSizeKeepingCentre (total, 24); // from the left edge
         soundName.setBounds (row.removeFromLeft (nameWidth));
         row.removeFromLeft (6);
         saveButton.setBounds (row.removeFromLeft (saveWidth));

@@ -1248,11 +1248,18 @@ int main (int argc, char* argv[])
         TesseractButton tesseract;
         constexpr int w = 912, h = 226;
         tesseract.setSize (w, h);
-        const double moments[] { 0.7, 1.0, 1.4, 2.0, 2.8, 3.7, 6.0 }; // the last after the waves, for the time
-        juce::Image strip (juce::Image::ARGB, w, h * (int) std::size (moments), true);
+        std::vector<double> moments { 0.7, 1.0, 1.4, 2.0, 2.8, 3.7, 6.0 }; // the last after the waves, for the time
+        for (const auto& a : args) // at=10,12.5: other moments (after the waves, to see the black hole turn)
+            if (a.startsWith ("at="))
+            {
+                moments.clear();
+                for (const auto& token : juce::StringArray::fromTokens (a.fromFirstOccurrenceOf ("=", false, false), ",", {}))
+                    moments.push_back (token.getDoubleValue());
+            }
+        juce::Image strip (juce::Image::ARGB, w, h * (int) moments.size(), true);
         {
             juce::Graphics g (strip);
-            for (size_t i = 0; i < std::size (moments); ++i)
+            for (size_t i = 0; i < moments.size(); ++i)
             {
                 tesseract.showWavesAt (moments[i]);
                 const auto start = juce::Time::getMillisecondCounterHiRes();
