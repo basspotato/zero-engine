@@ -246,6 +246,40 @@ private:
     bool filled = false;
 };
 
+// A knob with a detent: dragging through `zone` either side of `at` sticks at
+// `at` (the Pan knob's 12 o'clock), so the middle is easy to come back to.
+class DetentSlider : public juce::Slider
+{
+public:
+    using juce::Slider::Slider;
+    void setDetent (double at, double zoneEachSide) { detentAt = at; detentZone = zoneEachSide; }
+    double snapValue (double attempted, DragMode) override
+    {
+        return detentZone > 0.0 && std::abs (attempted - detentAt) < detentZone ? detentAt : attempted;
+    }
+
+private:
+    double detentAt = 0.0, detentZone = 0.0;
+};
+
+// The 303 box's running light: a thin live waveform of the output, between the
+// knobs and their names, lit while 303 mode is on; a dim flat rail when off.
+class AcidStrip : public juce::Component,
+                  private juce::Timer
+{
+public:
+    explicit AcidStrip (ZeroEngineProcessor& p) : processor (p)
+    {
+        setInterceptsMouseClicks (false, false);
+        startTimerHz (30);
+    }
+    void paint (juce::Graphics&) override;
+
+private:
+    void timerCallback() override { if (isShowing()) repaint(); }
+    ZeroEngineProcessor& processor;
+};
+
 // The thumbs down beside the heart: "less like this"; Generate learns from it
 // and moves on to the next sound.
 class DislikeButton : public juce::Button
@@ -326,7 +360,7 @@ private:
 
     struct Macro
     {
-        juce::Slider knob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
+        DetentSlider knob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
         juce::Label label;
         std::unique_ptr<SliderAttachment> attachment;
         juce::String name; // the label without its CC
@@ -344,7 +378,9 @@ private:
     juce::TextButton filter303Button { "303 MODE" }; // the box's tag: switches on 303 mode
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> filter303Attachment;
     juce::TextButton arpJumpButton { "SEQUENCER" }; // in the Macros header, over the 303 box: opens the ARP page
-    juce::TextButton arpPowerButton { "ARP OFF" };  // right of SEQUENCER: the arp (and its latch) on or off from the main page
+    juce::TextButton arpPowerButton { "ARP OFF" };  // right of SEQUENCER: the arp on or off from the main page
+    juce::TextButton latchButton { "LATCH OFF" };   // right of that: Latch on or off (the pattern keeps playing after the keys lift)
+    AcidStrip acidStrip { processor };               // the 303 box's running light (a thin waveform under the knobs)
     juce::TextButton wave303Button { "SAW" };        // top right of the box: 303 mode's saw or square
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> wave303Attachment;
     juce::ComboBox genreBox, typeBox;

@@ -395,6 +395,43 @@ void HeartButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
     g.strokePath (heart, juce::PathStrokeType (1.4f));
 }
 
+void AcidStrip::paint (juce::Graphics& g)
+{
+    const auto on = processor.state.getRawParameterValue (ParamIDs::acidFilter)->load() > 0.5f;
+    const auto r = getLocalBounds().toFloat().reduced (4.0f, 0.0f);
+    const auto mid = r.getCentreY();
+
+    // The rail: faint when 303 mode is off, orange when it's on.
+    g.setColour ((on ? Palette::orange : Palette::panelEdge).withAlpha (on ? 0.3f : 0.55f));
+    g.fillRect (r.getX(), mid - 0.5f, r.getWidth(), 1.0f);
+    if (! on)
+        return;
+
+    // The live output, newest at the right: the loudest sample of each slice.
+    constexpr int samples = 2048, points = 200;
+    std::array<float, samples> scope {};
+    processor.copyScope (scope.data(), samples);
+    juce::Path wave;
+    for (int i = 0; i < points; ++i)
+    {
+        const auto from = i * samples / points, to = (i + 1) * samples / points;
+        auto peak = 0.0f;
+        for (int s = from; s < to; ++s)
+            if (std::abs (scope[(size_t) s]) > std::abs (peak))
+                peak = scope[(size_t) s];
+        const juce::Point<float> p (r.getX() + r.getWidth() * (float) i / (float) (points - 1),
+                                    mid - juce::jlimit (-1.0f, 1.0f, peak * 2.2f) * 0.5f * (r.getHeight() - 1.0f));
+        if (i == 0)
+            wave.startNewSubPath (p);
+        else
+            wave.lineTo (p);
+    }
+    g.setColour (Palette::orange.withAlpha (0.2f)); // a soft glow under the line
+    g.strokePath (wave, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved));
+    g.setColour (Palette::yellow.withAlpha (0.95f));
+    g.strokePath (wave, juce::PathStrokeType (1.1f, juce::PathStrokeType::curved));
+}
+
 void ChevronButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     const auto r = getLocalBounds().toFloat();
@@ -2270,6 +2307,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     setUpMacro (outputKnob, ParamIDs::output, "Output");
     setUpMacro (panKnob, ParamIDs::pan, "Pan");
     panKnob.knob.setDoubleClickReturnValue (true, 0.0); // double-click: back to centre
+    panKnob.knob.setDetent (0.0, 0.06);                 // and dragging sticks at centre (about 8 px of travel either side)
     // Clones of the Advanced page's filter cutoff and amp envelope knobs: the same
     // parameters, on the main page.
     {
@@ -2304,17 +2342,24 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
         };
         addAndMakeVisible (arpJumpButton);
 
-        // ARP ON / ARP OFF: switches the arp and its latch together, staying on this page.
-        arpPowerButton.setTooltip ("Arp on or off (with Latch, so it keeps playing after the keys lift).");
-        arpPowerButton.onClick = [this]
+        // ARP ON/OFF and LATCH ON/OFF: the two switches of the ARP page, without leaving this one.
+        auto wirePowerButton = [this] (juce::TextButton& button, const char* id, const char* onText, const char* offText, const char* tip)
         {
-            const auto on = processor.state.getRawParameterValue (ParamIDs::arpOn)->load() < 0.5f;
-            for (auto* id : { ParamIDs::arpOn, ParamIDs::arpLatch })
+            button.setTooltip (tip);
+            button.onClick = [this, &button, id, onText, offText]
+            {
+                const auto on = processor.state.getRawParameterValue (id)->load() < 0.5f;
                 processor.state.getParameter (id)->setValueNotifyingHost (on ? 1.0f : 0.0f);
-            arpPowerButton.setToggleState (on, juce::dontSendNotification);
-            arpPowerButton.setButtonText (on ? "ARP ON" : "ARP OFF");
+                button.setToggleState (on, juce::dontSendNotification);
+                button.setButtonText (on ? onText : offText);
+            };
+            addAndMakeVisible (button);
         };
+        wirePowerButton (arpPowerButton, ParamIDs::arpOn, "ARP ON", "ARP OFF", "Arp on or off.");
+        wirePowerButton (latchButton, ParamIDs::arpLatch, "LATCH ON", "LATCH OFF",
+                         "Arp Latch on or off: on, the pattern keeps playing after you lift the keys.");
         addAndMakeVisible (arpPowerButton);
+        addAndMakeVisible (acidStrip);
 
         wave303Button.setClickingTogglesState (true);
         wave303Button.setTooltip ("303 mode's waveform: saw or square.");
@@ -2572,12 +2617,17 @@ void ZeroEngineEditor::timerCallback()
     heartButton.setFilled (processor.isCurrentHearted());
     if (const auto name = processor.getSoundName(); name != soundName.getText())
         soundName.setText (name, juce::dontSendNotification);
-    const auto arpOn = processor.state.getRawParameterValue (ParamIDs::arpOn)->load() > 0.5f; // the arp page or Generate may switch it too
-    if (arpPowerButton.getToggleState() != arpOn || arpPowerButton.getButtonText().isEmpty())
+    // The arp page or Generate may switch the arp and its latch too.
+    auto follow = [this] (juce::TextButton& button, const char* id, const char* onText, const char* offText)
     {
-        arpPowerButton.setToggleState (arpOn, juce::dontSendNotification);
-        arpPowerButton.setButtonText (arpOn ? "ARP ON" : "ARP OFF");
-    }
+        const auto on = processor.state.getRawParameterValue (id)->load() > 0.5f;
+        if (button.getToggleState() != on)
+            button.setToggleState (on, juce::dontSendNotification);
+        if (const auto text = on ? juce::String (onText) : juce::String (offText); button.getButtonText() != text)
+            button.setButtonText (text);
+    };
+    follow (arpPowerButton, ParamIDs::arpOn, "ARP ON", "ARP OFF");
+    follow (latchButton, ParamIDs::arpLatch, "LATCH ON", "LATCH OFF");
     refreshGenerateMode(); // a session or favourite may bring its own
 
     for (size_t m = 0; m < macros.size(); ++m)
@@ -2796,11 +2846,21 @@ void ZeroEngineEditor::resized()
     }
     filter303Button.setBounds (box303.getX() + 4, box303.getY() - 2, 78, 16); // the box's tag, top left
     // In the Macros header strip, centred over the 303 box.
-    arpJumpButton.setBounds (juce::Rectangle<int> (110, 16).withCentre ({ box303.getCentreX(), macroSection.getY() + 11 }));
-    arpPowerButton.setBounds (arpJumpButton.getRight() + 6, arpJumpButton.getY(), 76, 16);
+    // SEQUENCER, ARP and LATCH as one group, centred over the 303 box.
+    {
+        constexpr int sequencerWidth = 92, arpWidth = 70, latchWidth = 82, gap = 6;
+        auto group = juce::Rectangle<int> (sequencerWidth + arpWidth + latchWidth + 2 * gap, 16)
+                         .withCentre ({ box303.getCentreX(), macroSection.getY() + 11 });
+        arpJumpButton.setBounds (group.removeFromLeft (sequencerWidth));
+        group.removeFromLeft (gap);
+        arpPowerButton.setBounds (group.removeFromLeft (arpWidth));
+        group.removeFromLeft (gap);
+        latchButton.setBounds (group);
+    }
     wave303Button.setBounds (box303.getRight() - 4 - 62, box303.getY() - 2, 62, 16); // its waveform, top right
     {
         auto inside = box303.withTrimmedTop (14).reduced (6, 2); // under the box's tag
+        const auto insideAll = inside;
         const auto smallWidth = inside.getWidth() / (int) acid.size();
         for (auto& knob : acid)
         {
@@ -2810,6 +2870,9 @@ void ZeroEngineEditor::resized()
             // On the same centre line as the macro knobs beside them.
             knob.knob.setBounds (juce::Rectangle<int> (size, size).withCentre ({ cell.getCentreX(), macros[0].knob.getBounds().getCentreY() }));
         }
+        // The running light: the gap between the knobs' bottoms and their names.
+        const auto knobsBottom = acid[0].knob.getBottom(), namesTop = acid[0].label.getY();
+        acidStrip.setBounds (insideAll.getX(), knobsBottom + 1, insideAll.getWidth(), juce::jmax (4, namesTop - knobsBottom - 2));
     }
     area.removeFromBottom (10);
 
