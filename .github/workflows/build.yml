@@ -29,7 +29,7 @@ jobs:
       - name: Build VST3 and standalone (Release)
         shell: pwsh
         run: |
-          cmake --build build --config Release --target ZeroEngine_VST3 ZeroEngine_Standalone --parallel *>&1 | Tee-Object -FilePath build.log
+          cmake --build build --config Release --target ZeroEngine_VST3 ZeroEngine_Standalone ZeroEngine_clap --parallel *>&1 | Tee-Object -FilePath build.log
           if ($LASTEXITCODE -ne 0) {
             $errs = (Select-String -Path build.log -Pattern ' error ' | Select-Object -First 30 | ForEach-Object { $_.Line }) -join '%0A'
             Write-Output "::error title=Build failed::$errs"
@@ -41,6 +41,13 @@ jobs:
         with:
           name: Zero-Engine-VST3-Windows-x64
           path: build/ZeroEngine_artefacts/Release/VST3/
+          if-no-files-found: error
+
+      - name: Upload CLAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zero-Engine-CLAP-Windows-x64
+          path: build/ZeroEngine_artefacts/Release/CLAP/*.clap
           if-no-files-found: error
 
       - name: Upload standalone
