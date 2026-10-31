@@ -84,6 +84,7 @@ private:
         std::atomic<float>* acidDecay;
         std::atomic<float>* acidAccent;
         std::atomic<float>* acidFilter;
+        std::atomic<float>* acidWave;
     } p;
 
     void setVelocity (float velocity);
@@ -140,7 +141,7 @@ private:
             Coeffs c;
             c.G = g / (1.0f + g);
             c.G4 = c.G * c.G * c.G * c.G;
-            c.k = 3.85f * resonance;          // 4 would ring on its own
+            c.k = 3.95f * resonance;          // 4 would ring on its own
             c.makeUp = 1.0f + 0.45f * c.k;    // part of the passband back
             c.lowCoeff = lowCoeff;
             return c;
@@ -162,6 +163,19 @@ private:
             feedbackLow += c.lowCoeff * (u - feedbackLow);
             return u * c.makeUp;
         }
+
+        // 303 mode: twice per sample (coefficients made for the doubled rate),
+        // driven harder into the soft clip, the two outputs averaged down.
+        // Cleaner screaming resonance at high cutoffs.
+        float processTwice (float x, const Coeffs& c, float drive) noexcept
+        {
+            const auto halfway = 0.5f * (lastIn + x);
+            lastIn = x;
+            const auto a = process (halfway * drive, c);
+            const auto b = process (x * drive, c);
+            return 0.5f * (a + b) / drive;
+        }
+        float lastIn = 0.0f;
     };
     Ladder303 ladders[2]; // [channel]
 
@@ -197,8 +211,10 @@ private:
     void startAcid() noexcept;
     float acidSweep = 0.0f;   // 1 at a note, falling by the Decay knob (fixed and short on an accent)
     float acidPulse = 0.0f;   // an accented note's own sweep
+    float sweepTarget = 0.0f, pulseTarget = 0.0f; // what they rise to in ~1.5 ms (an instant jump of the filter clicks)
     float acidCharge = 0.0f;  // the accent sweep capacitor: rises fast, lets go slowly
     bool acidAccented = false;
+    float accentLevel = 1.0f; // the accent's level boost, eased (no click between notes)
 };
 
 // juce::Synthesiser plus Mono and Legato play modes: one voice and a stack of

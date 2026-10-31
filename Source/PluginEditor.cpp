@@ -2260,10 +2260,17 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
             acid[i].label.setFont (Fonts::ui (10.5f, true));
         }
         filter303Button.setClickingTogglesState (true);
-        filter303Button.setTooltip ("303 filter: swaps the sound's filter for a 303-style ladder (squelchy resonance that thins the bass), "
-                                    "plays one note at a time and slides overlapping notes. Off again on every new sound.");
+        filter303Button.setTooltip ("303 mode: the sound becomes a 303 - its own saw or square, the 303 filter (squelchy resonance that thins the bass) "
+                                    "over the 303's cutoff range, its envelope, one note at a time with slides, mono, the finishing chain eased. "
+                                    "Off again on every new sound.");
         filter303Attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.state, ParamIDs::acidFilter, filter303Button);
         addAndMakeVisible (filter303Button);
+
+        wave303Button.setClickingTogglesState (true);
+        wave303Button.setTooltip ("303 mode's waveform: saw or square.");
+        wave303Button.onStateChange = [this] { wave303Button.setButtonText (wave303Button.getToggleState() ? "SQUARE" : "SAW"); };
+        wave303Attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.state, ParamIDs::acidWave, wave303Button);
+        addAndMakeVisible (wave303Button);
     }
 
     genreBox.addItemList (genreNames, 1);
@@ -2717,6 +2724,7 @@ void ZeroEngineEditor::resized()
         macro.knob.setBounds (cell.reduced (4));
     }
     filter303Button.setBounds (box303.getX() + 4, box303.getY() - 2, 78, 16); // the box's tag, top left
+    wave303Button.setBounds (box303.getRight() - 4 - 62, box303.getY() - 2, 62, 16); // its waveform, top right
     {
         auto inside = box303.withTrimmedTop (14).reduced (6, 2); // under the box's tag
         const auto smallWidth = inside.getWidth() / (int) acid.size();

@@ -340,8 +340,10 @@ private:
     std::array<Macro, 5> envelope; // cutoff, then attack, decay, sustain, release on the main page
     std::array<Macro, 5> acid;     // the 303 knobs in Macros: cutoff, reso, env mod, decay, accent
     juce::Rectangle<int> box303;   // their bordered box
-    juce::TextButton filter303Button { "303 FILTER" }; // the box's tag: switches on the 303-style filter
+    juce::TextButton filter303Button { "303 MODE" }; // the box's tag: switches on 303 mode
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> filter303Attachment;
+    juce::TextButton wave303Button { "SAW" };        // top right of the box: 303 mode's saw or square
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> wave303Attachment;
     juce::ComboBox genreBox, typeBox;
     std::unique_ptr<ComboAttachment> genreAttachment, typeAttachment;
     ScopeView display;

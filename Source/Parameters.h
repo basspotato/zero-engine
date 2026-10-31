@@ -88,7 +88,8 @@ namespace ParamIDs
     inline constexpr auto acidEnvMod  = "acidEnvMod";  // depth of the 303 sweep (0 = none)
     inline constexpr auto acidDecay   = "acidDecay";   // the sweep's decay
     inline constexpr auto acidAccent  = "acidAccent";  // how hard accented notes hit (0 = none)
-    inline constexpr auto acidFilter  = "acidFilter";  // the 303 switch: a 303-style ladder filter, one note at a time with slides
+    inline constexpr auto acidFilter  = "acidFilter";  // the 303 switch: 303 mode (its own saw/square, filter range, envelope), one note at a time with slides
+    inline constexpr auto acidWave    = "acidWave";    // 303 mode's waveform: saw (off) or square (on)
     inline constexpr auto seqLength   = "seqLength";   // step sequencer (arp mode "Sequence")
     inline constexpr auto tilt        = "tilt";
     inline constexpr auto monoFreq    = "monoFreq";
@@ -252,7 +253,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
                                                        NormalisableRange<float> (0.2f, 2.0f, 0.0f, 0.5f), 0.5f,
                                                        AudioParameterFloatAttributes().withLabel ("s")));
     unit (ParamIDs::acidAccent, "303 Accent", 0.0f);
-    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::acidFilter, 1 }, "303 Filter", false));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::acidFilter, 1 }, "303 Mode", false));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::acidWave, 1 }, "303 Square", false));
 
     // Step sequencer: every step on, accents on the beats, so it plays at once.
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ParamIDs::seqLength, 1 }, "Seq Length", 1, 16, 16));

@@ -1064,7 +1064,30 @@ namespace
                 chord.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 90), 0);
             engine.processBlock (block, chord);
             if (engine.getActiveVoiceCount() != 1)
-                problems.add ("303 filter: a chord played " + juce::String (engine.getActiveVoiceCount()) + " voices, not one");
+                problems.add ("303 mode: a chord played " + juce::String (engine.getActiveVoiceCount()) + " voices, not one");
+
+            // And it's the 303: mono (a wide pad loses its width), finite, in bounds.
+            juce::MidiBuffer none303;
+            double side = 0.0, mid = 1.0e-12;
+            float peak = 0.0f;
+            bool ok = true;
+            for (int b = 0; b < 60; ++b)
+            {
+                block.clear();
+                engine.processBlock (block, none303);
+                for (int i = 0; i < block.getNumSamples(); ++i)
+                {
+                    const auto l = block.getSample (0, i), r = block.getSample (1, i);
+                    ok = ok && std::isfinite (l) && std::isfinite (r);
+                    side += (l - r) * (l - r);
+                    mid += (l + r) * (l + r);
+                    peak = juce::jmax (peak, std::abs (l), std::abs (r));
+                }
+            }
+            if (! ok || peak > 1.01f)
+                problems.add ("303 mode: a pad went out of bounds (peak " + juce::String (peak, 2) + ")");
+            if (side > 0.01 * mid)
+                problems.add ("303 mode: not mono (side " + juce::String (side / mid, 3) + " of mid)");
         }
 
         // Through the arp: one key held at velocity 90, the default pattern's

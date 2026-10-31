@@ -49,6 +49,7 @@ ZeroEngineProcessor::ZeroEngineProcessor()
         arpParams[slot] = state.getRawParameterValue (id);
     seqLengthParam = state.getRawParameterValue (ParamIDs::seqLength);
     arpLatchParam = state.getRawParameterValue (ParamIDs::arpLatch);
+    mode303Param = state.getRawParameterValue (ParamIDs::acidFilter);
     for (auto [m, id] : { std::pair { 0, ParamIDs::weight }, { 1, ParamIDs::grit }, { 2, ParamIDs::punch }, { 3, ParamIDs::width }, { 4, ParamIDs::motion }, { 5, ParamIDs::air } })
         macroParams[m] = state.getParameter (id);
     for (int step = 0; step < Arpeggiator::maxSteps; ++step)
@@ -127,7 +128,7 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
 void ZeroEngineProcessor::resetAcid()
 {
     // The 303 row tweaks the sound in front of you: a new one starts it at neutral.
-    for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent, ParamIDs::acidFilter })
+    for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent, ParamIDs::acidFilter, ParamIDs::acidWave })
         if (auto* param = state.getParameter (id))
             param->setValueNotifyingHost (param->getDefaultValue());
 }
@@ -1260,12 +1261,21 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.air      = air.load();
     settings.monoFreq = monoFreq.load();
     settings.midHighPassHz = juce::jlimit (20.0f, 1000.0f, midHighPass.load() * std::exp2 (macroMap.offset (MacroTarget::midHighPass)));
+    const auto mode303 = mode303Param->load() > 0.5f;
+    if (mode303)
+    {
+        // 303 mode: the bite comes through - OTT eased, no spectral stage, mono
+        // (set below). Grit stays, as a 303 into a pedal.
+        settings.ottDepth *= 0.3f;
+        settings.spectral = 0.0f;
+        settings.tiltDb = juce::jmax (0.0f, settings.tiltDb); // the sound's darkening left out; the 303's filter decides
+    }
 
     // With no sub (leads, chords, pads, plucks) nothing replaces what the
     // high-pass removes, so keep it below the lowest note's fundamental: a low
     // hoover or brass chord keeps its root. Basses keep the fixed split, since
     // their clean sub carries the fundamental.
-    if (subOn.load() < 0.5f)
+    if (subOn.load() < 0.5f || mode303) // 303 mode has no sub either
     {
         int lowest = 128;
         for (int i = 0; i < synth.getNumVoices(); ++i)
@@ -1285,6 +1295,8 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
     settings.outputDb = output.load() + levelTrim.load();
     settings.pan = pan.load();
+    if (mode303)
+        settings.sideGain = 0.0f; // a 303 is mono
 
     const auto beats = delayTimeBeats[juce::jlimit (0, (int) std::size (delayTimeBeats) - 1, (int) delayTime.load())];
     settings.delaySeconds  = (float) (beats * 60.0 / bpm);

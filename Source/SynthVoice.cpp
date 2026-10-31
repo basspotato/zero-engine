@@ -15,6 +15,37 @@ namespace
         const auto pairs = count / 2;
         return sign * (float) pair / (float) pairs;
     }
+
+    // PolyBLEP: the step of a jump smoothed over a sample each side, so the
+    // 303 oscillator's saw and square don't alias.
+    float polyBlep (double t, double dt) noexcept
+    {
+        if (t < dt)
+        {
+            t /= dt;
+            return (float) (t + t - t * t - 1.0);
+        }
+        if (t > 1.0 - dt)
+        {
+            t = (t - 1.0) / dt;
+            return (float) (t * t + t + t + 1.0);
+        }
+        return 0.0f;
+    }
+
+    // 303 mode's oscillator: a falling saw, or a square with its corners a
+    // little rounded (the 303 makes its square from the saw).
+    float osc303 (double phase, double inc, bool square) noexcept
+    {
+        if (! square)
+            return (float) (1.0 - 2.0 * phase) + polyBlep (phase, inc);
+
+        auto second = phase + 0.5;
+        if (second >= 1.0)
+            second -= 1.0;
+        const auto value = (phase < 0.5 ? 1.0f : -1.0f) + polyBlep (phase, inc) - polyBlep (second, inc);
+        return 0.7f * value; // a square carries more power than a saw at the same peak
+    }
 }
 
 ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap& map, const std::atomic<float>& bpm,
@@ -36,15 +67,15 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::waveTable), get (ParamIDs::waveTableB), get (ParamIDs::tableMix), get (ParamIDs::subOn),
           get (ParamIDs::lfoSync),
           get (ParamIDs::acidCutoff), get (ParamIDs::acidRes), get (ParamIDs::acidEnvMod), get (ParamIDs::acidDecay), get (ParamIDs::acidAccent),
-          get (ParamIDs::acidFilter) };
+          get (ParamIDs::acidFilter), get (ParamIDs::acidWave) };
 }
 
 void ZeroVoice::startAcid() noexcept
 {
-    acidSweep = 1.0f;
+    sweepTarget = 1.0f;
     acidAccented = noteVelocity >= 100.0f / 127.0f;
     if (acidAccented)
-        acidPulse = 1.0f;
+        pulseTarget = 1.0f;
 }
 
 bool ZeroVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -74,8 +105,11 @@ void ZeroVoice::updateEnvelopes()
     const auto attackScale = 1.0f - 0.95f * p.punch->load();
     const auto decayScale = std::exp2 (macroMap.offset (MacroTarget::ampDecay));
 
-    ampEnv.setParameters ({ juce::jmax (0.001f, p.ampAttack->load() * attackScale), juce::jmax (0.001f, p.ampDecay->load() * decayScale),
-                            p.ampSustain->load(), juce::jmax (0.005f, p.ampRelease->load()) });
+    if (p.acidFilter->load() > 0.5f) // 303 mode: snaps on, sinks slowly while held, stops short
+        ampEnv.setParameters ({ 0.003f, 1.6f, 0.0f, 0.012f });
+    else
+        ampEnv.setParameters ({ juce::jmax (0.001f, p.ampAttack->load() * attackScale), juce::jmax (0.001f, p.ampDecay->load() * decayScale),
+                                p.ampSustain->load(), juce::jmax (0.005f, p.ampRelease->load()) });
     modEnv.setParameters ({ juce::jmax (0.001f, p.modAttack->load()), juce::jmax (0.001f, p.modDecay->load()),
                             p.modSustain->load(), juce::jmax (0.005f, p.modRelease->load()) });
 }
@@ -88,7 +122,7 @@ void ZeroVoice::pitchWheelMoved (int newValue)
 void ZeroVoice::setVelocity (float velocity)
 {
     noteVelocity = velocity;
-    const auto sensitivity = p.velSens->load();
+    const auto sensitivity = p.acidFilter->load() > 0.5f ? 0.0f : p.velSens->load(); // a 303 has no velocity, only accent
     level = 0.3f * (1.0f - sensitivity + sensitivity * velocity);
 }
 
@@ -233,6 +267,9 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
 
     const auto& bank = WavetableBank::get();
     const auto sampleRate = getSampleRate();
+    // 303 mode (the 303 FILTER switch): its own oscillator, filter range and
+    // envelope in place of the sound's, as close to a TB-303 as we get.
+    const auto filter303 = p.acidFilter->load() > 0.5f;
 
     updateEnvelopes();
 
@@ -245,15 +282,15 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto modToPos = juce::jlimit (-1.0f, 1.0f, p.modToPos->load() + macroMap.offset (MacroTarget::modToPos));
     const auto motion = macroMap.motion(); // the knob plus the mod wheel
     const auto lfoToPos = juce::jlimit (0.0f, 1.0f, p.lfoToPos->load() + motion * 0.5f + macroMap.offset (MacroTarget::lfoToPos));
-    const auto lfoToPitch = p.lfoToPitch->load() * 2.0f; // semitones
+    const auto lfoToPitch = filter303 ? 0.0f : p.lfoToPitch->load() * 2.0f; // semitones (a 303 has no vibrato)
     // Synced: one cycle per note division of the host tempo, so wobbles stay on
     // the beat at any BPM. Motion still doubles the rate per unit (the next division).
     const auto sync = juce::jlimit (0, (int) std::size (lfoSyncBeats) - 1, (int) p.lfoSync->load());
     const auto baseRate = sync > 0 ? hostBpm.load() / 60.0f / lfoSyncBeats[sync] : p.lfoRate->load();
     const auto lfoRate = juce::jlimit (0.05f, 40.0f, baseRate * std::exp2 (macroMap.offset (MacroTarget::lfoRate)));
     const auto lfoInc = (float) (lfoRate / sampleRate);
-    const auto modToPitch = juce::jlimit (-36.0f, 36.0f, p.modToPitch->load() + macroMap.offset (MacroTarget::modToPitch)); // semitones at full mod envelope
-    const auto subLevel = p.subOn->load() > 0.5f ? p.weight->load() * 0.8f : 0.0f;
+    const auto modToPitch = filter303 ? 0.0f : juce::jlimit (-36.0f, 36.0f, p.modToPitch->load() + macroMap.offset (MacroTarget::modToPitch)); // semitones at full mod envelope
+    const auto subLevel = p.subOn->load() > 0.5f && ! filter303 ? p.weight->load() * 0.8f : 0.0f;
     const auto subRatio = p.subOctave->load() < -0.5f ? 0.5 : 1.0;
 
     // Per unison voice: pitch ratio and equal-power stereo gains.
@@ -275,7 +312,6 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
 
     // Choose the mip level for the highest pitch this block can reach.
     const auto bendSemis = bend * p.bendRange->load();
-    const auto filter303 = p.acidFilter->load() > 0.5f;
     const auto glideTime = filter303 ? juce::jmax (0.06f, p.glide->load()) : p.glide->load(); // the 303's slide, about 60 ms
     const auto glideCoeff = glideTime > 0.0005f ? 1.0 - std::exp (-3.0 / (glideTime * sampleRate)) : 1.0; // ~95% there at glideTime
 
@@ -304,9 +340,12 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto acidResOffset = p.acidRes->load();
     const auto envMod = p.acidEnvMod->load();
     const auto accent = p.acidAccent->load();
-    const auto acidOn = std::abs (acidOctaves) > 1.0e-4f || envMod > 1.0e-4f || accent > 1.0e-4f;
-    const auto resonance = std::abs (acidResOffset) > 1.0e-4f ? juce::jlimit (0.0f, 0.95f, p.filterRes->load() + acidResOffset) // short of a scream
-                                                             : p.filterRes->load();
+    const auto acidOn = std::abs (acidOctaves) > 1.0e-4f || envMod > 1.0e-4f || accent > 1.0e-4f || filter303;
+    // In 303 mode Reso covers the 303's whole range by itself (centre about
+    // half, full right at the edge of ringing); otherwise it moves the sound's.
+    const auto resonance = filter303 ? juce::jlimit (0.0f, 1.0f, 0.55f + 0.45f * acidResOffset)
+                         : std::abs (acidResOffset) > 1.0e-4f ? juce::jlimit (0.0f, 0.95f, p.filterRes->load() + acidResOffset) // short of a scream
+                                                              : p.filterRes->load();
     // Env Mod sweeps up to 4.5 octaves and, as on the 303, lowers the resting
     // cutoff as it rises; an accent's own sweep and its wow grow with resonance.
     const auto sweepFall = (float) std::exp (-3.0 / ((acidAccented ? 0.2 : (double) p.acidDecay->load()) * sampleRate)); // ~95 % down at Decay
@@ -315,7 +354,13 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     // a row climb (the 303's wow); it lets go over about a second.
     const auto chargeRise = (float) (1.0 - std::exp (-1.0 / (0.1 * sampleRate)));
     const auto chargeFall = (float) (1.0 - std::exp (-1.0 / (0.35 * sampleRate)));
-    const auto accentGain = acidAccented ? 1.0f + 0.8f * accent : 1.0f; // about +5 dB at full Accent
+    const auto accentGain = acidAccented ? 1.0f + (filter303 ? 1.0f : 0.8f) * accent : 1.0f; // about +5 dB at full Accent (+6 in 303 mode)
+    // 303 mode: the cutoff is the 303's own (about 230 Hz to 2.8 kHz across the
+    // Cutoff knob, 800 Hz at centre), the sound's filter settings left out.
+    const auto cutoff303 = 800.0f * std::exp2 (0.45f * acidOctaves);
+    const auto square303 = p.acidWave->load() > 0.5f;
+    const auto accentEase = (float) (1.0 - std::exp (-1.0 / (0.003 * sampleRate)));
+    const auto sweepRise = (float) (1.0 - std::exp (-1.0 / (0.0005 * sampleRate))); // ~1.5 ms to the top
     const auto wowDepth = accent * (1.5f + 7.0f * resonance);
 
     const auto filterOn = filterMode > 1 || cutoff < 19000.0f || std::abs (filterEnv) > 1.0e-3f
@@ -325,7 +370,7 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto middleC = std::log2 (261.63);
     Svf::Coeffs resonant, flat;
     Ladder303::Coeffs ladder;
-    const auto ladderLow = (float) (1.0 - std::exp (-juce::MathConstants<double>::twoPi * 25.0 / sampleRate)); // only near-DC kept out of the feedback
+    const auto ladderLow303 = (float) (1.0 - std::exp (-juce::MathConstants<double>::twoPi * 25.0 / (2.0 * sampleRate))); // only near-DC kept out of the feedback (oversampled)
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -338,6 +383,16 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         const auto inc = std::exp2 (pitch + (lfo * lfoToPitch + mod * modToPitch + bendSemis) / 12.0) / sampleRate;
 
         float l = 0.0f, r = 0.0f;
+        if (filter303)
+        {
+            // One band-limited oscillator, saw or square, the same both sides.
+            const auto s = 0.45f * osc303 (phases[0], inc, square303); // about a designed sound's level into the chain
+            l = r = s;
+            phases[0] += inc;
+            if (phases[0] >= 1.0)
+                phases[0] -= 1.0;
+        }
+        else
         for (int v = 0; v < voices; ++v)
         {
             auto s = bankA.lookup (table, mipLevel, pos, phases[v]);
@@ -353,32 +408,42 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
 
         // The 303 sweeps run even at neutral, so turning Env Mod up mid-note
         // joins the sweep where it is.
-        const auto acidShift = acidOn ? acidOctaves + envMod * (4.5f * acidSweep - 1.2f) + accent * 2.0f * acidPulse + wowDepth * acidCharge
-                                      : 0.0f;
-        acidSweep *= sweepFall;
-        acidPulse *= pulseFall;
+        const auto acidShift = filter303 ? envMod * (4.5f * acidSweep - 0.6f) + accent * 2.5f * acidPulse + wowDepth * acidCharge
+                             : acidOn    ? acidOctaves + envMod * (4.5f * acidSweep - 1.2f) + accent * 2.0f * acidPulse + wowDepth * acidCharge
+                                         : 0.0f;
+        sweepTarget *= sweepFall;
+        pulseTarget *= pulseFall;
+        acidSweep += (sweepTarget - acidSweep) * sweepRise;
+        acidPulse += (pulseTarget - acidPulse) * sweepRise;
         acidCharge += (acidPulse - acidCharge) * (acidPulse > acidCharge ? chargeRise : chargeFall);
 
         if (filterOn)
         {
-            if ((i & 7) == 0) // cutoff modulation at 1/8 rate is plenty and saves the tan()
+            // Cutoff modulation at 1/8 rate is plenty and saves the tan(); 303 mode
+            // (one voice, fast sweeps into high resonance) updates every other sample.
+            if ((i & (filter303 ? 1 : 7)) == 0)
             {
-                const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC) + acidShift;
-                const auto fc = juce::jlimit (20.0f, maxCutoff, cutoff * std::exp2 (octaves));
-                const auto g = std::tan (juce::MathConstants<float>::pi * fc / (float) sampleRate);
                 if (filter303)
-                    ladder = Ladder303::make (g, resonance, ladderLow);
+                {
+                    // At twice the rate (the ladder runs oversampled).
+                    const auto fc = juce::jlimit (20.0f, (float) (0.9 * sampleRate), cutoff303 * std::exp2 (acidShift));
+                    const auto g = std::tan (juce::MathConstants<float>::pi * fc / (float) (2.0 * sampleRate));
+                    ladder = Ladder303::make (g, resonance, ladderLow303);
+                }
                 else
                 {
+                    const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC) + acidShift;
+                    const auto fc = juce::jlimit (20.0f, maxCutoff, cutoff * std::exp2 (octaves));
+                    const auto g = std::tan (juce::MathConstants<float>::pi * fc / (float) sampleRate);
                     resonant = Svf::make (g, k);
                     flat = Svf::make (g, juce::MathConstants<float>::sqrt2);
                 }
             }
 
-            if (filter303) // the 303 switch: the ladder in place of the sound's filter, whatever its mode
+            if (filter303) // 303 mode: the ladder, oversampled and driven, in place of the sound's filter
             {
-                l = ladders[0].process (l, ladder);
-                r = ladders[1].process (r, ladder);
+                l = ladders[0].processTwice (l, ladder, 2.0f);
+                r = l; // mono, like the 303 (one ladder is enough)
             }
             else
             {
@@ -396,7 +461,12 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         // otherwise it is mixed into both sides as before.
         auto gain = ampEnv.getNextSample() * level;
         if (acidOn)
-            gain *= accentGain;
+        {
+            // Eased over ~3 ms: a voice carried from an accented note to a plain
+            // one (or back) would otherwise step in level and click.
+            accentLevel += (accentGain - accentLevel) * accentEase;
+            gain *= accentLevel;
+        }
         if (output.getNumChannels() > 2)
         {
             output.addSample (0, startSample + i, l * gain);

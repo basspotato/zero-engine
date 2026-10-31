@@ -1257,6 +1257,119 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "acidline")
+    {
+        // 303 mode on a classic 16-step acid line (130 BPM, accents, slides),
+        // saw and square, plus a slow sweep of Cutoff and Env Mod over 8 bars;
+        // WAVs for listening, each checked for clicks as clickcheck does.
+        const auto dir = argFile (args, 1, "analysis/acid");
+        dir.createDirectory();
+        constexpr double rate = 48000.0, bpm = 130.0;
+        constexpr int block = 256;
+        const auto stepSamples = (int) (rate * 60.0 / bpm / 4.0);
+        struct Step { int note; bool accent, slide, rest; };
+        const Step line[16] { { 36, true, false, false }, { 36, false, false, false }, { 48, false, true, false },  { 36, false, false, false },
+                              { 39, true, false, false }, { 36, false, false, false }, { 0, false, false, true },   { 43, false, true, false },
+                              { 36, true, false, false }, { 34, false, false, false }, { 36, false, false, false }, { 48, true, true, false },
+                              { 36, false, false, false }, { 39, false, false, false }, { 41, true, false, false },  { 36, false, false, false } };
+
+        auto render = [&] (const juce::String& name, bool square, int bars, std::function<void (ZeroEngineProcessor&, double)> automate)
+        {
+            auto owned = std::make_unique<ZeroEngineProcessor>();
+            auto& engine = *owned;
+            engine.setUserFolder (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_acidline"));
+            auto set = [&] (const char* id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+            set (ParamIDs::genre, (float) genreNames.indexOf ("Techno"));
+            set (ParamIDs::type, (float) typeNames.indexOf ("Bass"));
+            engine.syncProfile();
+            set (ParamIDs::acidFilter, 1.0f);
+            set (ParamIDs::acidWave, square ? 1.0f : 0.0f);
+            set (ParamIDs::acidCutoff, -0.5f);
+            set (ParamIDs::acidRes, 0.6f);
+            set (ParamIDs::acidEnvMod, 0.7f);
+            set (ParamIDs::acidDecay, 0.35f);
+            set (ParamIDs::acidAccent, 0.8f);
+            if (args.contains ("dry")) // the 303 voice alone, without the loaded sound's finishing
+            {
+                set (ParamIDs::grit, 0.0f);
+                set (ParamIDs::tilt, 0.0f);
+                set (ParamIDs::air, 0.0f);
+                set (ParamIDs::reverbMix, 0.0f);
+                set (ParamIDs::delayMix, 0.0f);
+            }
+            engine.setPlayConfigDetails (0, 2, rate, block);
+            engine.prepareToPlay (rate, block);
+
+            const auto total = bars * 16 * stepSamples + (int) rate;
+            juce::AudioBuffer<float> out (2, (total / block) * block), chunk (2, block);
+            juce::MidiBuffer midi;
+            for (int pos = 0; pos + block <= out.getNumSamples(); pos += block)
+            {
+                if (automate)
+                    automate (engine, (double) pos / (bars * 16 * stepSamples));
+                midi.clear();
+                for (int s = 0; s < bars * 16; ++s)
+                {
+                    const auto& step = line[s % 16];
+                    if (step.rest)
+                        continue;
+                    const auto on = s * stepSamples;
+                    const auto off = on + (step.slide ? stepSamples + stepSamples / 8 : stepSamples * 6 / 10); // a slide overlaps the next note
+                    if (on >= pos && on < pos + block)
+                        midi.addEvent (juce::MidiMessage::noteOn (1, step.note, (juce::uint8) (step.accent ? 120 : 80)), on - pos);
+                    if (off >= pos && off < pos + block)
+                        midi.addEvent (juce::MidiMessage::noteOff (1, step.note), off - pos);
+                }
+                chunk.clear();
+                engine.processBlock (chunk, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    out.copyFrom (ch, pos, chunk, ch, 0, block);
+            }
+
+            // Clicks, as clickcheck: a sample-to-sample jump against the loudest within 20 ms.
+            const auto* l = out.getReadPointer (0);
+            const auto n = out.getNumSamples();
+            std::vector<float> d ((size_t) n, 0.0f);
+            for (int i = 1; i < n; ++i)
+                d[(size_t) i] = std::abs (l[i] - l[i - 1]);
+            const auto reach = (int) (0.02 * rate), self = 5;
+            float worst = 0.0f;
+            double worstAt = 0.0;
+            for (int i = reach; i < n - reach; ++i)
+            {
+                if (d[(size_t) i] < 1.0e-3f)
+                    continue;
+                float around = 0.0f;
+                for (int j = i - reach; j <= i + reach; ++j)
+                    if (std::abs (j - i) > self)
+                        around = juce::jmax (around, d[(size_t) j]);
+                if (const auto r = d[(size_t) i] / juce::jmax (1.0e-4f, around); r > worst) { worst = r; worstAt = i / rate; }
+            }
+
+            const auto file = dir.getChildFile (name + ".wav");
+            file.deleteFile();
+            if (auto stream = std::unique_ptr<juce::OutputStream> (file.createOutputStream()))
+                if (auto writer = std::unique_ptr<juce::AudioFormatWriter> (juce::WavAudioFormat().createWriterFor (stream.get(), rate, 2, 24, {}, 0)))
+                {
+                    stream.release();
+                    writer->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
+                }
+            std::printf ("%-16s peak %.2f  worst jump %.1fx at %.3f s%s\n", name.toRawUTF8(), out.getMagnitude (0, out.getNumSamples()),
+                         worst, worstAt, worst > 4.0f ? "  << click" : "");
+        };
+
+        render ("acid_saw", false, 4, {});
+        render ("acid_square", true, 4, {});
+        render ("acid_sweep", false, 8, [] (ZeroEngineProcessor& engine, double t)
+        {
+            auto set = [&] (const char* id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+            set (ParamIDs::acidCutoff, (float) (-4.0 + 8.0 * juce::jmin (1.0, t)));            // closed to open over 8 bars
+            set (ParamIDs::acidEnvMod, (float) (0.2 + 0.8 * std::sin (juce::MathConstants<double>::pi * juce::jmin (1.0, t))));
+        });
+        std::printf ("Wrote %s\n", dir.getFullPathName().toRawUTF8());
+        return 0;
+    }
+
     if (command == "clickcheck")
     {
         // Clicks in Generate's picks: per profile, 3 picks each play two notes (on,
