@@ -224,6 +224,7 @@ private:
     float acidCharge = 0.0f;  // the accent sweep capacitor: rises fast, lets go slowly
     bool acidAccented = false;
     float accentLevel = 1.0f; // the accent's level boost, eased (no click between notes)
+    bool wasStereo303 = false; // 303 mode's Width was up last sample (the twin then picks up where the left is)
 };
 
 // juce::Synthesiser plus Mono and Legato play modes: one voice and a stack of

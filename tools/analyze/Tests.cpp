@@ -1153,6 +1153,7 @@ namespace
             ZeroEngineProcessor engine;
             loadProfile (engine, genreNames.indexOf ("Trance"), typeNames.indexOf ("Pad"));
             engine.state.getParameter (ParamIDs::acidFilter)->setValueNotifyingHost (1.0f);
+            engine.state.getParameter (ParamIDs::width)->setValueNotifyingHost (0.0f); // Width down: mono, like the 303
             engine.setPlayConfigDetails (0, 2, 48000.0, 512);
             engine.prepareToPlay (48000.0, 512);
             juce::AudioBuffer<float> block (2, 512);
@@ -1163,28 +1164,39 @@ namespace
             if (engine.getActiveVoiceCount() != 1)
                 problems.add ("303 mode: a chord played " + juce::String (engine.getActiveVoiceCount()) + " voices, not one");
 
-            // And it's the 303: mono (a wide pad loses its width), finite, in bounds.
+            // And it's the 303: mono with Width down (a wide pad loses its width),
+            // stereo with Width up, finite and in bounds either way.
             juce::MidiBuffer none303;
-            double side = 0.0, mid = 1.0e-12;
+            auto measure = [&] (double& sideShare, float& peak, bool& ok)
+            {
+                double side = 0.0, mid = 1.0e-12;
+                for (int b = 0; b < 60; ++b)
+                {
+                    block.clear();
+                    engine.processBlock (block, none303);
+                    for (int i = 0; i < block.getNumSamples(); ++i)
+                    {
+                        const auto l = block.getSample (0, i), r = block.getSample (1, i);
+                        ok = ok && std::isfinite (l) && std::isfinite (r);
+                        side += (l - r) * (l - r);
+                        mid += (l + r) * (l + r);
+                        peak = juce::jmax (peak, std::abs (l), std::abs (r));
+                    }
+                }
+                sideShare = side / mid;
+            };
+            double monoSide = 0.0, wideSide = 0.0;
             float peak = 0.0f;
             bool ok = true;
-            for (int b = 0; b < 60; ++b)
-            {
-                block.clear();
-                engine.processBlock (block, none303);
-                for (int i = 0; i < block.getNumSamples(); ++i)
-                {
-                    const auto l = block.getSample (0, i), r = block.getSample (1, i);
-                    ok = ok && std::isfinite (l) && std::isfinite (r);
-                    side += (l - r) * (l - r);
-                    mid += (l + r) * (l + r);
-                    peak = juce::jmax (peak, std::abs (l), std::abs (r));
-                }
-            }
+            measure (monoSide, peak, ok);
+            engine.state.getParameter (ParamIDs::width)->setValueNotifyingHost (1.0f);
+            measure (wideSide, peak, ok);
             if (! ok || peak > 1.01f)
                 problems.add ("303 mode: a pad went out of bounds (peak " + juce::String (peak, 2) + ")");
-            if (side > 0.01 * mid)
-                problems.add ("303 mode: not mono (side " + juce::String (side / mid, 3) + " of mid)");
+            if (monoSide > 0.001)
+                problems.add ("303 mode: Width down not mono (side " + juce::String (monoSide, 3) + " of mid)");
+            if (wideSide < 0.01)
+                problems.add ("303 mode: Width up not stereo (side " + juce::String (wideSide, 3) + " of mid)");
         }
 
         // Through the arp: one key held at velocity 90, the default pattern's

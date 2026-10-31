@@ -1306,8 +1306,8 @@ void ZeroEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     settings.sideGain = stereoWidth.load() * (0.5f + width.load()); // Width also sets unison spread in the voice
     settings.outputDb = output.load() + levelTrim.load();
     settings.pan = pan.load();
-    if (mode303)
-        settings.sideGain = 0.0f; // a 303 is mono
+    if (mode303 && width.load() < 0.005f)
+        settings.sideGain = 0.0f; // Width all the way down: mono, like the 303 (up, the 303 spreads in the voice and here)
 
     const auto beats = delayTimeBeats[juce::jlimit (0, (int) std::size (delayTimeBeats) - 1, (int) delayTime.load())];
     settings.delaySeconds  = (float) (beats * 60.0 / bpm);

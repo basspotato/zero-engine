@@ -395,7 +395,12 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto maxCutoff = (float) (0.45 * sampleRate);
     const auto middleC = std::log2 (261.63);
     Svf::Coeffs resonant, flat;
-    Ladder303::Coeffs ladder;
+    Ladder303::Coeffs ladder, ladderRight;
+    // 303 mode's Width: 0 is mono, like the 303; up spreads it (a detuned twin
+    // on the right, the two filters a little apart, the chain's widener on).
+    const auto stereo303 = filter303 && spread > 0.005f;
+    const auto detuneUp303 = std::pow (2.0, 4.0 * spread / 1200.0), detuneDown303 = 1.0 / detuneUp303;
+    const auto filterSpread303 = 0.1f * spread;
     const auto ladderLow303 = (float) (1.0 - std::exp (-juce::MathConstants<double>::twoPi * 25.0 / (2.0 * sampleRate))); // only near-DC kept out of the feedback (oversampled)
 
     for (int i = 0; i < numSamples; ++i)
@@ -414,12 +419,33 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         float l = 0.0f, r = 0.0f;
         if (filter303)
         {
-            // One band-limited oscillator, saw or square, the same both sides.
-            const auto s = 0.45f * osc303 (phases[0], inc, square303); // about a designed sound's level into the chain
-            l = r = s;
-            phases[0] += inc;
-            if (phases[0] >= 1.0)
-                phases[0] -= 1.0;
+            // A band-limited saw or square: one oscillator, the same both sides
+            // (mono, like the 303) with Width down; Width up detunes a twin for
+            // the right side, up to 8 cents apart.
+            if (stereo303)
+            {
+                if (! wasStereo303) // the twin starts where the left is, so nothing jumps
+                {
+                    phases[1] = phases[0];
+                    ladders[1] = ladders[0];
+                }
+                l = 0.45f * osc303 (phases[0], inc * detuneDown303, square303);
+                r = 0.45f * osc303 (phases[1], inc * detuneUp303, square303);
+                for (int side = 0; side < 2; ++side)
+                {
+                    phases[side] += inc * (side == 0 ? detuneDown303 : detuneUp303);
+                    if (phases[side] >= 1.0)
+                        phases[side] -= 1.0;
+                }
+            }
+            else
+            {
+                l = r = 0.45f * osc303 (phases[0], inc, square303); // about a designed sound's level into the chain
+                phases[0] += inc;
+                if (phases[0] >= 1.0)
+                    phases[0] -= 1.0;
+            }
+            wasStereo303 = stereo303;
         }
         else
         for (int v = 0; v < voices; ++v)
@@ -456,8 +482,16 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
                 {
                     // At twice the rate (the ladder runs oversampled).
                     const auto fc = juce::jlimit (20.0f, (float) (0.9 * sampleRate), cutoff303 * std::exp2 (acidShift));
-                    const auto g = std::tan (juce::MathConstants<float>::pi * fc / (float) (2.0 * sampleRate));
-                    ladder = Ladder303::make (g, resonance, ladderLow303);                }
+                    auto coeffsAt = [&] (float octaves)
+                    {
+                        const auto f = juce::jlimit (20.0f, (float) (0.9 * sampleRate), fc * std::exp2 (octaves));
+                        return Ladder303::make (std::tan (juce::MathConstants<float>::pi * f / (float) (2.0 * sampleRate)), resonance, ladderLow303);
+                    };
+                    // Width up: the two sides' filters a little apart (up to 0.2 octaves).
+                    ladder = coeffsAt (stereo303 ? -filterSpread303 : 0.0f);
+                    if (stereo303)
+                        ladderRight = coeffsAt (filterSpread303);
+                }
                 else
                 {
                     const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC) + acidShift
@@ -472,7 +506,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
             if (filter303) // 303 mode: the ladder, oversampled and driven, in place of the sound's filter
             {
                 l = ladders[0].processTwice (l, ladder, drive303);
-                r = l; // mono, like the 303 (one ladder is enough)
+                r = stereo303 ? ladders[1].processTwice (r, ladderRight, drive303)
+                              : l; // mono, like the 303 (one ladder is enough)
             }
             else
             {
