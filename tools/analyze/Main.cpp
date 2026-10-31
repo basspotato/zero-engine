@@ -1260,6 +1260,43 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "wtstrip" && args.size() >= 2)
+    {
+        // The Wavetable display while the position sweeps (as an LFO or envelope
+        // moves it): frames at four moments, 60 per second, so the smoke trail and
+        // the smooth following show. Then the position stops and the trail fades.
+        ZeroEngineProcessor engine;
+        engine.setPlayConfigDetails (0, 2, renderRate, renderBlock);
+        engine.prepareToPlay (renderRate, renderBlock);
+        ScopeView view (engine);
+        constexpr int w = 560, h = 112;
+        view.setSize (w, h);
+        const double moments[] { 0.25, 0.5, 0.8, 1.0, 1.3, 1.8 };
+        juce::Image strip (juce::Image::ARGB, w * 2 * 2, h * 2 * 3, true); // two columns of three, each frame at 2x
+        int shot = 0;
+        {
+            juce::Graphics g (strip);
+            for (int frame = 0; frame <= 120 && shot < (int) std::size (moments); ++frame)
+            {
+                const auto t = (double) frame / 60.0;
+                const auto position = t < 0.9 ? 0.5f + 0.42f * (float) std::sin (juce::MathConstants<double>::twoPi * 0.9 * t) : 0.5f;
+                view.previewFrame (t, position, t < 0.9 ? 0.6f : 0.3f);
+                if (t + 1.0e-6 >= moments[shot])
+                {
+                    const auto image = view.createComponentSnapshot (view.getLocalBounds(), true, 2.0f);
+                    g.drawImageAt (image, (shot % 2) * w * 2, (shot / 2) * h * 2);
+                    ++shot;
+                }
+            }
+        }
+        juce::FileOutputStream out (argFile (args, 1, {}));
+        out.setPosition (0);
+        out.truncate();
+        juce::PNGImageFormat().writeImageToStream (strip, out);
+        std::printf ("Wrote %s\n", argFile (args, 1, {}).getFullPathName().toRawUTF8());
+        return 0;
+    }
+
     if (command == "acidline")
     {
         // 303 mode on a classic 16-step acid line (130 BPM, accents, slides),
