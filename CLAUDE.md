@@ -13,6 +13,8 @@ cmake --build build --config Release --target ZeroEngine_VST3 ZeroEngine_Standal
 
 JUCE 8 is fetched by CMake. Outputs land in `build/ZeroEngine_artefacts/Release/` (`VST3/Zero Engine.vst3`, `Standalone/Zero Engine.exe`). A running standalone locks the `.exe`, so close it before rebuilding. `dist/` holds a prebuilt VST3 for testing on other machines; GitHub Actions (`.github/workflows/build.yml`) also builds it on every push.
 
+**macOS (prepared, never built yet):** `CMakeLists.txt` adds the AU format and Apple Silicon only (arm64, macOS 11+) on a Mac, and does nothing different on Windows. `.github/workflows/macos.yml` is a separate workflow: on a push that changes `CMakeLists.txt` or itself it only checks that CMake configures on a Mac runner and that the AU, VST3 and Standalone targets exist; Actions tab > "macOS build (on demand)" > Run workflow > mode "full" builds all three, signs them ad hoc, uploads zips and runs `auval` and pluginval. The repo is public, so macOS minutes are free. Plan and open questions: Build notes.
+
 ## Analysis tool (offline, not shipped)
 
 `tools/analyze/` builds `ZeroAnalyze.exe` (target `ZeroAnalyze`, output in `build/ZeroAnalyze_artefacts/Release/`). It measures loudness (BS.1770 LUFS, peak-to-loudness ratio), brightness (centroid, % above 4 kHz), bass (% below 150/60 Hz) and width (side share, correlation).

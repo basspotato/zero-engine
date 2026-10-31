@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
+# macOS: Apple Silicon only, macOS 11 and up (set before project(); no effect on Windows).
+if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Apple Silicon only")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS supported")
+endif()
+
 project(ZeroEngine VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -13,6 +19,11 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
 
+set(ZERO_FORMATS VST3 Standalone)
+if (APPLE)
+    list(APPEND ZERO_FORMATS AU) # Audio Units, macOS only
+endif()
+
 juce_add_plugin(ZeroEngine
     COMPANY_NAME "Zero Engine"
     PRODUCT_NAME "Zero Engine"
@@ -24,7 +35,7 @@ juce_add_plugin(ZeroEngine
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
-    FORMATS VST3 Standalone)
+    FORMATS ${ZERO_FORMATS})
 
 target_sources(ZeroEngine
     PRIVATE
@@ -128,6 +139,8 @@ target_link_libraries(ZeroAnalyze
 # into one function they outgrow the default 1 MB.
 if (MSVC)
     target_link_options(ZeroAnalyze PRIVATE /STACK:16777216)
+elseif (APPLE)
+    target_link_options(ZeroAnalyze PRIVATE -Wl,-stack_size,0x1000000) # the same 16 MB (untried on a Mac)
 endif()
 
 if (ZERO_SPACE_IMAGES)

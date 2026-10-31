@@ -1,0 +1,105 @@
+name: macOS build (on demand)
+
+# Prepared ahead of the full macOS build: Apple Silicon only, formats AU, VST3 and Standalone.
+#
+# - Automatically, only when CMakeLists.txt or this file changes: a quick check that CMake
+#   configures on macOS and that the AU, VST3 and Standalone targets exist. Nothing is compiled.
+# - By hand: Actions tab > "macOS build (on demand)" > Run workflow > mode "full". That builds
+#   all three, signs them ad hoc, uploads zips, then checks them with pluginval and auval.
+#
+# The repo is public, so macOS runner minutes are free. Unsigned builds downloaded to a Mac need
+#   xattr -dr com.apple.quarantine "<the plugin>"
+# (not needed when copying by USB or over the network).
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - CMakeLists.txt
+      - .github/workflows/macos.yml
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = configure only (quick); full = build, check and upload"
+        type: choice
+        options:
+          - check
+          - full
+        default: check
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-14 # Apple Silicon
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake --version
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: The AU, VST3 and Standalone targets exist
+        run: |
+          cmake --build build --target help > targets.txt
+          grep -E "ZeroEngine_(AU|VST3|Standalone)" targets.txt | sort -u
+          for t in AU VST3 Standalone; do
+            grep -q "ZeroEngine_$t" targets.txt || { echo "::error title=Missing target::ZeroEngine_$t is not a target"; exit 1; }
+          done
+
+  full:
+    needs: check
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'full'
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build AU, VST3 and Standalone (Release, arm64)
+        run: |
+          cmake --build build --config Release --target ZeroEngine_AU ZeroEngine_VST3 ZeroEngine_Standalone --parallel 3 2>&1 | tee build.log
+          test "${PIPESTATUS[0]}" -eq 0 || { echo "::error title=Build failed::$(grep ' error ' build.log | head -20 | tr '\n' ' ')"; exit 1; }
+
+      # Ad hoc signature (no certificate): what Apple Silicon needs to run the binaries at all.
+      - name: Sign ad hoc and zip
+        run: |
+          mkdir out
+          find build/ZeroEngine_artefacts -maxdepth 3 \( -name "*.component" -o -name "*.vst3" -o -name "*.app" \) -print0 |
+            while IFS= read -r -d '' bundle; do
+              echo "signing $bundle"
+              codesign --force --deep --sign - "$bundle"
+              ditto -c -k --keepParent "$bundle" "out/$(basename "$bundle").zip"
+            done
+          ls -la out
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zero-Engine-macOS-arm64
+          path: out/
+          if-no-files-found: error
+
+      # The checks report but don't stop the upload above; look at them when reading the run.
+      - name: Validate the Audio Unit (auval)
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "$(find build/ZeroEngine_artefacts -maxdepth 3 -name '*.component' | head -1)" ~/Library/Audio/Plug-Ins/Components/
+          sudo killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aumu Zen1 Zeng
+
+      - name: Validate the VST3 (pluginval)
+        continue-on-error: true
+        run: |
+          curl -sL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip"
+          unzip -q pluginval.zip -d pluginval
+          pluginval/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --validate-in-process --timeout-ms 180000 \
+            --validate "$(find build/ZeroEngine_artefacts -maxdepth 3 -name '*.vst3' | head -1)"
