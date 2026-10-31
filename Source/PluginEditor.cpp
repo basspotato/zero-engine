@@ -1893,7 +1893,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
                              { "FINISH",       { inputTrim, ottDepth, spectral, tilt, monoFreq, stereoWidth, levelTrim } } } } },
         // The pattern on top (the output and each step as it plays), the steps,
         // then the arp's settings.
-        { "ARP",    { { { "PATTERN  (the output, and each step as it plays)", {} } },
+        { "ARPEGGIATOR", { { { "PATTERN  (the output, and each step as it plays)", {} } },
                       { { "STEP SEQUENCER  (rests, pitch and accents for every arp mode)", {} } },
                       { { "ARPEGGIATOR",  { arpOn, arpLatch, arpMode, arpRate, arpOctaves, arpGate, seqLength } } } },
                     { 240, 179, 116 } }, // in pixels at the design size: the arp settings' border 20 px lower than at 9 : 6 : 5
@@ -2098,11 +2098,12 @@ void AdvancedPanel::resized()
     if (pages.empty())
         return;
 
-    // Page tabs across the header strip, right of the title.
-    auto strip = getLocalBounds().removeFromTop (22).reduced (6, 3);
+    // Page tabs filling the header strip right of the title, each an equal share.
+    auto strip = getLocalBounds().removeFromTop (22).reduced (6, 2);
     strip.removeFromLeft (80);
+    const auto tabWidth = strip.getWidth() / (int) pages.size();
     for (auto& page : pages)
-        page.button->setBounds (strip.removeFromLeft (110).reduced (2, 0));
+        page.button->setBounds (strip.removeFromLeft (tabWidth).reduced (3, 0));
 
     // Rows share the height; sections in a row share the width by control count.
     auto area = getLocalBounds().withTrimmedTop (22).reduced (12, 10);
@@ -2665,6 +2666,10 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
     section (displaySection, "DISPLAY");
     section (meterSection, "CUTOFF & ENVELOPE");
     section (generateSection, "GENERATE");
+    // "BACK" beside the history's back arrow, in the header strip.
+    g.setColour (Palette::accent);
+    g.setFont (Fonts::ui (11.0f, true));
+    g.drawText ("BACK", backButton.getBounds().translated (-40, 0).withWidth (38), juce::Justification::centredRight);
     if (! favouritesSection.isEmpty())
         section (favouritesSection, "FAVOURITES");
     section (macroSection, "MACROS");
