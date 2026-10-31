@@ -19,6 +19,13 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
 
+# CLAP format (MIT licensed wrapper around JUCE); adds the ZeroEngine_clap target.
+FetchContent_Declare(
+    clap-juce-extensions
+    GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
+    GIT_TAG main)
+FetchContent_MakeAvailable(clap-juce-extensions)
+
 set(ZERO_FORMATS VST3 Standalone)
 if (APPLE)
     list(APPEND ZERO_FORMATS AU) # Audio Units, macOS only
@@ -36,6 +43,10 @@ juce_add_plugin(ZeroEngine
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
     FORMATS ${ZERO_FORMATS})
+
+clap_juce_extensions_plugin(TARGET ZeroEngine
+    CLAP_ID "com.zeroengine.zeroengine"
+    CLAP_FEATURES instrument synthesizer stereo)
 
 target_sources(ZeroEngine
     PRIVATE

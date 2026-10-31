@@ -8,10 +8,10 @@ Background and decisions: `reports/AI finished sound VST engine.md` (original re
 
 ```bash
 cmake -S . -B build -G "Visual Studio 18 2026" -A x64
-cmake --build build --config Release --target ZeroEngine_VST3 ZeroEngine_Standalone
+cmake --build build --config Release --target ZeroEngine_VST3 ZeroEngine_Standalone ZeroEngine_clap
 ```
 
-JUCE 8 is fetched by CMake. Outputs land in `build/ZeroEngine_artefacts/Release/` (`VST3/Zero Engine.vst3`, `Standalone/Zero Engine.exe`). A running standalone locks the `.exe`, so close it before rebuilding. `dist/` holds a prebuilt VST3 for testing on other machines; GitHub Actions (`.github/workflows/build.yml`) also builds it on every push.
+JUCE 8 is fetched by CMake. The CLAP format comes from `clap-juce-extensions` (MIT, fetched by CMake; target `ZeroEngine_clap`; Windows only so far, for Reaper and Bitwig). Outputs land in `build/ZeroEngine_artefacts/Release/` (`VST3/Zero Engine.vst3`, `Standalone/Zero Engine.exe`, `CLAP/Zero Engine.clap`). A running standalone locks the `.exe`, so close it before rebuilding. `dist/` holds a prebuilt VST3 for testing on other machines; GitHub Actions (`.github/workflows/build.yml`) also builds it on every push.
 
 **macOS (builds and validates on GitHub; not yet heard on a Mac):** `CMakeLists.txt` adds the AU format and Apple Silicon only (arm64, macOS 11+) on a Mac, and does nothing different on Windows. `.github/workflows/macos.yml` is a separate workflow: on a push that changes `CMakeLists.txt` or itself it only checks that CMake configures on a Mac runner and that the AU, VST3 and Standalone targets exist; Actions tab > "macOS build (on demand)" > Run workflow > mode "full" builds all three, signs them ad hoc, uploads zips and runs `auval` and pluginval. The repo is public, so macOS minutes are free. First full run (2026-10-31, run 41230487300, 3m24s): AU, VST3 and Standalone built; `auval` "AU VALIDATION SUCCEEDED"; pluginval SUCCESS at strictness 5; one zip (9.4 MB, artifact `Zero-Engine-macOS-arm64`, kept 90 days) with the three bundles zipped inside. Fetch with `gh run download <id> -n Zero-Engine-macOS-arm64`. Plan and open questions: Build notes.
 
