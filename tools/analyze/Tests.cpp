@@ -892,7 +892,7 @@ namespace
     // wow, and a new sound or an undo puts the row back to neutral.
     juce::StringArray checkAcid()
     {
-        struct Knobs { float cutoff = 0.0f, res = 0.0f, envMod = 0.0f, decay = 0.5f, accent = 0.0f; };
+        struct Knobs { float cutoff = 0.0f, res = 0.0f, envMod = 0.0f, decay = 0.5f, accent = 0.0f; bool filter = false; };
         // The output runs late by the processor's latency (the spectral stage):
         // moved back, sample n lines up with the MIDI at n.
         auto alignedBy = [] (const juce::AudioBuffer<float>& out, int latency)
@@ -922,6 +922,7 @@ namespace
             set (ParamIDs::acidEnvMod, k.envMod);
             set (ParamIDs::acidDecay, k.decay);
             set (ParamIDs::acidAccent, k.accent);
+            set (ParamIDs::acidFilter, k.filter ? 1.0f : 0.0f);
             engine.setPlayConfigDetails (0, 2, 48000.0, 500);
             engine.prepareToPlay (48000.0, 500);
 
@@ -987,6 +988,85 @@ namespace
         if (bright (building, 6000 * 3, 3000) < 1.15 * bright (building, 0, 3000))
             problems.add ("Accent wow: back-to-back accents did not climb");
 
+        // The 303 filter: changes the sound, stays finite and in bounds with
+        // everything up, sweeps, and thins the bass as resonance rises.
+        {
+            auto peakOf = [] (const juce::AudioBuffer<float>& a) { return a.getMagnitude (0, 0, a.getNumSamples()); };
+            auto finite = [] (const juce::AudioBuffer<float>& a)
+            {
+                for (int i = 0; i < a.getNumSamples(); ++i)
+                    if (! std::isfinite (a.getSample (0, i)))
+                        return false;
+                return true;
+            };
+            // Share of the energy under ~150 Hz (a one-pole low-pass over the note).
+            auto lowShare = [] (const juce::AudioBuffer<float>& a, int from, int length)
+            {
+                const auto c = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 150.0f / 48000.0f);
+                float low = 0.0f;
+                double lowEnergy = 0.0, energy = 1.0e-12;
+                for (int i = from; i < from + length; ++i)
+                {
+                    const auto x = a.getSample (0, i);
+                    low += c * (x - low);
+                    lowEnergy += low * low;
+                    energy += x * x;
+                }
+                return lowEnergy / energy;
+            };
+
+            Knobs on;
+            on.filter = true;
+            const auto ladder = render (on, none);
+            double difference = 0.0, energy = 1.0e-12;
+            for (int i = 0; i < plain.getNumSamples(); ++i)
+            {
+                const auto d = ladder.getSample (0, i) - plain.getSample (0, i);
+                difference += d * d;
+                energy += plain.getSample (0, i) * plain.getSample (0, i);
+            }
+            if (difference < 0.01 * energy)
+                problems.add ("303 filter: the switch barely changed the sound");
+
+            Knobs everything;
+            everything.filter = true; everything.res = 1.0f; everything.envMod = 1.0f; everything.accent = 1.0f; everything.cutoff = -1.0f;
+            const auto loud = render (everything, all);
+            if (! finite (loud) || peakOf (loud) > 4.0f * juce::jmax (0.05f, peakOf (plain)))
+                problems.add ("303 filter: everything up ran away (peak " + juce::String (peakOf (loud), 2) + " vs " + juce::String (peakOf (plain), 2) + ")");
+            if (peakOf (loud) < 0.1f * peakOf (plain))
+                problems.add ("303 filter: everything up went near silent");
+
+            Knobs swept303;
+            swept303.filter = true; swept303.cutoff = -2.0f; swept303.envMod = 1.0f; swept303.decay = 0.2f;
+            const auto sweeping = render (swept303, none);
+            if (bright (sweeping, 6000, 480) < 2.0 * bright (sweeping, 6000 + 3000, 480))
+                problems.add ("303 filter: Env Mod did not sweep it");
+
+            Knobs low, high;
+            low.filter = high.filter = true;
+            low.cutoff = high.cutoff = -1.5f;
+            high.res = 1.0f;
+            const auto thin = lowShare (render (high, none), 6000, 4000), full = lowShare (render (low, none), 6000, 4000);
+            if (thin > 0.85 * full)
+                problems.add ("303 filter: high resonance did not thin the bass (" + juce::String (thin, 3) + " vs " + juce::String (full, 3) + ")");
+        }
+
+        // With the switch on a poly sound plays one note at a time, as a 303.
+        {
+            ZeroEngineProcessor engine;
+            loadProfile (engine, genreNames.indexOf ("Trance"), typeNames.indexOf ("Pad"));
+            engine.state.getParameter (ParamIDs::acidFilter)->setValueNotifyingHost (1.0f);
+            engine.setPlayConfigDetails (0, 2, 48000.0, 512);
+            engine.prepareToPlay (48000.0, 512);
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer chord;
+            for (auto note : { 60, 64, 67 })
+                chord.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 90), 0);
+            engine.processBlock (block, chord);
+            if (engine.getActiveVoiceCount() != 1)
+                problems.add ("303 filter: a chord played " + juce::String (engine.getActiveVoiceCount()) + " voices, not one");
+        }
+
         // Through the arp: one key held at velocity 90, the default pattern's
         // accent steps (on the beats) hit harder with Accent up, and every arp
         // note starts its own Env Mod sweep.
@@ -1049,13 +1129,14 @@ namespace
         auto set = [&] (const char* id, float v) { auto* q = a.state.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
         auto atNeutral = [&]
         {
-            for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent })
+            for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent, ParamIDs::acidFilter })
                 if (auto* q = a.state.getParameter (id); std::abs (q->getValue() - q->getDefaultValue()) > 1.0e-5f)
                     return false;
             return true;
         };
         set (ParamIDs::acidCutoff, 2.0f);
         set (ParamIDs::acidEnvMod, 0.8f);
+        set (ParamIDs::acidFilter, 1.0f);
         loadProfile (a, genreNames.indexOf ("Trap"), typeNames.indexOf ("Bass"));
         if (! atNeutral())
             problems.add ("a new sound kept the 303 row's settings");

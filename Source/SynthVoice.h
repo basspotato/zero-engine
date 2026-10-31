@@ -83,6 +83,7 @@ private:
         std::atomic<float>* acidEnvMod;
         std::atomic<float>* acidDecay;
         std::atomic<float>* acidAccent;
+        std::atomic<float>* acidFilter;
     } p;
 
     void setVelocity (float velocity);
@@ -121,6 +122,48 @@ private:
     float filterSample (int ch, float x, int mode, const Svf::Coeffs& resonant, const Svf::Coeffs& flat) noexcept;
 
     Svf filters[2][2]; // [stage][channel]
+
+    // The 303 switch's filter: four one-pole stages in a ladder with resonance
+    // feedback, the linear part solved in the same sample (TPT, Zavalishin) and
+    // the input soft-clipped (the squelch). Only near-DC is kept out of the
+    // feedback, so the passband drops as resonance rises (the bass thins, as on
+    // a 303), partly made up. Stops just short of self-oscillation.
+    struct Ladder303
+    {
+        float s[4] {};
+        float feedbackLow = 0.0f; // the low part kept out of the feedback
+
+        struct Coeffs { float G = 0.0f, G4 = 0.0f, k = 0.0f, makeUp = 1.0f, lowCoeff = 0.0f; };
+
+        static Coeffs make (float g, float resonance, float lowCoeff) noexcept
+        {
+            Coeffs c;
+            c.G = g / (1.0f + g);
+            c.G4 = c.G * c.G * c.G * c.G;
+            c.k = 3.85f * resonance;          // 4 would ring on its own
+            c.makeUp = 1.0f + 0.45f * c.k;    // part of the passband back
+            c.lowCoeff = lowCoeff;
+            return c;
+        }
+
+        float process (float x, const Coeffs& c) noexcept
+        {
+            const auto rest = 1.0f - c.G;
+            const auto memory = c.G * c.G * c.G * rest * s[0] + c.G * c.G * rest * s[1] + c.G * rest * s[2] + rest * s[3];
+            const auto y4 = (c.G4 * x + memory + c.k * c.G4 * feedbackLow) / (1.0f + c.k * c.G4);
+            auto u = std::tanh (x - c.k * (y4 - feedbackLow));
+            for (auto& state : s)
+            {
+                const auto v = (u - state) * c.G;
+                const auto y = v + state;
+                state = y + v;
+                u = y;
+            }
+            feedbackLow += c.lowCoeff * (u - feedbackLow);
+            return u * c.makeUp;
+        }
+    };
+    Ladder303 ladders[2]; // [channel]
 
     const MacroMap& macroMap;
     const std::atomic<float>& hostBpm; // set by the processor each block
@@ -176,6 +219,8 @@ private:
     void removeHeld (int note);
 
     std::atomic<float>& playMode;
+    std::atomic<float>& filter303; // the 303 switch: Legato whatever the sound's mode, as a 303 plays
+    int currentMode() const noexcept { return filter303.load() > 0.5f ? (int) legato : (int) playMode.load(); }
     int lastMode = poly;
 
     static constexpr int maxHeld = 16;

@@ -127,7 +127,7 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
 void ZeroEngineProcessor::resetAcid()
 {
     // The 303 row tweaks the sound in front of you: a new one starts it at neutral.
-    for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent })
+    for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent, ParamIDs::acidFilter })
         if (auto* param = state.getParameter (id))
             param->setValueNotifyingHost (param->getDefaultValue());
 }

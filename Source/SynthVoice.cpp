@@ -35,7 +35,8 @@ ZeroVoice::ZeroVoice (juce::AudioProcessorValueTreeState& state, const MacroMap&
           get (ParamIDs::filterKeytrack), get (ParamIDs::lfoToCutoff), get (ParamIDs::velToCutoff), get (ParamIDs::velSens),
           get (ParamIDs::waveTable), get (ParamIDs::waveTableB), get (ParamIDs::tableMix), get (ParamIDs::subOn),
           get (ParamIDs::lfoSync),
-          get (ParamIDs::acidCutoff), get (ParamIDs::acidRes), get (ParamIDs::acidEnvMod), get (ParamIDs::acidDecay), get (ParamIDs::acidAccent) };
+          get (ParamIDs::acidCutoff), get (ParamIDs::acidRes), get (ParamIDs::acidEnvMod), get (ParamIDs::acidDecay), get (ParamIDs::acidAccent),
+          get (ParamIDs::acidFilter) };
 }
 
 void ZeroVoice::startAcid() noexcept
@@ -126,6 +127,8 @@ void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*
         for (auto& stage : filters)
             for (auto& f : stage)
                 f = {};
+        for (auto& ladder : ladders)
+            ladder = {};
 
         // Random start phases keep unison voices from starting phase-locked (a flat, phasey attack).
         for (auto& phase : phases)
@@ -272,7 +275,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
 
     // Choose the mip level for the highest pitch this block can reach.
     const auto bendSemis = bend * p.bendRange->load();
-    const auto glideTime = p.glide->load();
+    const auto filter303 = p.acidFilter->load() > 0.5f;
+    const auto glideTime = filter303 ? juce::jmax (0.06f, p.glide->load()) : p.glide->load(); // the 303's slide, about 60 ms
     const auto glideCoeff = glideTime > 0.0005f ? 1.0 - std::exp (-3.0 / (glideTime * sampleRate)) : 1.0; // ~95% there at glideTime
 
     const auto maxFreq = std::exp2 (juce::jmax (pitch, targetPitch) + maxCents / 1200.0
@@ -315,11 +319,13 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto wowDepth = accent * (1.5f + 7.0f * resonance);
 
     const auto filterOn = filterMode > 1 || cutoff < 19000.0f || std::abs (filterEnv) > 1.0e-3f
-                       || lfoToCutoff > 1.0e-3f || keytrack > 1.0e-3f || acidOn || std::abs (acidResOffset) > 1.0e-4f;
+                       || lfoToCutoff > 1.0e-3f || keytrack > 1.0e-3f || acidOn || std::abs (acidResOffset) > 1.0e-4f || filter303;
     const auto k = 2.0f * (1.0f - 0.97f * resonance);
     const auto maxCutoff = (float) (0.45 * sampleRate);
     const auto middleC = std::log2 (261.63);
     Svf::Coeffs resonant, flat;
+    Ladder303::Coeffs ladder;
+    const auto ladderLow = (float) (1.0 - std::exp (-juce::MathConstants<double>::twoPi * 25.0 / sampleRate)); // only near-DC kept out of the feedback
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -360,12 +366,25 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
                 const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC) + acidShift;
                 const auto fc = juce::jlimit (20.0f, maxCutoff, cutoff * std::exp2 (octaves));
                 const auto g = std::tan (juce::MathConstants<float>::pi * fc / (float) sampleRate);
-                resonant = Svf::make (g, k);
-                flat = Svf::make (g, juce::MathConstants<float>::sqrt2);
+                if (filter303)
+                    ladder = Ladder303::make (g, resonance, ladderLow);
+                else
+                {
+                    resonant = Svf::make (g, k);
+                    flat = Svf::make (g, juce::MathConstants<float>::sqrt2);
+                }
             }
 
-            l = filterSample (0, l, filterMode, resonant, flat);
-            r = filterSample (1, r, filterMode, resonant, flat);
+            if (filter303) // the 303 switch: the ladder in place of the sound's filter, whatever its mode
+            {
+                l = ladders[0].process (l, ladder);
+                r = ladders[1].process (r, ladder);
+            }
+            else
+            {
+                l = filterSample (0, l, filterMode, resonant, flat);
+                r = filterSample (1, r, filterMode, resonant, flat);
+            }
         }
 
         const auto sub = std::sin (juce::MathConstants<double>::twoPi * subPhase) * subLevel;
@@ -398,7 +417,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
 
 //==============================================================================
 ZeroSynth::ZeroSynth (juce::AudioProcessorValueTreeState& state)
-    : playMode (*state.getRawParameterValue (ParamIDs::playMode))
+    : playMode (*state.getRawParameterValue (ParamIDs::playMode)),
+      filter303 (*state.getRawParameterValue (ParamIDs::acidFilter))
 {
 }
 
@@ -421,7 +441,7 @@ void ZeroSynth::removeHeld (int note)
 
 void ZeroSynth::noteOn (int midiChannel, int midiNoteNumber, float velocity)
 {
-    const auto mode = (int) playMode.load();
+    const auto mode = currentMode();
     if (mode != lastMode)
     {
         // Switching modes mid-note would strand voices the other mode can't see.

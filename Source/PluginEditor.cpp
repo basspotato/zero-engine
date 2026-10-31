@@ -2259,6 +2259,11 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
             setUpMacro (acid[i], knobs303[i].first, knobs303[i].second);
             acid[i].label.setFont (Fonts::ui (10.5f, true));
         }
+        filter303Button.setClickingTogglesState (true);
+        filter303Button.setTooltip ("303 filter: swaps the sound's filter for a 303-style ladder (squelchy resonance that thins the bass), "
+                                    "plays one note at a time and slides overlapping notes. Off again on every new sound.");
+        filter303Attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.state, ParamIDs::acidFilter, filter303Button);
+        addAndMakeVisible (filter303Button);
     }
 
     genreBox.addItemList (genreNames, 1);
@@ -2649,7 +2654,7 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
         section (favouritesSection, "FAVOURITES");
     section (macroSection, "MACROS");
 
-    // The 303 box inside Macros: a recessed border with an orange "303" tag.
+    // The 303 box inside Macros: a recessed border; its tag is the 303 FILTER switch.
     if (! box303.isEmpty())
     {
         const auto box = box303.toFloat().expanded (0.0f, 4.0f);
@@ -2657,9 +2662,6 @@ void ZeroEngineEditor::paint (juce::Graphics& g)
         g.fillRoundedRectangle (box, 6.0f);
         g.setColour (Palette::panelEdge);
         g.drawRoundedRectangle (box.reduced (0.5f), 6.0f, 1.0f);
-        g.setColour (Palette::orange);
-        g.setFont (Fonts::ui (12.0f, true));
-        g.drawText ("303", box.reduced (8.0f, 3.0f).withHeight (14.0f), juce::Justification::centredLeft);
     }
 }
 
@@ -2714,8 +2716,9 @@ void ZeroEngineEditor::resized()
         macro.label.setBounds (cell.removeFromBottom (18));
         macro.knob.setBounds (cell.reduced (4));
     }
+    filter303Button.setBounds (box303.getX() + 4, box303.getY() - 2, 78, 16); // the box's tag, top left
     {
-        auto inside = box303.withTrimmedTop (14).reduced (6, 2); // under the box's "303" tag
+        auto inside = box303.withTrimmedTop (14).reduced (6, 2); // under the box's tag
         const auto smallWidth = inside.getWidth() / (int) acid.size();
         for (auto& knob : acid)
         {
