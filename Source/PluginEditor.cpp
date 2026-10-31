@@ -1270,102 +1270,25 @@ void LevelMeter::paint (juce::Graphics& g)
 ScopeView::ScopeView (ZeroEngineProcessor& p)
     : processor (p)
 {
-    startTimerHz (60); // the Wavetable view; the others go at 30 (setMode)
-}
-
-void ScopeView::setMode (int newMode)
-{
-    mode = newMode;
-    startTimerHz (mode == wavetable ? 60 : 30);
-    if (trail.isValid())
-        trail.clear (trail.getBounds());
-    trailLife = 0;
-    moving = true;
-    repaint();
-}
-
-void ScopeView::resized()
-{
-    const auto area = stackNow().area;
-    trail = juce::Image (juce::Image::ARGB, juce::jmax (1, (int) area.getWidth()), juce::jmax (1, (int) area.getHeight()), true);
-    trailLife = 0;
-    moving = true;
-}
-
-// One frame of following: the position critically damped toward the voices'
-// (no jumps, no overshoot, whatever the timer does), the level quick up and slow
-// down, then the trail fades and takes this frame's path.
-void ScopeView::tick (double seconds, float targetPosition, float targetLevel, bool drawTrail)
-{
-    const auto dt = lastTick < 0.0 ? 1.0f / 60.0f : (float) juce::jlimit (0.001, 0.1, seconds - lastTick);
-    lastTick = seconds;
-
-    if (shownPosition < 0.0f)
-    {
-        shownPosition = targetPosition;
-        positionVelocity = 0.0f;
-    }
-    else
-    {
-        constexpr float smoothTime = 0.09f; // about how long it takes to catch up
-        const auto omega = 2.0f / smoothTime, x = omega * dt;
-        const auto decay = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
-        const auto change = shownPosition - targetPosition;
-        const auto temp = (positionVelocity + omega * change) * dt;
-        positionVelocity = (positionVelocity - omega * temp) * decay;
-        shownPosition = juce::jlimit (0.0f, 1.0f, targetPosition + (change + temp) * decay);
-    }
-    level += (targetLevel - level) * (1.0f - std::exp (-dt / (targetLevel > level ? 0.04f : 0.22f)));
-
-    moving = std::abs (shownPosition - targetPosition) > 5.0e-4f || std::abs (positionVelocity) > 5.0e-3f
-          || std::abs (targetLevel - level) > 2.0e-3f;
-
-    if (mode != wavetable || ! trail.isValid() || ! drawTrail)
-        return;
-
-    // The smoke: faded a little each frame, then the playing frame's path goes in
-    // (wide faint glow, medium, thin) in proportion to how fast the position is moving.
-    trail.multiplyAllAlphas (std::exp (-dt / 0.45f));
-    const auto strength = juce::jlimit (0.0f, 1.0f, std::abs (positionVelocity) * 1.6f + 0.08f * level);
-    if (strength > 0.02f)
-    {
-        trailLife = 150;
-        const auto stack = stackNow();
-        juce::Graphics g (trail);
-        g.addTransform (juce::AffineTransform::translation (-stack.area.getX(), -stack.area.getY()));
-        const auto path = stackTrace (stack, shownPosition, shownPosition);
-        const auto smoke = Palette::accent.interpolatedWith (juce::Colours::white, 0.35f);
-        g.setColour (smoke.withAlpha (0.05f * strength));
-        g.strokePath (path, juce::PathStrokeType (8.0f, juce::PathStrokeType::curved));
-        g.setColour (smoke.withAlpha (0.10f * strength));
-        g.strokePath (path, juce::PathStrokeType (3.5f, juce::PathStrokeType::curved));
-        g.setColour (smoke.withAlpha (0.22f * strength));
-        g.strokePath (path, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved));
-    }
-    else if (trailLife > 0)
-        --trailLife;
+    startTimerHz (30);
 }
 
 void ScopeView::timerCallback()
 {
-    // Follow the sound: the voices' live wavetable position (envelopes and LFOs
-    // included), or the knob's position when nothing plays; and the output level.
-    const auto live = processor.getLivePosition();
-    const auto target = live >= 0.0f ? live : processor.state.getRawParameterValue (ParamIDs::wavePos)->load();
-    const auto rms = juce::Decibels::decibelsToGain (processor.getMeters().rmsDb.load());
-    tick (juce::Time::getMillisecondCounterHiRes() / 1000.0, target, juce::jlimit (0.0f, 1.0f, rms * 3.0f), isShowing());
-
     if (! isShowing())
         return;
 
     if (mode == wavetable)
     {
-        // Draw only while something moves, its smoke is fading, or the tables changed.
+        // A still picture: redrawn only when the table settings change.
         auto param = [this] (const char* id) { return processor.state.getRawParameterValue (id)->load(); };
-        const auto signature = (int) param (ParamIDs::waveTable) * 100000 + (int) param (ParamIDs::waveTableB) * 1000 + juce::roundToInt (param (ParamIDs::tableMix) * 100.0f);
-        if (moving || trailLife > 0 || signature != lastSignature)
+        const auto signature = (int) param (ParamIDs::waveTable) * 1000000 + (int) param (ParamIDs::waveTableB) * 10000
+                             + juce::roundToInt (param (ParamIDs::tableMix) * 100.0f) * 100 + juce::roundToInt (param (ParamIDs::wavePos) * 99.0f);
+        if (signature != lastSignature)
+        {
+            lastSignature = signature;
             repaint();
-        lastSignature = signature;
+        }
         return;
     }
 
@@ -1492,88 +1415,73 @@ void ScopeView::drawSpectrum (juce::Graphics& g, juce::Rectangle<float> area)
     g.strokePath (path, juce::PathStrokeType (1.2f));
 }
 
-ScopeView::Stack ScopeView::stackNow() const
-{
-    auto param = [this] (const char* id) { return processor.state.getRawParameterValue (id)->load(); };
-    Stack s;
-    s.bankA = juce::jlimit (0, WavetableBank::numBanks - 1, (int) param (ParamIDs::waveTable));
-    s.bankB = juce::jlimit (0, WavetableBank::numBanks - 1, (int) param (ParamIDs::waveTableB));
-    s.mix = s.bankB != s.bankA ? juce::jlimit (0.0f, 1.0f, param (ParamIDs::tableMix)) : 0.0f;
-    s.area = getLocalBounds().reduced (10).withTrimmedTop (16).toFloat(); // under the title
-    s.depthX = s.area.getWidth() * 0.18f;
-    s.depthY = s.area.getHeight() * 0.3f;
-    s.face = s.area.withTrimmedRight (s.depthX).withTrimmedTop (s.depthY);
-    return s;
-}
-
-// One frame of the table at `position`, drawn `shift` (0 front, 1 back) up and right in the stack.
-juce::Path ScopeView::stackTrace (const Stack& s, float position, float shift) const
-{
-    const auto& tablesA = processor.bankFor (s.bankA);
-    const auto& tablesB = processor.bankFor (s.bankB);
-    constexpr int points = 256;
-    juce::Path path;
-    for (int i = 0; i < points; ++i)
-    {
-        const auto phase = (double) i / (double) points;
-        // The voice's own blend of table A and B, so the picture is what plays.
-        const auto a = tablesA.lookup (s.bankA, 0, position, phase);
-        const auto value = s.mix > 0.0f ? a + s.mix * (tablesB.lookup (s.bankB, 0, position, phase) - a) : a;
-        const auto px = s.face.getX() + shift * s.depthX + s.face.getWidth() * (float) i / (float) (points - 1);
-        const auto py = s.face.getCentreY() - shift * s.depthY - juce::jlimit (-1.0f, 1.0f, value) * s.face.getHeight() * 0.45f;
-        i == 0 ? path.startNewSubPath (px, py) : path.lineTo (px, py);
-    }
-    return path;
-}
-
+// A still picture of the current wavetable: every frame stacked back to front, the
+// frame at the Wave Position knob lit on top. No motion; it follows the knobs only.
 void ScopeView::drawWavetable (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    const auto stack = stackNow();
-    const auto position = juce::jlimit (0.0f, 1.0f, shownPosition);
+    auto param = [this] (const char* id) { return processor.state.getRawParameterValue (id)->load(); };
+    const auto bankA = juce::jlimit (0, WavetableBank::numBanks - 1, (int) param (ParamIDs::waveTable));
+    const auto bankB = juce::jlimit (0, WavetableBank::numBanks - 1, (int) param (ParamIDs::waveTableB));
+    const auto mix = bankB != bankA ? juce::jlimit (0.0f, 1.0f, param (ParamIDs::tableMix)) : 0.0f;
+    const auto position = juce::jlimit (0.0f, 1.0f, param (ParamIDs::wavePos));
+    const auto& tablesA = processor.bankFor (bankA);
+    const auto& tablesB = processor.bankFor (bankB);
+
+    // The voice's own blend of table A and B, so the picture is what plays.
+    auto sample = [&] (float pos, double phase)
+    {
+        const auto a = tablesA.lookup (bankA, 0, pos, phase);
+        return mix > 0.0f ? a + mix * (tablesB.lookup (bankB, 0, pos, phase) - a) : a;
+    };
 
     auto title = area.removeFromTop (16.0f);
     g.setFont (Fonts::ui (11.0f, true));
     g.setColour (Palette::accent.withAlpha (0.75f));
-    g.drawText (waveTableNames[stack.bankA].toUpperCase() + (stack.mix > 0.0f ? "  +  " + waveTableNames[stack.bankB].toUpperCase() : juce::String()),
+    g.drawText (waveTableNames[bankA].toUpperCase() + (mix > 0.0f ? "  +  " + waveTableNames[bankB].toUpperCase() : juce::String()),
                 title, juce::Justification::centredLeft);
     g.setFont (Fonts::mono (11.0f));
     g.setColour (Palette::yellow.withAlpha (0.8f));
     g.drawText ("POS " + juce::String (position, 2), title, juce::Justification::centredRight);
 
-    // Every frame stacked back to front; the ones near the playing position light
-    // up on a smooth bell (so the light glides as the position does).
+    constexpr int points = 256;
     constexpr int layers = 24;
+    const auto depthX = area.getWidth() * 0.18f, depthY = area.getHeight() * 0.3f;
+    const auto face = area.withTrimmedRight (depthX).withTrimmedTop (depthY);
+
+    auto trace = [&] (float pos, float shift)
+    {
+        juce::Path path;
+        for (int i = 0; i < points; ++i)
+        {
+            const auto phase = (double) i / (double) points;
+            const auto px = face.getX() + shift * depthX + face.getWidth() * (float) i / (float) (points - 1);
+            const auto py = face.getCentreY() - shift * depthY - juce::jlimit (-1.0f, 1.0f, sample (pos, phase)) * face.getHeight() * 0.45f;
+            i == 0 ? path.startNewSubPath (px, py) : path.lineTo (px, py);
+        }
+        return path;
+    };
+
+    // The frames near the lit one glow a little, on a smooth bell.
     for (int layer = layers - 1; layer >= 0; --layer)
     {
         const auto pos = (float) layer / (float) (layers - 1);
         const auto d = (pos - position) / 0.12f;
-        const auto lit = std::exp (-d * d);
-        g.setColour (Palette::accent.withAlpha (0.06f + 0.07f * (1.0f - pos) + 0.3f * lit * (0.35f + level)));
-        g.strokePath (stackTrace (stack, pos, pos), juce::PathStrokeType (1.0f, juce::PathStrokeType::curved));
+        g.setColour (Palette::accent.withAlpha (0.06f + 0.07f * (1.0f - pos) + 0.12f * std::exp (-d * d)));
+        g.strokePath (trace (pos, pos), juce::PathStrokeType (1.0f, juce::PathStrokeType::curved));
     }
 
-    // The smoke the playing frame left behind it as the position moved.
-    if (trail.isValid())
-    {
-        g.setOpacity (1.0f);
-        g.drawImageAt (trail, juce::roundToInt (stack.area.getX()), juce::roundToInt (stack.area.getY()));
-    }
-
-    // The playing frame on top: a soft body between it and its centre line, then
-    // three strokes (wide faint glow, medium, thin and bright), glowing with the level.
-    const auto current = stackTrace (stack, position, position);
+    // The frame at the knob's position: a soft body, a wide faint glow, then the line.
+    const auto current = trace (position, position);
     const auto colour = Palette::orange.interpolatedWith (Palette::yellow, position);
-    const auto centreY = stack.face.getCentreY() - position * stack.depthY;
+    const auto centreY = face.getCentreY() - position * depthY;
     juce::Path body (current);
-    body.lineTo (stack.face.getX() + position * stack.depthX + stack.face.getWidth(), centreY);
-    body.lineTo (stack.face.getX() + position * stack.depthX, centreY);
+    body.lineTo (face.getX() + position * depthX + face.getWidth(), centreY);
+    body.lineTo (face.getX() + position * depthX, centreY);
     body.closeSubPath();
-    g.setColour (colour.withAlpha (0.04f + 0.08f * level));
+    g.setColour (colour.withAlpha (0.07f));
     g.fillPath (body);
-    g.setColour (colour.withAlpha (0.06f + 0.10f * level));
-    g.strokePath (current, juce::PathStrokeType (9.0f + 5.0f * level, juce::PathStrokeType::curved));
-    g.setColour (colour.withAlpha (0.14f + 0.22f * level));
-    g.strokePath (current, juce::PathStrokeType (4.0f + 2.0f * level, juce::PathStrokeType::curved));
+    g.setColour (colour.withAlpha (0.12f));
+    g.strokePath (current, juce::PathStrokeType (8.0f, juce::PathStrokeType::curved));
     g.setColour (colour);
     g.strokePath (current, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved));
 }
@@ -2493,7 +2401,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     displayMode.addItem ("Wavetable", ScopeView::wavetable);
     displayMode.addItem ("Waveform", ScopeView::waveform);
     displayMode.addItem ("Spectrum", ScopeView::spectrum);
-    displayMode.setSelectedId (ScopeView::wavetable, juce::dontSendNotification);
+    displayMode.setSelectedId (ScopeView::spectrum, juce::dontSendNotification); // Spectrum by default
     displayMode.onChange = [this] { display.setMode (displayMode.getSelectedId()); };
     addAndMakeVisible (displayMode);
     addChildComponent (levelMeter); // the main page shows the envelope knobs in its place

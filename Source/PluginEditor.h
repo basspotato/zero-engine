@@ -49,9 +49,10 @@ private:
     float momentary = -100, shortTerm = -100, clipDb = 0, correlation = 1;
 };
 
-// The display window: the output as a waveform or spectrum, or the current
-// wavetable following the playing position live. The mode menu sits in the
-// panel's header strip (owned by the editor).
+// The display window: the output's spectrum (the default) or waveform, or a still
+// picture of the current wavetable (no motion: it redraws only when the table
+// settings change). The mode menu sits in the panel's header strip (owned by the
+// editor).
 class ScopeView : public juce::Component,
                   private juce::Timer
 {
@@ -60,40 +61,18 @@ public:
 
     explicit ScopeView (ZeroEngineProcessor&);
     void paint (juce::Graphics& g) override;
-    void resized() override;
-    void setMode (int newMode);
+    void setMode (int newMode) { mode = newMode; lastSignature = -1; repaint(); }
     void setDropHint (bool show) { dropHint = show; repaint(); } // a file is being dragged over
-    // Tooling: one frame of the wavetable view at a given time, for a position and level, without the timer.
-    void previewFrame (double seconds, float position, float outputLevel) { tick (seconds, position, outputLevel, true); }
 
 private:
     void timerCallback() override;
-    void tick (double seconds, float targetPosition, float targetLevel, bool drawTrail);
     void drawWaveform (juce::Graphics&, juce::Rectangle<float>);
     void drawSpectrum (juce::Graphics&, juce::Rectangle<float>);
     void drawWavetable (juce::Graphics&, juce::Rectangle<float>);
 
-    // What the Wavetable view's paint and its trail share each frame.
-    struct Stack
-    {
-        int bankA = 0, bankB = 0;
-        float mix = 0.0f;
-        juce::Rectangle<float> area, face; // the picture's area (under the title), and the front frame's
-        float depthX = 0.0f, depthY = 0.0f; // how far the back frame sits right and up
-    };
-    Stack stackNow() const;
-    juce::Path stackTrace (const Stack&, float position, float shift) const;
-
     ZeroEngineProcessor& processor;
-    int mode = wavetable;
-    float shownPosition = -1.0f;   // follows the live position, critically damped
-    float positionVelocity = 0.0f;
-    float level = 0.0f;            // output level: up fast, down slowly, for the glow
-    double lastTick = -1.0;
-    bool moving = true;            // something is still moving (or the tables changed): keep drawing
-    int trailLife = 0;             // frames the trail still has something to show
-    int lastSignature = -1;        // the table settings last drawn
-    juce::Image trail;             // the smoke of the playing frame's path, faded each frame (like the arp's ghost)
+    int mode = spectrum;
+    int lastSignature = -1; // the wavetable settings last drawn
     bool dropHint = false;
     void drawMatchOverlay (juce::Graphics&, juce::Rectangle<float>);
 
@@ -297,8 +276,16 @@ public:
     void paint (juce::Graphics&) override;
 
 private:
-    void timerCallback() override { if (isShowing()) repaint(); }
+    void timerCallback() override
+    {
+        // Only while 303 mode is on (or just changed): the dim rail needs drawing once.
+        const auto on = processor.state.getRawParameterValue (ParamIDs::acidFilter)->load() > 0.5f;
+        if (isShowing() && (on || on != wasOn))
+            repaint();
+        wasOn = on;
+    }
     ZeroEngineProcessor& processor;
+    bool wasOn = false;
 };
 
 // The thumbs down beside the heart: "less like this"; Generate learns from it

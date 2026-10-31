@@ -36,6 +36,15 @@
 
 namespace
 {
+    // The editor's AcidStrip and Wavetable display, for the UI checks.
+    void findEditorParts (juce::Component& root, AcidStrip*& strip, ScopeView*& scope)
+    {
+        if (auto* s = dynamic_cast<AcidStrip*> (&root)) strip = s;
+        if (auto* s = dynamic_cast<ScopeView*> (&root)) scope = s;
+        for (auto* child : root.getChildren())
+            findEditorParts (*child, strip, scope);
+    }
+
     void writeWav (const juce::File& file, const juce::AudioBuffer<float>& audio)
     {
         file.getParentDirectory().createDirectory();
@@ -1260,40 +1269,103 @@ int main (int argc, char* argv[])
         return 0;
     }
 
-    if (command == "wtstrip" && args.size() >= 2)
+    if (command == "uicheck")
     {
-        // The Wavetable display while the position sweeps (as an LFO or envelope
-        // moves it): frames at four moments, 60 per second, so the smoke trail and
-        // the smooth following show. Then the position stops and the trail fades.
+        // The 303 knobs' health: is anything in front of them (a hit test over
+        // each knob's face), and how long the pieces take to paint, in ms, against
+        // the 16.7 ms a 60 Hz frame allows.
         ZeroEngineProcessor engine;
         engine.setPlayConfigDetails (0, 2, renderRate, renderBlock);
         engine.prepareToPlay (renderRate, renderBlock);
-        ScopeView view (engine);
-        constexpr int w = 560, h = 112;
-        view.setSize (w, h);
-        const double moments[] { 0.25, 0.5, 0.8, 1.0, 1.3, 1.8 };
-        juce::Image strip (juce::Image::ARGB, w * 2 * 2, h * 2 * 3, true); // two columns of three, each frame at 2x
-        int shot = 0;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (engine.createEditor());
+        juce::AudioBuffer<float> block (2, renderBlock);
+        juce::MidiBuffer midi;
+        for (int i = 0; i < 60; ++i)
         {
-            juce::Graphics g (strip);
-            for (int frame = 0; frame <= 120 && shot < (int) std::size (moments); ++frame)
+            midi.clear();
+            if (i == 0)
+                for (auto note : { 48, 55, 60 })
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), 0);
+            engine.processBlock (block, midi);
+        }
+        for (int i = 0; i < 10; ++i)
+        {
+            engine.processBlock (block, midi);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (30);
+        }
+
+        std::function<void (juce::Component&, std::vector<juce::Component*>&)> collect = [&] (juce::Component& c, std::vector<juce::Component*>& all)
+        {
+            all.push_back (&c);
+            for (auto* child : c.getChildren())
+                collect (*child, all);
+        };
+        std::vector<juce::Component*> all;
+        collect (*editor, all);
+        AcidStrip* strip = nullptr;
+        ScopeView* scopeView = nullptr;
+        findEditorParts (*editor, strip, scopeView);
+        if (strip == nullptr || scopeView == nullptr)
+            return 1;
+        editor->setVisible (true); // hit tests only see a shown component
+
+        // The 303 knobs: the sliders whose bottom edge sits just above the strip.
+        int knobs = 0, blocked = 0;
+        for (auto* c : all)
+            if (auto* knob = dynamic_cast<juce::Slider*> (c); knob != nullptr && knob->getParentComponent() == editor.get()
+                && knob->getBottom() <= strip->getY() && knob->getBottom() >= strip->getY() - 3 && knob->getX() >= strip->getX() - 2)
             {
-                const auto t = (double) frame / 60.0;
-                const auto position = t < 0.9 ? 0.5f + 0.42f * (float) std::sin (juce::MathConstants<double>::twoPi * 0.9 * t) : 0.5f;
-                view.previewFrame (t, position, t < 0.9 ? 0.6f : 0.3f);
-                if (t + 1.0e-6 >= moments[shot])
+                ++knobs;
+                const auto centre = knob->getBounds().getCentre().toFloat();
+                const auto radius = (float) knob->getWidth() * 0.5f;
+                for (int step = 0; step < 17; ++step)
                 {
-                    const auto image = view.createComponentSnapshot (view.getLocalBounds(), true, 2.0f);
-                    g.drawImageAt (image, (shot % 2) * w * 2, (shot / 2) * h * 2);
-                    ++shot;
+                    // The centre, then rings at 0.5, 0.8 and 0.95 of the radius, every 45 degrees.
+                    const auto ring = step == 0 ? 0.0f : step <= 8 ? 0.5f : step <= 16 ? 0.8f : 0.95f;
+                    const auto angle = (float) (step % 8) * juce::MathConstants<float>::pi * 0.25f;
+                    const auto at = (centre + juce::Point<float> (std::cos (angle), std::sin (angle)) * (ring * radius)).toInt();
+                    auto* hit = editor->getComponentAt (at);
+                    if (hit != knob)
+                    {
+                        ++blocked;
+                        std::printf ("  knob at x=%d: a point %.0f%% out is %s\n", knob->getX(), ring * 100.0f,
+                                     hit == nullptr ? "the editor" : typeid (*hit).name());
+                    }
                 }
             }
-        }
-        juce::FileOutputStream out (argFile (args, 1, {}));
-        out.setPosition (0);
-        out.truncate();
-        juce::PNGImageFormat().writeImageToStream (strip, out);
-        std::printf ("Wrote %s\n", argFile (args, 1, {}).getFullPathName().toRawUTF8());
+        std::printf ("303 knobs found: %d; points where something else is in front: %d\n", knobs, blocked);
+
+        auto timeIt = [] (const std::function<void()>& work, int n)
+        {
+            work(); // warm up
+            const auto start = juce::Time::getMillisecondCounterHiRes();
+            for (int i = 0; i < n; ++i)
+                work();
+            return (juce::Time::getMillisecondCounterHiRes() - start) / n;
+        };
+        // Painted into plain software images, so the time is the drawing's own (not a graphics card's).
+        auto paintMs = [&] (juce::Component& c, int n)
+        {
+            juce::Image image (juce::Image::ARGB, juce::jmax (1, c.getWidth()), juce::jmax (1, c.getHeight()), true, juce::SoftwareImageType());
+            return timeIt ([&] { juce::Graphics g (image); c.paintEntireComponent (g, false); }, n);
+        };
+        const auto stripMs = paintMs (*strip, 100);
+        // The display: Spectrum (the default, 30 per second) and the still Wavetable picture (only when the settings change).
+        scopeView->setMode (ScopeView::spectrum);
+        const auto spectrumMs = paintMs (*scopeView, 100);
+        scopeView->setMode (ScopeView::wavetable);
+        const auto tableMs = paintMs (*scopeView, 100);
+        const auto editorMs = paintMs (*editor, 20);
+        TesseractButton* tesseract = nullptr;
+        for (auto* c : all)
+            if (auto* t = dynamic_cast<TesseractButton*> (c); t != nullptr && (tesseract == nullptr || t->getWidth() > tesseract->getWidth()))
+                tesseract = t;
+        const auto screenMs = tesseract != nullptr ? paintMs (*tesseract, 20) : 0.0;
+        std::printf ("paint: 303 strip %.2f ms (30 per second while 303 mode is on), Spectrum display %.2f ms (30 per second), "
+                     "Wavetable picture %.2f ms (only when the settings change), space screen with the tesseract %.1f ms (60 per second), "
+                     "whole editor %.1f ms\n", stripMs, spectrumMs, tableMs, screenMs, editorMs);
+        std::printf ("as a share of one core (software drawing, which reads about 1.4x the real app's):  strip %.0f%%,  spectrum %.0f%%,  space screen %.0f%%\n",
+                     stripMs * 3.0, spectrumMs * 3.0, screenMs * 6.0);
         return 0;
     }
 
@@ -2045,6 +2117,19 @@ int main (int argc, char* argv[])
                                  engine.state.getRawParameterValue (SeqIDs::on (step))->load(),
                                  arpModeNames[(int) engine.state.getRawParameterValue (ParamIDs::arpMode)->load()].toRawUTF8());
                 }
+                continue;
+            }
+            if (args[a].startsWith ("display=")) // the display's view: display=wavetable, waveform or spectrum
+            {
+                const auto id = args[a].endsWith ("wavetable") ? (int) ScopeView::wavetable : args[a].endsWith ("waveform") ? (int) ScopeView::waveform : (int) ScopeView::spectrum;
+                std::function<void (juce::Component&)> pick = [&] (juce::Component& c)
+                {
+                    if (auto* box = dynamic_cast<juce::ComboBox*> (&c); box != nullptr && box->getNumItems() == 3 && box->getItemText (0) == "Wavetable") // the display's menu, not genre or type
+                        box->setSelectedId (id, juce::sendNotificationSync);
+                    for (auto* child : c.getChildren())
+                        pick (*child);
+                };
+                pick (*editor);
                 continue;
             }
             if (args[a] == "dialog") // the rename dialog, written next to the snapshot
