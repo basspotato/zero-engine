@@ -10,6 +10,12 @@
 // plus its stereo width and level. A reference is also transcribed into notes
 // (onset, length, pitch), so candidates can play the same phrase; its pitch,
 // octave-band shape and any wobble guide where the search starts.
+
+// The composite loss's weights (mel spectrograms, MFCC timbre, brightness, loudness envelope).
+// Defined outside SoundPrint: Apple's compiler needs a struct with default values complete before
+// the class that holds a static copy of it (SoundPrint::weights).
+struct SoundPrintWeights { float mel = 1.0f, mfcc = 1.0f, centroid = 1.0f, loudness = 1.0f; };
+
 struct SoundPrint
 {
     static constexpr int numBands = 10;
@@ -46,7 +52,7 @@ struct SoundPrint
 
     // The composite loss's weights (mel spectrograms, MFCC timbre, brightness,
     // loudness envelope); set by tooling to tune, otherwise as tuned on matchbench.
-    struct Weights { float mel = 1.0f, mfcc = 1.0f, centroid = 1.0f, loudness = 1.0f; };
+    using Weights = SoundPrintWeights;
     static inline Weights weights;
     static inline bool debugNotes = false; // tooling: print each detected note and why it was merged or kept
 

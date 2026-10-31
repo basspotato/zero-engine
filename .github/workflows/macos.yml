@@ -65,7 +65,7 @@ jobs:
 
       - name: Build AU, VST3 and Standalone (Release, arm64)
         run: |
-          cmake --build build --config Release --target ZeroEngine_AU ZeroEngine_VST3 ZeroEngine_Standalone --parallel 3 2>&1 | tee build.log
+          cmake --build build --config Release --target ZeroEngine_AU ZeroEngine_VST3 ZeroEngine_Standalone --parallel 3 -- -k 2>&1 | tee build.log # -k: keep going, so one run lists every error
           test "${PIPESTATUS[0]}" -eq 0 || { echo "::error title=Build failed::$(grep ' error ' build.log | head -20 | tr '\n' ' ')"; exit 1; }
 
       # Ad hoc signature (no certificate): what Apple Silicon needs to run the binaries at all.
