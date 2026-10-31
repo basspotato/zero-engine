@@ -877,8 +877,7 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     }
 
     // Glowing nodes spread over the whole screen, drifting round the black hole
-    // on wide oval orbits (the inner ones faster), each shimmering; faint oval
-    // orbit lines under them.
+    // on wide oval orbits (the inner ones faster), each shimmering.
     if (nodes.empty())
     {
         juce::Random random (11);
@@ -890,13 +889,6 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     }
     const auto c = screen.getCentre();
     const auto rx = 0.5f * screen.getWidth(), ry = 0.62f * screen.getHeight();
-
-    for (int ring = 1; ring <= 5; ++ring)
-    {
-        const auto k = (float) ring / 5.0f;
-        g.setColour (Palette::accent.withAlpha (0.04f));
-        g.drawEllipse (c.x - rx * k, c.y - ry * k, 2.0f * rx * k, 2.0f * ry * k, 0.8f);
-    }
 
     for (const auto& n : nodes)
     {
@@ -913,26 +905,10 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
 
     // (Gravity waves from a collapse bend this whole picture: see warpWaves.)
 
-    // The black hole at the centre: an accretion disc of tilted rings, magenta
-    // into orange, turning slowly (steady through a fold; only the rim brightens);
-    // a dark core with a faint rim of light.
+    // The black hole at the centre: a dark core with a faint rim of light that
+    // brightens through a fold (the owner had the tilted disc rings taken out).
     const auto flare = std::sin (MathConstants<float>::pi * foldProgress);
     const auto r = 0.36f * juce::jmin (screen.getWidth(), screen.getHeight());
-    for (int ring = 0; ring < 7; ++ring)
-    {
-        const auto k = (float) ring / 6.0f;
-        const auto radius = r * (0.55f + 0.5f * k);
-        juce::Path disc;
-        disc.addEllipse (-radius, -radius * 0.32f, 2.0f * radius, 2.0f * radius * 0.32f);
-        const auto turn = juce::AffineTransform::rotation (-0.35f + 0.05f * std::sin (t * 0.05f)).translated (c.x, c.y);
-        g.setColour (Palette::magenta.interpolatedWith (Palette::orange, k).withAlpha (0.08f * (1.0f - 0.6f * k)));
-        g.strokePath (disc, juce::PathStrokeType (2.5f), turn);
-        juce::Path dashed;
-        const float dashes[] { 6.0f + 10.0f * k, 9.0f };
-        juce::PathStrokeType (1.2f).createDashedStroke (dashed, disc, dashes, 2);
-        g.setColour (Palette::yellow.withAlpha (0.06f * (1.0f - k)));
-        g.fillPath (dashed, juce::AffineTransform::rotation (t * (0.1f - 0.05f * k)).followedBy (turn));
-    }
     const auto core = r * 0.28f;
     juce::ColourGradient rim (juce::Colour (0xff05060c), c.x, c.y, Palette::accent.withAlpha (0.0f), c.x + core * 1.6f, c.y, true);
     rim.addColour (0.62, juce::Colour (0xff05060c));
