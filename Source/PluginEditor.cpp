@@ -145,8 +145,10 @@ juce::Font ZeroLookAndFeel::getPopupMenuFont()
     return Fonts::ui (12.5f, false, 0.04f);
 }
 
-juce::Font ZeroLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)
+juce::Font ZeroLookAndFeel::getTextButtonFont (juce::TextButton& button, int buttonHeight)
 {
+    if (button.getProperties().contains ("fillHeight")) // the Advanced page's tabs: text as tall as the tab allows
+        return Fonts::ui ((float) buttonHeight * 0.8f, true, 0.08f);
     return Fonts::ui (juce::jmin (12.0f, (float) buttonHeight * 0.62f), true, 0.08f);
 }
 
@@ -1998,6 +2000,7 @@ AdvancedPanel::AdvancedPanel (juce::AudioProcessorValueTreeState& state, std::fu
         }
 
         page.button = std::make_unique<juce::TextButton> (page.name);
+        page.button->getProperties().set ("fillHeight", true); // tab text fills its height
         page.button->setClickingTogglesState (true);
         page.button->setRadioGroupId (0x7ab5);
         const auto index = pages.size();
@@ -2098,12 +2101,11 @@ void AdvancedPanel::resized()
     if (pages.empty())
         return;
 
-    // Page tabs filling the header strip right of the title, each an equal share.
-    auto strip = getLocalBounds().removeFromTop (22).reduced (6, 2);
+    // Page tabs in the header strip, right of the title, its full height.
+    auto strip = getLocalBounds().removeFromTop (22).reduced (6, 1);
     strip.removeFromLeft (80);
-    const auto tabWidth = strip.getWidth() / (int) pages.size();
     for (auto& page : pages)
-        page.button->setBounds (strip.removeFromLeft (tabWidth).reduced (3, 0));
+        page.button->setBounds (strip.removeFromLeft (130).reduced (2, 0));
 
     // Rows share the height; sections in a row share the width by control count.
     auto area = getLocalBounds().withTrimmedTop (22).reduced (12, 10);
