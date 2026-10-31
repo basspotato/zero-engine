@@ -948,14 +948,23 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     const auto r = 0.36f * juce::jmin (screen.getWidth(), screen.getHeight());
 
    #if ZERO_SPACE_IMAGES
-    // The owner's black hole picture: a ring of light round a dark core, turning
-    // counter-clockwise at about the pace of the rest of the movement (a turn in
-    // about 20 seconds), the ring brightening through a fold.
+    // The owner's black hole picture: a ring of light round a dark core. It turns
+    // counter-clockwise, slowly, and breathes at the same rate: once per turn its
+    // whole size eases in to 80% and back out to 100% (a cosine, so it slows and
+    // turns round smoothly at both ends). The ring brightens through a fold.
     if (const auto ring = spaceImage ("blackhole.png"); ring.isValid())
     {
         constexpr float holeOfWidth = 0.211f; // the dark hole's radius as a share of the picture's width
-        const auto holeRadius = 0.105f * juce::jmin (screen.getWidth(), screen.getHeight()); // the old black hole's dark core (r x 0.28 x 1.6 x 0.62 = 0.28 of the height), so the same size
+        constexpr float turnRate = 0.16f;     // radians a second: a turn, and a breath, in about 39 seconds
+        const auto breath = 0.9f + 0.1f * std::cos (turnRate * t); // 1.0 -> 0.8 -> 1.0
+        const auto holeRadius = breath * 0.105f * juce::jmin (screen.getWidth(), screen.getHeight()); // 100% is the old dark core's size
         const auto width = holeRadius / holeOfWidth;
+
+        // The picture shrunk once to under twice its size on screen, so the fine
+        // streaks don't shimmer as it turns and resizes.
+        static juce::Image soft;
+        if (! soft.isValid())
+            soft = ring.rescaled (192, 192, juce::Graphics::highResamplingQuality);
 
         // The void itself: dark, with a soft edge just inside the ring (the stars and glowing nodes pass behind it).
         juce::ColourGradient dark (juce::Colour (0xff04050a), c.x, c.y, juce::Colour (0x0004050a), c.x + holeRadius * 1.08f, c.y, true);
@@ -963,11 +972,11 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.setGradientFill (dark);
         g.fillEllipse (c.x - holeRadius * 1.08f, c.y - holeRadius * 1.08f, holeRadius * 2.16f, holeRadius * 2.16f);
 
-        const auto turn = -0.32f * t; // negative is counter-clockwise on screen
-        g.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
+        const auto turn = -turnRate * t; // negative is counter-clockwise on screen
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
         g.setOpacity (0.88f + 0.12f * flare);
-        g.drawImageTransformed (ring, juce::AffineTransform::translation (-0.5f * (float) ring.getWidth(), -0.5f * (float) ring.getHeight())
-                                          .scaled (width / (float) ring.getWidth())
+        g.drawImageTransformed (soft, juce::AffineTransform::translation (-0.5f * (float) soft.getWidth(), -0.5f * (float) soft.getHeight())
+                                          .scaled (width / (float) soft.getWidth())
                                           .rotated (turn)
                                           .translated (c.x, c.y));
         g.setOpacity (1.0f);
