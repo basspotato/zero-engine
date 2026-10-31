@@ -1289,7 +1289,15 @@ int main (int argc, char* argv[])
             set (ParamIDs::acidWave, square ? 1.0f : 0.0f);
             set (ParamIDs::acidCutoff, -0.5f);
             set (ParamIDs::acidRes, 0.6f);
-            set (ParamIDs::acidEnvMod, 0.7f);
+            auto option = [&] (const char* key, float fallback)
+            {
+                for (const auto& a : args)
+                    if (a.startsWith (juce::String (key) + "="))
+                        return a.fromFirstOccurrenceOf ("=", false, false).getFloatValue();
+                return fallback;
+            };
+            set (ParamIDs::acidEnvMod, option ("env", 0.7f));
+            set (ParamIDs::acidCutoff, option ("cut", -0.5f));
             set (ParamIDs::acidDecay, 0.35f);
             set (ParamIDs::acidAccent, 0.8f);
             if (args.contains ("dry")) // the 303 voice alone, without the loaded sound's finishing

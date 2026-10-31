@@ -85,6 +85,8 @@ private:
         std::atomic<float>* acidAccent;
         std::atomic<float>* acidFilter;
         std::atomic<float>* acidWave;
+        std::atomic<float>* grit;  // 303 mode: drives its filter
+        std::atomic<float>* air;   // 303 mode: brighter, more resonant
     } p;
 
     void setVelocity (float velocity);
@@ -180,7 +182,7 @@ private:
             lastIn = x;
             const auto a = process (halfway * drive, c);
             const auto b = process (x * drive, c);
-            return 0.5f * (a + b) / drive;
+            return 0.5f * (a + b) / std::sqrt (2.0f * drive); // harder drive comes out a little louder, not quieter
         }
         float lastIn = 0.0f;
     };

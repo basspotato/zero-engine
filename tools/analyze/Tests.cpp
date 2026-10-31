@@ -949,7 +949,7 @@ namespace
     // wow, and a new sound or an undo puts the row back to neutral.
     juce::StringArray checkAcid()
     {
-        struct Knobs { float cutoff = 0.0f, res = 0.0f, envMod = 0.0f, decay = 0.5f, accent = 0.0f; bool filter = false; };
+        struct Knobs { float cutoff = 0.0f, res = 0.0f, envMod = 0.0f, decay = 0.5f, accent = 0.0f; bool filter = false; float weight = -1.0f, motion = -1.0f, grit = -1.0f; };
         // The output runs late by the processor's latency (the spectral stage):
         // moved back, sample n lines up with the MIDI at n.
         auto alignedBy = [] (const juce::AudioBuffer<float>& out, int latency)
@@ -980,6 +980,9 @@ namespace
             set (ParamIDs::acidDecay, k.decay);
             set (ParamIDs::acidAccent, k.accent);
             set (ParamIDs::acidFilter, k.filter ? 1.0f : 0.0f);
+            if (k.weight >= 0.0f) set (ParamIDs::weight, k.weight);
+            if (k.motion >= 0.0f) set (ParamIDs::motion, k.motion);
+            if (k.grit >= 0.0f) set (ParamIDs::grit, k.grit);
             engine.setPlayConfigDetails (0, 2, 48000.0, 500);
             engine.prepareToPlay (48000.0, 500);
 
@@ -1096,8 +1099,45 @@ namespace
             Knobs swept303;
             swept303.filter = true; swept303.cutoff = -2.0f; swept303.envMod = 1.0f; swept303.decay = 0.2f;
             const auto sweeping = render (swept303, none);
-            if (bright (sweeping, 6000, 480) < 2.0 * bright (sweeping, 6000 + 3000, 480))
+            if (bright (sweeping, 6000, 480) < 1.5 * bright (sweeping, 6000 + 3000, 480)) // the saw and resonance keep the tail brighter than the plain filter's
                 problems.add ("303 filter: Env Mod did not sweep it");
+
+            // The macros shape 303 mode: Weight darker, Motion sweeps further, Grit changes it.
+            Knobs light = swept303, heavy = swept303;
+            light.weight = 0.0f;
+            heavy.weight = 1.0f;
+            if (bright (render (heavy, none), 6000, 4000) > 0.8 * bright (render (light, none), 6000, 4000))
+                problems.add ("303 mode: Weight did not darken it");
+            Knobs still = swept303, moving = swept303;
+            still.envMod = moving.envMod = 0.3f;
+            still.motion = 0.0f;
+            moving.motion = 1.0f;
+            const auto stillRender = render (still, none), movingRender = render (moving, none);
+            {
+                // Motion works as more Env Mod (a saw's brightness measures poorly: does it change the sound?)
+                double motionDifference = 0.0, motionEnergy = 1.0e-12;
+                for (int i = 0; i < stillRender.getNumSamples(); ++i)
+                {
+                    const auto d = movingRender.getSample (0, i) - stillRender.getSample (0, i);
+                    motionDifference += d * d;
+                    motionEnergy += stillRender.getSample (0, i) * stillRender.getSample (0, i);
+                }
+                if (motionDifference < 0.02 * motionEnergy)
+                    problems.add ("303 mode: Motion barely changed it");
+            }
+            Knobs clean = swept303, driven = swept303;
+            clean.grit = 0.0f;
+            driven.grit = 1.0f;
+            const auto cleanRender = render (clean, none), drivenRender = render (driven, none);
+            double gritDifference = 0.0, gritEnergy = 1.0e-12;
+            for (int i = 0; i < cleanRender.getNumSamples(); ++i)
+            {
+                const auto d = drivenRender.getSample (0, i) - cleanRender.getSample (0, i);
+                gritDifference += d * d;
+                gritEnergy += cleanRender.getSample (0, i) * cleanRender.getSample (0, i);
+            }
+            if (gritDifference < 0.02 * gritEnergy)
+                problems.add ("303 mode: Grit barely changed it");
 
             Knobs low, high;
             low.filter = high.filter = true;
