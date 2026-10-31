@@ -3,6 +3,7 @@
 #include "Wavetable.h"
 #include "BinaryData.h"
 #include <numeric>
+#include <thread>
 #if ZERO_SPACE_IMAGES
  #include "SpaceImages.h"
 #endif
@@ -536,6 +537,187 @@ void TesseractButton::updateSwirl (const juce::Image& background, juce::Rectangl
     }
 }
 
+// Gravity waves bending the screen: each is a ring of refraction rushing out of
+// the black hole. Near the hole it's a rough, jagged rumble with colour fringes
+// and a bright shimmer; as it spreads it smooths into a broad, clean lens ripple
+// and fades at the edges. The bend is worked out on a coarse grid and blended
+// per pixel; pixels it doesn't reach are copied as they are.
+void TesseractButton::warpWaves (float scale)
+{
+    const juce::Image::BitmapData src (waveFrame, juce::Image::BitmapData::readOnly);
+    juce::Image::BitmapData dst (waveOut, juce::Image::BitmapData::writeOnly);
+    const auto width = src.width, height = src.height;
+    const auto cx = 0.5f * (float) width, cy = 0.5f * (float) height;
+    constexpr float squash = 0.78f; // the rings are ovals, like the orbits
+    const auto farthest = std::hypot (cx, cy / squash);
+
+    struct Live { float reach, spread, amp, rough, fringe, shimmer, phase, age; };
+    std::array<Live, 9> live {};
+    int numLive = 0;
+    for (const auto& w : waves)
+    {
+        const auto age = (float) (spaceTime - w.start);
+        if (age <= 0.0f || age >= (float) waveLife || numLive == (int) live.size())
+            continue;
+        const auto k = age / (float) waveLife;
+        const auto fadeIn = juce::jmin (1.0f, k * 8.0f), calm = 1.0f - k;
+        live[(size_t) numLive++] = { farthest * 1.08f * (1.0f - calm * calm),              // fast at first, easing out
+                                     scale * (10.0f + 34.0f * k),                          // the ring broadens
+                                     scale * fadeIn * (1.5f + 9.0f * calm * std::sqrt (calm)), // and gentles
+                                     calm * calm,                                          // jagged near the hole only
+                                     0.45f * calm * calm,
+                                     0.05f * fadeIn * calm * calm, // a faint glint, not a line
+                                     w.phase, age };
+    }
+
+    // The bend (dx, dy), shimmer and colour fringe on a grid every 6 px; each
+    // point's distance, angle and outward direction kept from frame to frame.
+    constexpr int cell = 6;
+    const auto gw = width / cell + 2, gh = height / cell + 2;
+    if (waveGeometry.size() != (size_t) (gw * gh * 4))
+    {
+        waveGeometry.resize ((size_t) (gw * gh * 4));
+        for (int gy = 0; gy < gh; ++gy)
+            for (int gx = 0; gx < gw; ++gx)
+            {
+                const auto px = (float) (gx * cell) - cx, py = (float) (gy * cell) - cy;
+                const auto len = juce::jmax (1.0f, std::hypot (px, py));
+                auto* p = &waveGeometry[(size_t) ((gy * gw + gx) * 4)];
+                p[0] = std::hypot (px, py / squash);
+                p[1] = std::atan2 (py / squash, px);
+                p[2] = px / len;
+                p[3] = py / len;
+            }
+    }
+    waveGrid.resize ((size_t) (gw * gh * 4));
+    for (int gy = 0; gy < gh; ++gy)
+        for (int gx = 0; gx < gw; ++gx)
+        {
+            const auto* geometry = &waveGeometry[(size_t) ((gy * gw + gx) * 4)];
+            const auto d = geometry[0], a = geometry[1];
+            float bend = 0.0f, shimmer = 0.0f, fringe = 0.0f;
+            for (int i = 0; i < numLive; ++i)
+            {
+                const auto& w = live[(size_t) i];
+                const auto x = (d - w.reach) / w.spread;
+                if (x < -3.0f || x > 3.0f)
+                    continue;
+                const auto envelope = std::exp (-x * x);
+                const auto jag = w.rough * (0.5f * std::sin (7.0f * a + w.phase + 9.0f * w.age)
+                                            + 0.35f * std::sin (13.0f * a - 2.0f * w.phase + 14.0f * w.age)
+                                            + 0.3f * std::sin (d * 0.09f / scale - 25.0f * w.age));
+                const auto carrier = std::sin (3.2f * x + 2.2f * jag);
+                bend += w.amp * envelope * carrier * (1.0f + 0.7f * jag);
+                shimmer += w.shimmer * envelope * juce::jmax (0.0f, carrier);
+                fringe += w.fringe * envelope;
+            }
+            auto* cellData = &waveGrid[(size_t) ((gy * gw + gx) * 4)];
+            cellData[0] = bend * geometry[2];
+            cellData[1] = bend * geometry[3];
+            cellData[2] = shimmer;
+            cellData[3] = fringe;
+        }
+
+    auto channel = [&] (float x, float y, int c)
+    {
+        x = juce::jlimit (0.0f, (float) width - 1.001f, x);
+        y = juce::jlimit (0.0f, (float) height - 1.001f, y);
+        const auto x0 = (int) x, y0 = (int) y;
+        const auto fx = x - (float) x0, fy = y - (float) y0;
+        const auto* p00 = src.getPixelPointer (x0, y0);
+        const auto* p01 = src.getPixelPointer (x0, y0 + 1);
+        const auto top = (float) p00[c] + fx * (float) (p00[src.pixelStride + c] - p00[c]);
+        const auto bottom = (float) p01[c] + fx * (float) (p01[src.pixelStride + c] - p01[c]);
+        return top + fy * (bottom - top);
+    };
+    // Cells the waves don't touch (all four corners still) are copied whole.
+    auto still = [&] (int gx, int gy)
+    {
+        const auto* c = &waveGrid[(size_t) ((gy * gw + gx) * 4)];
+        return std::abs (c[0]) + std::abs (c[1]) < 0.03f && c[2] < 0.002f;
+    };
+    stillCells.resize ((size_t) (gw * gh));
+    for (int gy = 0; gy + 1 < gh; ++gy)
+        for (int gx = 0; gx + 1 < gw; ++gx)
+            stillCells[(size_t) (gy * gw + gx)] = still (gx, gy) && still (gx + 1, gy) && still (gx, gy + 1) && still (gx + 1, gy + 1);
+
+    // JUCE's RGB pixels are stored blue, green, red.
+    auto rows = [&] (int yBegin, int yEnd)
+    {
+    for (int y = yBegin; y < yEnd; ++y)
+    {
+        const auto gy = y / cell;
+        const auto fy = (float) (y - gy * cell) / (float) cell;
+        const auto* in = src.getLinePointer (y);
+        auto* out = dst.getLinePointer (y);
+        for (int x = 0; x < width; ++x)
+        {
+            const auto gx = x / cell;
+            if (stillCells[(size_t) (gy * gw + gx)])
+            {
+                const auto run = juce::jmin (width, (gx + 1) * cell) - x;
+                std::memcpy (out + x * dst.pixelStride, in + x * src.pixelStride, (size_t) (run * src.pixelStride));
+                x += run - 1;
+                continue;
+            }
+            const auto fx = (float) (x - gx * cell) / (float) cell;
+            const auto* c00 = &waveGrid[(size_t) ((gy * gw + gx) * 4)];
+            const auto* c10 = c00 + 4;
+            const auto* c01 = c00 + gw * 4;
+            const auto* c11 = c01 + 4;
+            float v[4];
+            for (int k = 0; k < 4; ++k)
+            {
+                const auto top = c00[k] + fx * (c10[k] - c00[k]);
+                v[k] = top + fy * (c01[k] + fx * (c11[k] - c01[k]) - top);
+            }
+            auto* o = out + x * dst.pixelStride;
+            if (std::abs (v[0]) + std::abs (v[1]) < 0.03f && v[2] < 0.002f)
+            {
+                const auto* i = in + x * src.pixelStride;
+                o[0] = i[0];
+                o[1] = i[1];
+                o[2] = i[2];
+                continue;
+            }
+            const auto lift = v[2] * 255.0f;
+            if (v[3] < 0.02f)
+            {
+                // No fringe here: one bilinear sample for all three channels.
+                const auto sx = juce::jlimit (0.0f, (float) width - 1.001f, (float) x - v[0]);
+                const auto sy = juce::jlimit (0.0f, (float) height - 1.001f, (float) y - v[1]);
+                const auto x0 = (int) sx, y0 = (int) sy;
+                const auto fx2 = sx - (float) x0, fy2 = sy - (float) y0;
+                const auto* p00 = src.getPixelPointer (x0, y0);
+                const auto* p10 = p00 + src.pixelStride;
+                const auto* p01 = src.getPixelPointer (x0, y0 + 1);
+                const auto* p11 = p01 + src.pixelStride;
+                const auto w00 = (1.0f - fx2) * (1.0f - fy2), w10 = fx2 * (1.0f - fy2), w01 = (1.0f - fx2) * fy2, w11 = fx2 * fy2;
+                for (int c = 0; c < 3; ++c)
+                    o[c] = (juce::uint8) juce::jmin (255.0f, (float) p00[c] * w00 + (float) p10[c] * w10 + (float) p01[c] * w01 + (float) p11[c] * w11 + lift);
+                continue;
+            }
+            for (int c = 0; c < 3; ++c)
+            {
+                // Red bends a little further than green, blue a little less: the fringe.
+                const auto f = 1.0f + v[3] * (float) (c - 1);
+                const auto value = channel ((float) x - v[0] * f, (float) y - v[1] * f, c) + lift;
+                o[c] = (juce::uint8) juce::jlimit (0.0f, 255.0f, value);
+            }
+        }
+    }
+    };
+
+    // Rows in four bands at once (the GUI thread does one).
+    constexpr int bands = 4;
+    std::array<std::thread, bands - 1> helpers;
+    for (int b = 1; b < bands; ++b)
+        helpers[(size_t) (b - 1)] = std::thread (rows, height * b / bands, height * (b + 1) / bands);
+    rows (0, height / bands);
+    for (auto& helper : helpers)
+        helper.join();
+}
+
 void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> screen)
 {
     // Kept faint, so the tesseract stays the thing to look at.
@@ -729,37 +911,7 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
         g.fillEllipse (p.x - 0.5f * n.size, p.y - 0.5f * n.size, n.size, n.size);
     }
 
-    // Gravity waves from a collapse: faint rings rippling out from the black
-    // hole across the whole screen, uneven (a few slow wobbles round each),
-    // fading as they spread; light blue going to magenta.
-    {
-        const auto farthest = std::hypot (0.5f * screen.getWidth(), 0.5f * screen.getHeight());
-        for (const auto& w : waves)
-        {
-            const auto age = (float) (spaceTime - w.start);
-            const auto life = 3.2f;
-            if (age <= 0.0f || age >= life)
-                continue;
-            const auto k = age / life;
-            const auto reach = farthest * 1.1f * (1.0f - std::pow (1.0f - k, 2.0f)); // fast at first, easing out
-            juce::Path ring;
-            for (int s = 0; s <= 96; ++s)
-            {
-                const auto a = juce::MathConstants<float>::twoPi * (float) s / 96.0f;
-                const auto wobble = 1.0f + 0.05f * std::sin (3.0f * a + w.phase + age) + 0.035f * std::sin (5.0f * a - 1.7f * w.phase - 0.6f * age);
-                const auto p = c + juce::Point<float> (std::cos (a), std::sin (a) * 0.78f) * (reach * wobble);
-                if (s == 0)
-                    ring.startNewSubPath (p);
-                else
-                    ring.lineTo (p);
-            }
-            const auto alpha = 0.16f * (1.0f - k) * std::sqrt (k * 4.0f > 1.0f ? 1.0f : k * 4.0f);
-            g.setColour (Palette::accent.interpolatedWith (Palette::magenta, k).withAlpha (alpha));
-            g.strokePath (ring, juce::PathStrokeType (1.4f + 2.0f * (1.0f - k)));
-            g.setColour (Palette::accent.withAlpha (alpha * 0.25f)); // a soft halo
-            g.strokePath (ring, juce::PathStrokeType (8.0f * (1.0f - k) + 2.0f));
-        }
-    }
+    // (Gravity waves from a collapse bend this whole picture: see warpWaves.)
 
     // The black hole at the centre: an accretion disc of tilted rings, magenta
     // into orange, turning slowly (steady through a fold; only the rim brightens);
@@ -797,7 +949,35 @@ void TesseractButton::paintButton (juce::Graphics& g, bool highlighted, bool dow
     if (! mini)
     {
         fillScreen (g, bounds);
-        paintSpace (g, bounds.reduced (2.0f));
+        const auto screen = bounds.reduced (2.0f);
+        const auto waving = std::any_of (waves.begin(), waves.end(), [this] (const Wave& w)
+                                         { return spaceTime > w.start && spaceTime < w.start + waveLife; });
+        if (! waving)
+            paintSpace (g, screen);
+        else
+        {
+            // A gravity wave running: draw the space into a picture at the
+            // screen's real pixels, bend it, and show that.
+            // At most 1.5x the layout's pixels: the scene is faint and soft, and
+            // drawing and bending it at full 2x took too long a frame.
+            const auto scale = juce::jlimit (1.0f, 1.5f, g.getInternalContext().getPhysicalPixelScaleFactor());
+            const auto w = juce::roundToInt (screen.getWidth() * scale), h = juce::roundToInt (screen.getHeight() * scale);
+            if (waveFrame.getWidth() != w || waveFrame.getHeight() != h)
+            {
+                waveFrame = juce::Image (juce::Image::RGB, w, h, false, juce::SoftwareImageType());
+                waveOut = juce::Image (juce::Image::RGB, w, h, false, juce::SoftwareImageType());
+                waveGeometry.clear();
+            }
+            {
+                juce::Graphics frame (waveFrame);
+                frame.addTransform (juce::AffineTransform::translation (-screen.getX(), -screen.getY()).scaled (scale));
+                fillScreen (frame, bounds);
+                paintSpace (frame, screen);
+            }
+            warpWaves (scale);
+            g.setOpacity (1.0f); // drawImage takes the last colour's alpha
+            g.drawImage (waveOut, screen, juce::RectanglePlacement::stretchToFit);
+        }
     }
 
     // Fold: shrink towards the centre while turning a half turn through w (the

@@ -290,6 +290,13 @@ private:
     std::vector<Node> nodes;
     struct Wave { double start; float phase; }; // a gravity wave from a collapse: when it starts (spaceTime) and how it wobbles
     std::vector<Wave> waves;
+    static constexpr double waveLife = 3.6; // seconds from the black hole to the edges
+    // While a wave runs: the space drawn at the screen's real pixels, the bent
+    // copy shown, and the bend on a coarse grid (dx, dy, shimmer, fringe).
+    juce::Image waveFrame, waveOut;
+    std::vector<float> waveGrid, waveGeometry;
+    std::vector<bool> stillCells;
+    void warpWaves (float scale);
     // The nebula swirling round the black hole: the picture at a small working
     // size, the warped frame, and per pixel its offset from the centre and ring.
     juce::Image swirlSource, swirled;

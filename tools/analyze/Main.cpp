@@ -1229,16 +1229,21 @@ int main (int argc, char* argv[])
     if (command == "wavestrip" && args.size() >= 2)
     {
         // The gravity waves after a click: the Generate screen at 6 moments.
+        // Full size, one under another, with the time each frame takes to draw.
         TesseractButton tesseract;
-        tesseract.setSize (420, 220);
-        const double moments[] { 0.6, 1.0, 1.5, 2.0, 2.7, 3.4 };
-        juce::Image strip (juce::Image::ARGB, 420 * 3, 220 * 2, true);
+        constexpr int w = 912, h = 226;
+        tesseract.setSize (w, h);
+        const double moments[] { 0.7, 1.0, 1.4, 2.0, 2.8, 3.7, 6.0 }; // the last after the waves, for the time
+        juce::Image strip (juce::Image::ARGB, w, h * (int) std::size (moments), true);
         {
             juce::Graphics g (strip);
             for (size_t i = 0; i < std::size (moments); ++i)
             {
                 tesseract.showWavesAt (moments[i]);
-                g.drawImageAt (tesseract.createComponentSnapshot (tesseract.getLocalBounds()), 420 * (int) (i % 3), 220 * (int) (i / 3));
+                const auto start = juce::Time::getMillisecondCounterHiRes();
+                const auto frame = tesseract.createComponentSnapshot (tesseract.getLocalBounds(), true, 2.0f);
+                std::printf ("%.1f s: %.1f ms at 2x\n", moments[i], juce::Time::getMillisecondCounterHiRes() - start);
+                g.drawImage (frame, juce::Rectangle<float> (0.0f, (float) (h * (int) i), (float) w, (float) h));
             }
         }
         juce::FileOutputStream out (argFile (args, 1, {}));
