@@ -94,6 +94,7 @@ private:
     float levelNow = 0.0f, velocityNow = 1.0f;
     float ampRounded = 0.0f; // the amp envelope, corners rounded over ~0.5 ms
     bool quickSlide = false;
+    bool retriggered = false; // this note restarted a voice still sounding (the mod envelope then rises over 4 ms at least)
 
     // Topology-preserving state-variable filter (Zavalishin), one channel, one stage.
     struct Svf

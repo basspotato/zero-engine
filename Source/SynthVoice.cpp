@@ -76,7 +76,10 @@ void ZeroVoice::updateEnvelopes()
 
     ampEnv.setParameters ({ juce::jmax (0.001f, p.ampAttack->load() * attackScale), juce::jmax (0.001f, p.ampDecay->load() * decayScale),
                             p.ampSustain->load(), juce::jmax (0.005f, p.ampRelease->load()) });
-    modEnv.setParameters ({ juce::jmax (0.001f, p.modAttack->load()), juce::jmax (0.001f, p.modDecay->load()),
+    // A note restarting a voice that still sounds rises its mod envelope over
+    // 4 ms at least: a big filter sweep snapping up in 1 ms on a loud voice
+    // ticks (from silence the amp attack hides it; that stays the punch).
+    modEnv.setParameters ({ juce::jmax (retriggered ? 0.004f : 0.001f, p.modAttack->load()), juce::jmax (0.001f, p.modDecay->load()),
                             p.modSustain->load(), juce::jmax (0.005f, p.modRelease->load()) });
 }
 
@@ -101,6 +104,7 @@ void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger, bool jump
     if (retrigger)
     {
         releasing = false; // a retrigger restarts the envelopes
+        retriggered = true; // of a voice still sounding (glideTo only comes to an active voice)
         setVelocity (velocity);
         updateEnvelopes();
         ampEnv.noteOn();
@@ -123,6 +127,7 @@ void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*
     // fast lines). Only a silent voice starts fresh, on the note.
     const auto continuing = ampEnv.isActive();
     quickSlide = continuing;
+    retriggered = continuing;
     if (! continuing)
     {
         pitch = targetPitch;
