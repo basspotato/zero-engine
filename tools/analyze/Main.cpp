@@ -1362,6 +1362,165 @@ int main (int argc, char* argv[])
         return 0;
     }
 
+    if (command == "peek" && args.size() >= 3)
+    {
+        // The samples of a WAV around a moment (left channel), with their second
+        // difference: what a click actually looks like.
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (argFile (args, 1, {})));
+        if (reader == nullptr)
+            return 1;
+        const auto centre = (juce::int64) (args[2].getDoubleValue() * reader->sampleRate);
+        const auto half = args.size() > 3 ? args[3].getIntValue() : 24;
+        juce::AudioBuffer<float> buffer (1, 2 * half + 2);
+        reader->read (&buffer, 0, buffer.getNumSamples(), centre - half - 2, true, false);
+        for (int i = 2; i < buffer.getNumSamples(); ++i)
+        {
+            const auto x = buffer.getSample (0, i);
+            const auto d2 = x - 2.0f * buffer.getSample (0, i - 1) + buffer.getSample (0, i - 2);
+            std::printf ("%+6d  %+.5f  d2 %+.5f %s\n", i - half - 2, x, d2, std::abs (d2) > 0.01f ? "<" : "");
+        }
+        return 0;
+    }
+
+    if (command == "clickhunt")
+    {
+        // A stricter click search than clickcheck, played like a person: per
+        // profile, two Generate picks play a staccato 1/8 line, a legato line
+        // (overlapping notes), chord changes and fast repeated 1/16s. A click is a
+        // spike in the second difference (a break in the waveform) against the
+        // largest within 20 ms around it, on either side. Lists every pick over
+        // the threshold (default 3x) with its settings; the worst 12 go to
+        // analysis/clicks as WAVs named with the spike's time.
+        const auto threshold = args.size() > 1 ? juce::jmax (1.5f, args[1].getFloatValue()) : 3.0f;
+        const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile ("analysis/clicks");
+        dir.deleteRecursively();
+        dir.createDirectory();
+        constexpr double rate = 48000.0;
+        constexpr int block = 512;
+        struct Found { float ratio; double at; juce::String what; juce::AudioBuffer<float> audio; };
+        std::vector<Found> found;
+        int picks = 0;
+        for (int g = 0; g < genreNames.size(); ++g)
+            for (int t = 0; t < typeNames.size(); ++t)
+            {
+                auto owned = std::make_unique<ZeroEngineProcessor>();
+                auto& engine = *owned;
+                engine.setUserFolder (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("zero_clickhunt"));
+                engine.setPlayConfigDetails (0, 2, rate, block);
+                engine.prepareToPlay (rate, block);
+                auto set = [&] (const char* id, float v) { auto* p = engine.state.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+                set (ParamIDs::genre, (float) g);
+                set (ParamIDs::type, (float) t);
+                engine.syncProfile();
+                for (int s = 0; s < 2; ++s)
+                {
+                    engine.generate (4400 + 37 * g + 11 * t + s);
+                    set (ParamIDs::arpOn, 0.0f);
+                    if (args.contains ("dry")) // the voices alone: is a click theirs or the finishing chain's?
+                        for (auto* id : { ParamIDs::grit, ParamIDs::ottDepth, ParamIDs::spectral, ParamIDs::reverbMix, ParamIDs::delayMix })
+                            set (id, 0.0f);
+                    if (args.contains ("only") && ! (typeNames[t] == "Bass" && (genreNames[g] == "Pop" || genreNames[g] == "Drum & Bass")))
+                        continue;
+                    engine.resetForRender();
+                    const auto base = t == 0 ? 36 : 57;
+
+                    // (on, off, note, velocity) in seconds.
+                    struct Note { double on, off; int note, velocity; };
+                    std::vector<Note> notes;
+                    const int melody[] { 0, 3, 7, 10, 12, 10, 7, 3 };
+                    for (int i = 0; i < 8; ++i) // staccato 1/8s
+                        notes.push_back ({ 0.25 * i, 0.25 * i + 0.18, base + melody[i], 80 + 5 * i });
+                    for (int i = 0; i < 8; ++i) // legato: each overlaps the next by 50 ms
+                        notes.push_back ({ 2.0 + 0.25 * i, 2.0 + 0.25 * i + 0.3, base + melody[7 - i], 120 - 5 * i });
+                    const int roots[] { 0, 5, 3, 7 };
+                    for (int c = 0; c < 4; ++c) // chord changes, 20 ms overlap
+                        for (const auto interval : { 0, 4, 7 })
+                            notes.push_back ({ 4.0 + 0.5 * c, 4.0 + 0.5 * c + 0.52, base + 12 * (t == 0 ? 0 : 0) + roots[c] + interval, 100 });
+                    for (int i = 0; i < 12; ++i) // fast repeated 1/16s
+                        notes.push_back ({ 6.0 + 0.125 * i, 6.0 + 0.125 * i + 0.06, base + 12, i % 4 == 0 ? 120 : 85 });
+
+                    juce::AudioBuffer<float> out (2, (int) (8.5 * rate / block) * block), chunk (2, block);
+                    juce::MidiBuffer midi;
+                    for (int pos = 0; pos + block <= out.getNumSamples(); pos += block)
+                    {
+                        midi.clear();
+                        for (const auto& n : notes)
+                        {
+                            const auto on = (int) (n.on * rate), off = (int) (n.off * rate);
+                            if (on >= pos && on < pos + block)
+                                midi.addEvent (juce::MidiMessage::noteOn (1, n.note, (juce::uint8) n.velocity), on - pos);
+                            if (off >= pos && off < pos + block)
+                                midi.addEvent (juce::MidiMessage::noteOff (1, n.note), off - pos);
+                        }
+                        chunk.clear();
+                        engine.processBlock (chunk, midi);
+                        for (int ch = 0; ch < 2; ++ch)
+                            out.copyFrom (ch, pos, chunk, ch, 0, block);
+                    }
+                    ++picks;
+
+                    float worst = 0.0f;
+                    double worstAt = 0.0;
+                    const auto n = out.getNumSamples();
+                    const auto reach = (int) (0.02 * rate), self = 4;
+                    std::vector<float> d ((size_t) n, 0.0f);
+                    for (int ch = 0; ch < 2; ++ch)
+                    {
+                        const auto* x = out.getReadPointer (ch);
+                        for (int i = 2; i < n; ++i)
+                            d[(size_t) i] = std::abs (x[i] - 2.0f * x[i - 1] + x[i - 2]);
+                        // Running max of the neighbourhood, by blocks of `self` (fast enough).
+                        for (int i = reach; i < n - reach; ++i)
+                        {
+                            if (d[(size_t) i] < 2.0e-4f)
+                                continue;
+                            float around = 0.0f;
+                            for (int j = i - reach; j <= i + reach; ++j)
+                                if (std::abs (j - i) > self && d[(size_t) j] > around)
+                                    around = d[(size_t) j];
+                            if (const auto r = d[(size_t) i] / juce::jmax (5.0e-5f, around); r > worst) { worst = r; worstAt = i / rate; }
+                        }
+                    }
+                    if (worst > threshold)
+                    {
+                        auto value = [&] (const char* id) { return engine.state.getRawParameterValue (id)->load(); };
+                        const auto section = worstAt < 2.0 ? "staccato" : worstAt < 4.0 ? "legato" : worstAt < 6.0 ? "chords" : worstAt < 7.5 ? "16ths" : "tail";
+                        found.push_back ({ worst, worstAt, (genreNames[g] + " " + typeNames[t] + " pick " + juce::String (s + 1)).paddedRight (' ', 24)
+                                                  + juce::String (worst, 1) + "x at " + juce::String (worstAt, 3) + " s (" + section + ")"
+                                                  + "  play " + playModeNames[(int) value (ParamIDs::playMode)]
+                                                  + "  atk " + juce::String (value (ParamIDs::ampAttack) * 1000.0f, 1) + " rel " + juce::String (value (ParamIDs::ampRelease) * 1000.0f, 0)
+                                                  + "  res " + juce::String (value (ParamIDs::filterRes), 2) + " env " + juce::String (value (ParamIDs::filterEnv), 1)
+                                                  + " modDec " + juce::String (value (ParamIDs::modDecay) * 1000.0f, 0)
+                                                  + "  glide " + juce::String (value (ParamIDs::glide) * 1000.0f, 0)
+                                                  + "  grit " + juce::String (value (ParamIDs::grit), 2) + " ott " + juce::String (value (ParamIDs::ottDepth), 2)
+                                                  + " spec " + juce::String (value (ParamIDs::spectral), 2)
+                                                  + "  lfo>cut " + juce::String (value (ParamIDs::lfoToCutoff), 2) + " >pos " + juce::String (value (ParamIDs::lfoToPos), 2),
+                                          out });
+                    }
+                }
+                std::fprintf (stderr, "\r%s %s   ", genreNames[g].toRawUTF8(), typeNames[t].toRawUTF8());
+            }
+        std::sort (found.begin(), found.end(), [] (const Found& a, const Found& b) { return a.ratio > b.ratio; });
+        std::printf ("\n%d of %d picks over %.1fx:\n", (int) found.size(), picks, threshold);
+        for (size_t i = 0; i < found.size(); ++i)
+        {
+            std::printf ("  %s\n", found[i].what.toRawUTF8());
+            if (i < 12)
+            {
+                const auto file = dir.getChildFile (juce::String (i + 1).paddedLeft ('0', 2) + " at " + juce::String (found[i].at, 3) + "s.wav");
+                if (auto stream = std::unique_ptr<juce::OutputStream> (file.createOutputStream()))
+                    if (auto writer = std::unique_ptr<juce::AudioFormatWriter> (juce::WavAudioFormat().createWriterFor (stream.get(), rate, 2, 24, {}, 0)))
+                    {
+                        stream.release();
+                        writer->writeFromAudioSampleBuffer (found[i].audio, 0, found[i].audio.getNumSamples());
+                    }
+            }
+        }
+        return 0;
+    }
+
     if (command == "tastereport")
     {
         // What the owner's taste models have learned (read only): the trait

@@ -88,6 +88,12 @@ private:
 
     void setVelocity (float velocity);
     float noteVelocity = 1.0f;
+    // On a voice still sounding, level and velocity's cutoff ease to a new
+    // note's over ~3 ms, and its pitch moves in 2.5 ms (quickSlide) when it
+    // isn't sliding: instant steps click.
+    float levelNow = 0.0f, velocityNow = 1.0f;
+    float ampRounded = 0.0f; // the amp envelope, corners rounded over ~0.5 ms
+    bool quickSlide = false;
 
     // Topology-preserving state-variable filter (Zavalishin), one channel, one stage.
     struct Svf
