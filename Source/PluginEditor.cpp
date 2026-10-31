@@ -467,6 +467,75 @@ static juce::Image spaceImage (const char* fileName)
 }
 #endif
 
+// The nebula warped round the black hole at a small working size (the screen
+// draws it stretched and faint, so detail isn't lost): the whole picture turns
+// slowly, twisted further near the centre into a spiral that breathes a little,
+// so the inside moves against the outside without ever winding up. Outside the
+// picture it reads its mirror image.
+void TesseractButton::updateSwirl (const juce::Image& background, juce::Rectangle<float> screen, float t)
+{
+    constexpr int width = 480, rings = 256;
+    const auto height = juce::jlimit (40, 240, juce::roundToInt (width * screen.getHeight() / juce::jmax (1.0f, screen.getWidth())));
+    if (! swirlSource.isValid() || swirlSource.getHeight() != height)
+    {
+        swirlSource = background.rescaled (width, height, juce::Graphics::highResamplingQuality).convertedToFormat (juce::Image::RGB);
+        swirled = juce::Image (juce::Image::RGB, width, height, false);
+        const auto cx = 0.5f * (float) width, cy = 0.5f * (float) height, reach = std::hypot (cx, cy);
+        swirlDx.resize ((size_t) (width * height));
+        swirlDy.resize (swirlDx.size());
+        swirlRing.resize (swirlDx.size());
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x)
+            {
+                const auto i = (size_t) (y * width + x);
+                swirlDx[i] = (float) x + 0.5f - cx;
+                swirlDy[i] = (float) y + 0.5f - cy;
+                swirlRing[i] = (juce::uint16) juce::jmin (rings - 1, (int) (std::hypot (swirlDx[i], swirlDy[i]) / reach * (float) rings));
+            }
+    }
+
+    // Each ring's turn: all of it at one slow pace (a turn in about 12 minutes),
+    // plus a spiral twist strongest at the centre.
+    std::array<float, rings> cosA, sinA;
+    const auto breathe = 1.0f + 0.3f * std::sin (t * 0.07f);
+    for (int k = 0; k < rings; ++k)
+    {
+        const auto rn = ((float) k + 0.5f) / (float) rings;
+        const auto a = -0.009f * t - 1.4f * breathe * (1.0f - rn) * (1.0f - rn);
+        cosA[(size_t) k] = std::cos (a);
+        sinA[(size_t) k] = std::sin (a);
+    }
+
+    const juce::Image::BitmapData src (swirlSource, juce::Image::BitmapData::readOnly);
+    juce::Image::BitmapData dst (swirled, juce::Image::BitmapData::writeOnly);
+    const auto cx = 0.5f * (float) width, cy = 0.5f * (float) height;
+    auto mirror = [] (int v, int n)
+    {
+        const auto period = 2 * n;
+        v %= period;
+        if (v < 0)
+            v += period;
+        return v < n ? v : period - 1 - v;
+    };
+    for (int y = 0; y < height; ++y)
+    {
+        auto* out = dst.getLinePointer (y);
+        for (int x = 0; x < width; ++x)
+        {
+            const auto i = (size_t) (y * width + x);
+            const auto k = swirlRing[i];
+            const auto dx = swirlDx[i], dy = swirlDy[i];
+            const auto sx = mirror ((int) std::floor (cx + dx * cosA[k] - dy * sinA[k]), width);
+            const auto sy = mirror ((int) std::floor (cy + dx * sinA[k] + dy * cosA[k]), height);
+            const auto* in = src.getPixelPointer (sx, sy);
+            auto* o = out + x * dst.pixelStride;
+            o[0] = in[0];
+            o[1] = in[1];
+            o[2] = in[2];
+        }
+    }
+}
+
 void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> screen)
 {
     // Kept faint, so the tesseract stays the thing to look at.
@@ -483,13 +552,19 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     g.reduceClipRegion (screen.toNearestInt());
 
    #if ZERO_SPACE_IMAGES
-    // The owner's nebula, stretched over the whole screen and almost
-    // transparent: everything else plays in front of it.
+    // The owner's nebula, swirling slowly round the black hole, stretched over
+    // the whole screen and almost transparent: everything else plays in front of it.
     const auto background = spaceImage ("background.jpg"); // ImageCache keeps it decoded
     if (background.isValid())
     {
-        g.setOpacity (0.16f);
-        g.drawImage (background, screen, juce::RectanglePlacement::stretchToFit);
+        if (swirledAt != spaceTime)
+        {
+            updateSwirl (background, screen, t);
+            swirledAt = spaceTime;
+        }
+        g.setOpacity (0.21f);
+        g.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
+        g.drawImage (swirled, screen, juce::RectanglePlacement::stretchToFit);
         g.setOpacity (1.0f);
     }
    #endif
@@ -643,7 +718,7 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
 
     for (const auto& n : nodes)
     {
-        const auto a = n.angle + t * 0.015f / n.radius;
+        const auto a = n.angle + t * 0.012f / (n.radius * std::sqrt (n.radius)); // Kepler-like: much faster near the hole
         const auto p = c + juce::Point<float> (std::cos (a) * rx, std::sin (a) * ry) * n.radius;
         const auto shimmer = 0.6f + 0.4f * std::sin (n.phase + t * 1.3f);
         const auto halo = 3.0f * n.size;

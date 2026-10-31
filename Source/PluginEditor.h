@@ -290,6 +290,13 @@ private:
     std::vector<Node> nodes;
     struct Wave { double start; float phase; }; // a gravity wave from a collapse: when it starts (spaceTime) and how it wobbles
     std::vector<Wave> waves;
+    // The nebula swirling round the black hole: the picture at a small working
+    // size, the warped frame, and per pixel its offset from the centre and ring.
+    juce::Image swirlSource, swirled;
+    std::vector<float> swirlDx, swirlDy;
+    std::vector<juce::uint16> swirlRing;
+    double swirledAt = -1.0;
+    void updateSwirl (const juce::Image& background, juce::Rectangle<float> screen, float t);
     void paintSpace (juce::Graphics&, juce::Rectangle<float> screen);
     bool mini = false;
 };
