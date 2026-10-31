@@ -2087,8 +2087,9 @@ void AdvancedPanel::paint (juce::Graphics& g)
             // (the owner's order): tone, movement, voice, mix read as groups.
             const auto stage = section.name == "OSCILLATOR" || section.name == "FILTER"     ? Palette::yellow
                              : section.name == "MOD ENVELOPE" || section.name == "LFO"      ? Palette::orange
-                             : section.name == "SPACE" || section.name == "FINISH"          ? Palette::accent
-                                                                                            : Palette::magenta;
+                             : section.name == "AMP ENVELOPE" || section.name == "SUB"
+                                || section.name == "PLAY"                                   ? Palette::magenta
+                                                                                            : Palette::accent; // SPACE, FINISH, and the ARP page's settings
             const auto tinted = section.custom == nullptr; // the ARP page's displays keep their own look
             if (tinted)
             {
