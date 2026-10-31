@@ -589,8 +589,8 @@ void TesseractButton::paintSpace (juce::Graphics& g, juce::Rectangle<float> scre
     // scintillates like a star low in the sky: brightness and spike length flutter
     // on a few fast unrelated rates, the colour flicking between blue, white and orange.
     {
-        const auto c = juce::Point<float> (screen.getX() + 0.68f * screen.getWidth(), screen.getY() + 0.2f * h);
-        const auto size = 0.0225f * h;
+        const auto c = juce::Point<float> (screen.getX() + 0.8f * screen.getWidth(), screen.getY() + 0.2f * h);
+        const auto size = 0.018f * h;
         const auto flutter = 0.5f + 0.2f * std::sin (t * 23.0f) + 0.17f * std::sin (t * 37.3f + 1.1f) + 0.13f * std::sin (t * 53.9f + 2.3f);
         const auto hue = std::sin (t * 9.7f) + 0.6f * std::sin (t * 17.1f + 0.7f); // -1.6 .. 1.6: blue, white, orange
         const auto white = juce::Colour (0xfff4f6ff), blue = juce::Colour (0xff8fb8ff), orange = juce::Colour (0xffffb36b);
