@@ -110,7 +110,10 @@ void ZeroVoice::updateEnvelopes()
     else
         ampEnv.setParameters ({ juce::jmax (0.001f, p.ampAttack->load() * attackScale), juce::jmax (0.001f, p.ampDecay->load() * decayScale),
                                 p.ampSustain->load(), juce::jmax (0.005f, p.ampRelease->load()) });
-    modEnv.setParameters ({ juce::jmax (0.001f, p.modAttack->load()), juce::jmax (0.001f, p.modDecay->load()),
+    // A note restarting a voice that still sounds rises its mod envelope over
+    // 4 ms at least: a big filter sweep snapping up in 1 ms on a loud voice
+    // ticks (from silence the amp attack hides it; that stays the punch).
+    modEnv.setParameters ({ juce::jmax (retriggered ? 0.004f : 0.001f, p.modAttack->load()), juce::jmax (0.001f, p.modDecay->load()),
                             p.modSustain->load(), juce::jmax (0.005f, p.modRelease->load()) });
 }
 
@@ -129,12 +132,13 @@ void ZeroVoice::setVelocity (float velocity)
 void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger, bool jump)
 {
     targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
-    if (jump)
-        pitch = targetPitch;
+    if (jump) // no slide: on a voice still sounding, an unheard 2.5 ms move (an instant jump kinks the wave and ticks)
+        quickSlide = true;
 
     if (retrigger)
     {
         releasing = false; // a retrigger restarts the envelopes
+        retriggered = true; // of a voice still sounding (glideTo only comes to an active voice)
         setVelocity (velocity);
         updateEnvelopes();
         ampEnv.noteOn();
@@ -146,15 +150,25 @@ void ZeroVoice::glideTo (int midiNote, float velocity, bool retrigger, bool jump
 void ZeroVoice::startNote (int midiNote, float velocity, juce::SynthesiserSound*, int pitchWheel)
 {
     releasing = false;
-    pitch = targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
+    targetPitch = std::log2 (juce::MidiMessage::getMidiNoteInHertz (midiNote));
     pitchWheelMoved (pitchWheel);
     setVelocity (velocity);
 
     // A voice still sounding (a stolen voice, a mono retrigger, fast arp notes)
-    // carries on: its filters, oscillator phases and LFO stay, and the envelope
-    // rises from where it is, so nothing jumps (the owner heard pops on arp
-    // patches). Only a silent voice starts fresh.
+    // carries on: its filters, oscillator phases and LFO stay, the envelope
+    // rises from where it is, and pitch, level and velocity's cutoff move there
+    // over a few ms, so nothing jumps (the owner heard pops on arp patches and
+    // fast lines). Only a silent voice starts fresh, on the note.
     const auto continuing = ampEnv.isActive();
+    quickSlide = continuing;
+    retriggered = continuing;
+    if (! continuing)
+    {
+        pitch = targetPitch;
+        levelNow = level;
+        velocityNow = noteVelocity;
+        ampRounded = 0.0f;
+    }
     stolen = false;
     if (! continuing)
     {
@@ -313,7 +327,10 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     // Choose the mip level for the highest pitch this block can reach.
     const auto bendSemis = bend * p.bendRange->load();
     const auto glideTime = filter303 ? juce::jmax (0.06f, p.glide->load()) : p.glide->load(); // the 303's slide, about 60 ms
-    const auto glideCoeff = glideTime > 0.0005f ? 1.0 - std::exp (-3.0 / (glideTime * sampleRate)) : 1.0; // ~95% there at glideTime
+    const auto glideCoeff = 1.0 - std::exp (-3.0 / (juce::jmax (0.0025f, glideTime) * sampleRate)); // ~95% there at glideTime (2.5 ms at least: no pitch steps)
+    const auto quickCoeff = 1.0 - std::exp (-3.0 / (0.0025 * sampleRate));
+    const auto ease = (float) (1.0 - std::exp (-1.0 / (0.003 * sampleRate))); // level and velocity's cutoff to a new note's
+    const auto cornerEase = (float) (1.0 - std::exp (-1.0 / (0.0005 * sampleRate)));
 
     const auto maxFreq = std::exp2 (juce::jmax (pitch, targetPitch) + maxCents / 1200.0
                                     + (lfoToPitch + juce::jmax (0.0f, modToPitch) + juce::jmax (0.0f, bendSemis)) / 12.0);
@@ -329,8 +346,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     // Filter. Fully open low-pass with no modulation is skipped, so profiles
     // that don't use it sound exactly as before.
     const auto filterMode = (int) p.filterMode->load();
-    const auto velocityOctaves = p.velToCutoff->load() * (noteVelocity - 1.0f); // softer notes are darker
-    const auto cutoff = p.filterCutoff->load() * std::exp2 (macroMap.offset (MacroTarget::filterCutoff) + velocityOctaves);
+    const auto velToCutoff = p.velToCutoff->load(); // softer notes are darker (eased per sample)
+    const auto cutoff = p.filterCutoff->load() * std::exp2 (macroMap.offset (MacroTarget::filterCutoff));
     const auto filterEnv = p.filterEnv->load() + macroMap.offset (MacroTarget::filterEnv);
     const auto keytrack = p.filterKeytrack->load();
     const auto lfoToCutoff = p.lfoToCutoff->load();
@@ -363,7 +380,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
     const auto sweepRise = (float) (1.0 - std::exp (-1.0 / (0.0005 * sampleRate))); // ~1.5 ms to the top
     const auto wowDepth = accent * (1.5f + 7.0f * resonance);
 
-    const auto filterOn = filterMode > 1 || cutoff < 19000.0f || std::abs (filterEnv) > 1.0e-3f
+    const auto velocityDarkens = velToCutoff > 1.0e-3f && juce::jmin (noteVelocity, velocityNow) < 0.999f;
+    const auto filterOn = filterMode > 1 || cutoff < 19000.0f || velocityDarkens || std::abs (filterEnv) > 1.0e-3f
                        || lfoToCutoff > 1.0e-3f || keytrack > 1.0e-3f || acidOn || std::abs (acidResOffset) > 1.0e-4f || filter303;
     const auto k = 2.0f * (1.0f - 0.97f * resonance);
     const auto maxCutoff = (float) (0.45 * sampleRate);
@@ -379,7 +397,10 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
         const auto pos = juce::jlimit (0.0f, 1.0f, basePos + mod * modToPos + lfo * lfoToPos * 0.5f);
         if (i == numSamples - 1)
             livePosition.store (pos, std::memory_order_relaxed); // for the display
-        pitch += glideCoeff * (targetPitch - pitch);
+        pitch += (quickSlide ? quickCoeff : glideCoeff) * (targetPitch - pitch);
+        if (quickSlide && std::abs (targetPitch - pitch) < 1.0e-6)
+            quickSlide = false;
+        velocityNow += (noteVelocity - velocityNow) * ease;
         const auto inc = std::exp2 (pitch + (lfo * lfoToPitch + mod * modToPitch + bendSemis) / 12.0) / sampleRate;
 
         float l = 0.0f, r = 0.0f;
@@ -432,7 +453,8 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
                 }
                 else
                 {
-                    const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC) + acidShift;
+                    const auto octaves = filterEnv * mod + lfoToCutoff * lfo + keytrack * (float) (pitch - middleC) + acidShift
+                                       + velToCutoff * (velocityNow - 1.0f);
                     const auto fc = juce::jlimit (20.0f, maxCutoff, cutoff * std::exp2 (octaves));
                     const auto g = std::tan (juce::MathConstants<float>::pi * fc / (float) sampleRate);
                     resonant = Svf::make (g, k);
@@ -459,7 +481,12 @@ void ZeroVoice::renderNextBlock (juce::AudioBuffer<float>& output, int startSamp
 
         // With a third channel the processor keeps the sub separate (Sub Split);
         // otherwise it is mixed into both sides as before.
-        auto gain = ampEnv.getNextSample() * level;
+        levelNow += (level - levelNow) * ease;
+        // The amp envelope with its corners rounded over ~0.5 ms: a retrigger
+        // turns a falling release straight into a rising attack, and on a
+        // loud, slow bass wave that corner alone ticks.
+        ampRounded += (ampEnv.getNextSample() - ampRounded) * cornerEase;
+        auto gain = ampRounded * levelNow;
         if (acidOn)
         {
             // Eased over ~3 ms: a voice carried from an accented note to a plain
