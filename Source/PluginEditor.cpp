@@ -361,18 +361,16 @@ void ZeroLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
 //==============================================================================
 void DislikeButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
-    // A thumb pointing down: the cuff on the left, the fist (a rounded block),
-    // and the thumb hanging down from it; outlined like the heart.
+    // The familiar thumbs-down: a hand with the thumb pointing down and the
+    // cuff to the right (Material Design's icon outline, Apache 2.0), outlined
+    // like the heart.
+    static const auto thumb = juce::Drawable::parseSVGPath (
+        "M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32"
+        "c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z");
     const auto r = getLocalBounds().toFloat().reduced (3.0f + (down ? 1.0f : 0.0f));
-    const auto size = juce::jmin (r.getWidth(), r.getHeight());
-    const auto b = r.withSizeKeepingCentre (size, size);
-    const auto x = b.getX(), y = b.getY(), w = b.getWidth(), h = b.getHeight();
-    juce::Path thumb;
-    thumb.addRectangle (x + 0.06f * w, y + 0.06f * h, 0.18f * w, 0.46f * h);                     // the cuff, on the left
-    thumb.addRoundedRectangle (x + 0.28f * w, y + 0.06f * h, 0.64f * w, 0.46f * h, 0.12f * w); // the fist
-    thumb.addRoundedRectangle (x + 0.28f * w, y + 0.44f * h, 0.22f * w, 0.5f * h, 0.11f * w);  // the thumb, pointing down
+    const auto fit = thumb.getTransformToScaleToFit (r, true);
     g.setColour (Palette::accent.withAlpha (highlighted ? 1.0f : 0.75f));
-    g.strokePath (thumb, juce::PathStrokeType (1.3f));
+    g.strokePath (thumb, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved), fit);
 }
 
 void HeartButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
@@ -2306,6 +2304,18 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
         };
         addAndMakeVisible (arpJumpButton);
 
+        // ARP ON / ARP OFF: switches the arp and its latch together, staying on this page.
+        arpPowerButton.setTooltip ("Arp on or off (with Latch, so it keeps playing after the keys lift).");
+        arpPowerButton.onClick = [this]
+        {
+            const auto on = processor.state.getRawParameterValue (ParamIDs::arpOn)->load() < 0.5f;
+            for (auto* id : { ParamIDs::arpOn, ParamIDs::arpLatch })
+                processor.state.getParameter (id)->setValueNotifyingHost (on ? 1.0f : 0.0f);
+            arpPowerButton.setToggleState (on, juce::dontSendNotification);
+            arpPowerButton.setButtonText (on ? "ARP ON" : "ARP OFF");
+        };
+        addAndMakeVisible (arpPowerButton);
+
         wave303Button.setClickingTogglesState (true);
         wave303Button.setTooltip ("303 mode's waveform: saw or square.");
         wave303Button.onStateChange = [this] { wave303Button.setButtonText (wave303Button.getToggleState() ? "SQUARE" : "SAW"); };
@@ -2385,6 +2395,15 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
     };
     dislikeButton.setTooltip ("Less like this: Generate learns from it and moves on to the next sound.");
     addAndMakeVisible (dislikeButton);
+
+    // The current sound's name in a small screen right of GENRE.
+    soundName.setJustificationType (juce::Justification::centred);
+    soundName.setFont (Fonts::ui (13.0f, true, 0.06f));
+    soundName.setColour (juce::Label::textColourId, Palette::yellow);
+    soundName.setColour (juce::Label::backgroundColourId, Palette::screen);
+    soundName.setColour (juce::Label::outlineColourId, Palette::panelEdge);
+    soundName.setText (processor.getSoundName(), juce::dontSendNotification);
+    addAndMakeVisible (soundName);
 
 
     heartButton.onClick = [this]
@@ -2551,6 +2570,14 @@ void ZeroEngineEditor::timerCallback()
     undoButton.setEnabled (processor.canUndo());
     redoButton.setEnabled (processor.canRedo());
     heartButton.setFilled (processor.isCurrentHearted());
+    if (const auto name = processor.getSoundName(); name != soundName.getText())
+        soundName.setText (name, juce::dontSendNotification);
+    const auto arpOn = processor.state.getRawParameterValue (ParamIDs::arpOn)->load() > 0.5f; // the arp page or Generate may switch it too
+    if (arpPowerButton.getToggleState() != arpOn || arpPowerButton.getButtonText().isEmpty())
+    {
+        arpPowerButton.setToggleState (arpOn, juce::dontSendNotification);
+        arpPowerButton.setButtonText (arpOn ? "ARP ON" : "ARP OFF");
+    }
     refreshGenerateMode(); // a session or favourite may bring its own
 
     for (size_t m = 0; m < macros.size(); ++m)
@@ -2770,6 +2797,7 @@ void ZeroEngineEditor::resized()
     filter303Button.setBounds (box303.getX() + 4, box303.getY() - 2, 78, 16); // the box's tag, top left
     // In the Macros header strip, centred over the 303 box.
     arpJumpButton.setBounds (juce::Rectangle<int> (110, 16).withCentre ({ box303.getCentreX(), macroSection.getY() + 11 }));
+    arpPowerButton.setBounds (arpJumpButton.getRight() + 6, arpJumpButton.getY(), 76, 16);
     wave303Button.setBounds (box303.getRight() - 4 - 62, box303.getY() - 2, 62, 16); // its waveform, top right
     {
         auto inside = box303.withTrimmedTop (14).reduced (6, 2); // under the box's tag
@@ -2809,12 +2837,17 @@ void ZeroEngineEditor::resized()
     moodButton.setBounds (modeRow.removeFromLeft (modeWidth));
     modeRow.removeFromLeft (6);
     genreModeButton.setBounds (modeRow);
-    heartButton.setBounds (genreModeButton.getRight() + 8, genreModeButton.getY() + 2, 22, 20);
-    dislikeButton.setBounds (heartButton.getRight() + 4, genreModeButton.getY() + 1, 22, 22);
+    // Left: Favourites, SAVE, then the heart and the thumbs down.
     auto favouritesRow = controls.removeFromLeft (300).withSizeKeepingCentre (300, 24);
+    dislikeButton.setBounds (favouritesRow.removeFromRight (22).withSizeKeepingCentre (22, 22));
+    favouritesRow.removeFromRight (2);
+    heartButton.setBounds (favouritesRow.removeFromRight (22).withSizeKeepingCentre (22, 20));
+    favouritesRow.removeFromRight (6);
     saveButton.setBounds (favouritesRow.removeFromRight (50));
     favouritesRow.removeFromRight (4);
     favouritesBox.setBounds (favouritesRow);
+    // Right of GENRE: the sound's name, in a small screen.
+    soundName.setBounds (genreModeButton.getRight() + 12, genreModeButton.getY(), 200, genreModeButton.getHeight());
     // History arrows sit in the header strip, left of the LED.
     forwardButton.setBounds (generateSection.getRight() - 26 - 18, generateSection.getY() + 3, 18, 16);
     backButton.setBounds (forwardButton.getX() - 20, generateSection.getY() + 3, 18, 16);

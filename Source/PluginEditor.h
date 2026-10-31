@@ -344,6 +344,7 @@ private:
     juce::TextButton filter303Button { "303 MODE" }; // the box's tag: switches on 303 mode
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> filter303Attachment;
     juce::TextButton arpJumpButton { "SEQUENCER" }; // in the Macros header, over the 303 box: opens the ARP page
+    juce::TextButton arpPowerButton { "ARP OFF" };  // right of SEQUENCER: the arp (and its latch) on or off from the main page
     juce::TextButton wave303Button { "SAW" };        // top right of the box: 303 mode's saw or square
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> wave303Attachment;
     juce::ComboBox genreBox, typeBox;
@@ -356,6 +357,7 @@ private:
     void refreshGenerateMode();
     HeartButton heartButton; // right of GENRE: like the sound playing
     DislikeButton dislikeButton; // beside the heart: less like this, and the next sound
+    juce::Label soundName;       // right of GENRE: the current sound's name ("Hydra Bass")
     juce::TextButton mutateButton { "MUTATE" }; // left of MOOD: small variations on the sound playing
     juce::ComboBox favouritesBox;            // recall a saved sound
     juce::String currentFavourite;           // the last one saved or recalled, which Rename and Delete act on

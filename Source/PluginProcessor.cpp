@@ -85,6 +85,7 @@ void ZeroEngineProcessor::timerCallback()
             if (result.target.harmonics.has_value()) // the matched sound may use the reference's own wavetable
                 setSampleHarmonics (*result.target.harmonics);
             loadProfile (result.genre, result.type, result.profile);
+            setSoundName (randomName (result.type));
         }
         matchSummary = result.summary;
         matchSummaryUntil = juce::Time::getMillisecondCounterHiRes() + 6000.0;
@@ -103,6 +104,7 @@ void ZeroEngineProcessor::syncProfile()
         return;
 
     loadProfile (genre, type, makeProfile (genre, type));
+    setSoundName (genreNames[genre] + " " + typeNames[type]); // a designed sound: its genre and type
     showingLatest = false;
     currentHeart = -1; // a designed sound now, not the last Generate result
 }
@@ -177,6 +179,7 @@ void ZeroEngineProcessor::applyGenerate (GeneratePlan& plan, const Profile& prof
 
     // In Genre mode the result loads as its genre; a mood keeps the genre box.
     loadProfile (plan.mood >= 0 ? plan.genre : source, plan.type, profile);
+    setSoundName (randomName (plan.type)); // a word and its type: "Hydra Bass"
     if (plan.mood >= 0)
     {
         matchSummary = Moods::nameOf (plan.mood);
@@ -266,7 +269,7 @@ void ZeroEngineProcessor::loadTasteAndHearts()
     }
     for (auto& h : hearts) // hearts from before they had names
         if (h.name.isEmpty())
-            h.name = randomName();
+            h.name = randomName (h.type);
     heartsChanged();
 }
 
@@ -348,7 +351,7 @@ void ZeroEngineProcessor::heartCurrent()
         heart.genre = appliedGenre;
         heart.type = appliedType;
         heart.state = state.copyState();
-        heart.name = randomName();
+        heart.name = randomName (heart.type, getSoundName()); // the sound's own name if it's free
         heart.profile = readProfile (state, heart.genre, heart.type); // with any tweaks
         if (showingLatest && ! shown.empty())
         {
@@ -424,20 +427,28 @@ bool ZeroEngineProcessor::recallLike (const juce::String& name)
         {
             restoreTree (hearts[i].state);
             currentHeart = (int) i; // after restoreTree, which clears it
+            setSoundName (name);
             return true;
         }
     return false;
 }
 
-juce::String ZeroEngineProcessor::randomName() const
+juce::String ZeroEngineProcessor::randomName (int type, const juce::String& preferred) const
 {
-    // Two words, one of each list, at random; a number after if every try is taken.
-    static const juce::StringArray first { "Neon", "Chrome", "Velvet", "Static", "Hollow", "Molten", "Glass", "Solar", "Feral", "Ghost",
-                                           "Iron", "Liquid", "Midnight", "Electric", "Frozen", "Golden", "Acid", "Silent", "Burning", "Cosmic",
-                                           "Rogue", "Crystal", "Shadow", "Toxic", "Hyper", "Lunar", "Savage", "Digital", "Wild", "Phantom" };
-    static const juce::StringArray second { "Viper", "Tide", "Engine", "Bloom", "Pulse", "Signal", "Comet", "Ember", "Circuit", "Storm",
-                                            "Prism", "Echo", "Drift", "Monolith", "Halo", "Serpent", "Vortex", "Orbit", "Lantern", "Rift",
-                                            "Wolf", "Mirage", "Spire", "Nova", "Reactor", "Canyon", "Siren", "Glacier", "Furnace", "Horizon" };
+    // One word and the sound's type ("Hydra Bass", "Purple Chord"), not used by
+    // a favourite or a heart; `preferred` (the sound's own name) if it's free; a
+    // number after if every try is taken.
+    static const juce::StringArray words {
+        "Hydra", "Purple", "Silly", "Neon", "Velvet", "Chrome", "Ghost", "Molten", "Glass", "Solar", "Feral", "Liquid", "Midnight",
+        "Electric", "Frozen", "Golden", "Acid", "Cosmic", "Rogue", "Crystal", "Shadow", "Toxic", "Hyper", "Lunar", "Savage", "Digital",
+        "Wild", "Phantom", "Viper", "Comet", "Ember", "Storm", "Prism", "Echo", "Drift", "Halo", "Vortex", "Orbit", "Nova", "Siren",
+        "Glacier", "Horizon", "Mirage", "Static", "Hollow", "Iron", "Rusty", "Fuzzy", "Wobbly", "Sticky", "Bouncy", "Dusty", "Moody",
+        "Sleepy", "Angry", "Happy", "Lucky", "Spicy", "Sugar", "Honey", "Pepper", "Mango", "Cherry", "Lemon", "Plasma", "Quantum",
+        "Laser", "Turbo", "Rocket", "Thunder", "Blizzard", "Jungle", "Desert", "Ocean", "Canyon", "Volcano", "Dragon", "Kraken",
+        "Phoenix", "Raven", "Panther", "Cobra", "Falcon", "Tiger", "Mammoth", "Yeti", "Goblin", "Wizard", "Ninja", "Pirate", "Robot",
+        "Cyborg", "Alien", "Saturn", "Jupiter", "Mars", "Venus", "Pluto", "Nebula", "Pulsar", "Quasar", "Zenith", "Aurora", "Satin",
+        "Copper", "Cobalt", "Indigo", "Crimson", "Scarlet", "Amber", "Jade", "Onyx", "Ivory", "Obsidian", "Magenta", "Cyan", "Violet" };
+    const auto kind = typeNames[juce::jlimit (0, typeNames.size() - 1, type >= 0 ? type : appliedType.load())];
     auto taken = [this] (const juce::String& name)
     {
         if (favouritesFolder.getChildFile (name + ".xml").exists())
@@ -447,17 +458,29 @@ juce::String ZeroEngineProcessor::randomName() const
                 return true;
         return false;
     };
+    if (preferred.isNotEmpty() && ! taken (preferred))
+        return preferred;
     juce::Random random;
     juce::String name;
     for (int attempt = 0; attempt < 50; ++attempt)
     {
-        name = first[random.nextInt (first.size())] + " " + second[random.nextInt (second.size())];
+        name = words[random.nextInt (words.size())] + " " + kind;
         if (attempt == 49)
             name << " " << juce::String (random.nextInt ({ 2, 1000 }));
         if (! taken (name))
             break;
     }
     return name;
+}
+
+void ZeroEngineProcessor::setSoundName (const juce::String& name)
+{
+    state.state.setProperty ("soundName", name, nullptr); // kept with the sound: history, undo, favourites, a project
+}
+
+juce::String ZeroEngineProcessor::getSoundName() const
+{
+    return state.state.getProperty ("soundName").toString();
 }
 
 
@@ -1634,7 +1657,7 @@ juce::String ZeroEngineProcessor::quickSave()
 {
     loadTasteAndHearts(); // so a name never repeats a heart's
     favouritesFolder.createDirectory();
-    const auto name = randomName();
+    const auto name = randomName (appliedType, getSoundName()); // the sound's own name if it's free
     if (auto xml = state.copyState().createXml())
         if (xml->writeTo (favouritesFolder.getChildFile (name + ".xml")))
         {
@@ -1674,7 +1697,11 @@ juce::String ZeroEngineProcessor::renameFavourite (const juce::String& name, con
 bool ZeroEngineProcessor::loadFavourite (const juce::String& name)
 {
     if (auto xml = juce::XmlDocument::parse (favouritesFolder.getChildFile (name + ".xml")))
-        return restoreState (*xml);
+        if (restoreState (*xml))
+        {
+            setSoundName (name); // the favourite's own name
+            return true;
+        }
     return false;
 }
 

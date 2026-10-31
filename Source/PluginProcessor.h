@@ -151,6 +151,9 @@ public:
     // Message thread: step back (-1) or forward (+1) through generated sounds.
     // Returns false at either end.
     bool stepHistory (int direction);
+    // The current sound's name ("Hydra Bass", "EDM Bass", a favourite's), shown beside GENRE.
+    juce::String getSoundName() const;
+    void setSoundName (const juce::String&);
     bool canStepHistory (int direction) const { const auto t = historyPos + direction; return t >= 0 && t < (int) history.size(); }
 
     // Undo / redo (message thread): snapshots of the whole sound. The timer takes a
@@ -252,7 +255,7 @@ private:
     void saveTaste() const;
     void heartsChanged(); // the settings taste's heart wins follow the hearts
     struct Heart { Profile profile {}; juce::ValueTree state; juce::String name; int genre = 0, type = 0; TasteModel::Features features {}; };
-    juce::String randomName() const; // two random words not used by a favourite or a heart
+    juce::String randomName (int type = -1, const juce::String& preferred = {}) const; // a word and the type ("Hydra Bass"), not used by a favourite or a heart
     void saveHearts() const;
     std::vector<Heart> hearts;
     bool heartsLoaded = false;
