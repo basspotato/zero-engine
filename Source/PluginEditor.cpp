@@ -2262,7 +2262,7 @@ ZeroEngineEditor::ZeroEngineEditor (ZeroEngineProcessor& p)
         filter303Button.setClickingTogglesState (true);
         filter303Button.setTooltip ("303 mode: the sound becomes a 303 - its own saw or square, the 303 filter (squelchy resonance that thins the bass) "
                                     "over the 303's cutoff range, its envelope, one note at a time with slides, mono, the finishing chain eased. "
-                                    "Off again on every new sound.");
+                                    "It and the 303 knobs stay as you generate new sounds.");
         filter303Attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.state, ParamIDs::acidFilter, filter303Button);
         addAndMakeVisible (filter303Button);
 

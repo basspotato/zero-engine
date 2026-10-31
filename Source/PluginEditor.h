@@ -394,7 +394,41 @@ private:
 
     // Panel areas, set in resized() and drawn in paint() behind the components.
     juce::Rectangle<int> displaySection, meterSection, generateSection, favouritesSection, macroSection;
-    juce::TooltipWindow tooltips { this };
+    // Tooltips that don't nag: each one shows the first 2 times its control is
+    // hovered, then rests for 10 minutes before it can show twice again (the
+    // owner found them too much).
+    struct QuietTooltips : public juce::TooltipWindow
+    {
+        using juce::TooltipWindow::TooltipWindow;
+
+        juce::String getTipFor (juce::Component& component) override
+        {
+            const auto tip = juce::TooltipWindow::getTipFor (component);
+            if (tip.isEmpty())
+            {
+                current = {};
+                return {};
+            }
+            if (tip != current) // a new hover (this is asked over and over while hovering)
+            {
+                current = tip;
+                auto& seen = shown[tip];
+                const auto now = juce::Time::getMillisecondCounterHiRes();
+                if (seen.count >= 2 && now - seen.restingSince > 10.0 * 60.0 * 1000.0)
+                    seen.count = 0; // rested: may show again
+                showing = seen.count < 2;
+                if (showing && ++seen.count == 2)
+                    seen.restingSince = now;
+            }
+            return showing ? tip : juce::String();
+        }
+
+        struct Seen { int count = 0; double restingSince = 0.0; };
+        std::map<juce::String, Seen> shown;
+        juce::String current;
+        bool showing = false;
+    };
+    QuietTooltips tooltips { this };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ZeroEngineEditor)
 };

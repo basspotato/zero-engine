@@ -121,16 +121,7 @@ void ZeroEngineProcessor::loadProfile (int genre, int type, const Profile& profi
     setChoice (ParamIDs::genre, genre);
     setChoice (ParamIDs::type, type);
     applyProfile (state, profile);
-    loadMacroMap (macroMap, profile);
-    resetAcid();
-}
-
-void ZeroEngineProcessor::resetAcid()
-{
-    // The 303 row tweaks the sound in front of you: a new one starts it at neutral.
-    for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent, ParamIDs::acidFilter, ParamIDs::acidWave })
-        if (auto* param = state.getParameter (id))
-            param->setValueNotifyingHost (param->getDefaultValue());
+    loadMacroMap (macroMap, profile); // the 303 settings (row, mode, waveform) aren't part of a sound: they carry over
 }
 
 ZeroEngineProcessor::GeneratePlan ZeroEngineProcessor::prepareGenerate (juce::int64 seed, bool moodMode, bool mutate)
@@ -1565,7 +1556,7 @@ bool ZeroEngineProcessor::undo()
         return false;
 
     redoStack.push_back (state.copyState());
-    restoreTree (undoStack.back());
+    restoreTree (undoStack.back(), true); // undo takes a 303 move back too
     undoStack.pop_back();
     lastKnown = state.copyState();
     return true;
@@ -1578,7 +1569,7 @@ bool ZeroEngineProcessor::redo()
         return false;
 
     undoStack.push_back (state.copyState());
-    restoreTree (redoStack.back());
+    restoreTree (redoStack.back(), true);
     redoStack.pop_back();
     lastKnown = state.copyState();
     return true;
@@ -1593,21 +1584,30 @@ void ZeroEngineProcessor::adoptCurrentGenreAndType()
     loadMacroMap (macroMap, makeProfile (appliedGenre, appliedType));
 }
 
-bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml, bool keep303)
+bool ZeroEngineProcessor::restoreState (const juce::XmlElement& xml, bool take303)
 {
     if (! xml.hasTagName (state.state.getType()))
         return false;
 
-    restoreTree (juce::ValueTree::fromXml (xml), keep303);
+    restoreTree (juce::ValueTree::fromXml (xml), take303);
     return true;
 }
 
-void ZeroEngineProcessor::restoreTree (const juce::ValueTree& tree, bool keep303)
+void ZeroEngineProcessor::restoreTree (const juce::ValueTree& tree, bool take303)
 {
+    // The 303 settings stay where they are when another sound comes in (history,
+    // a favourite, a heart); a project reopening, undo and redo take the saved ones.
+    const char* ids303[] { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay,
+                           ParamIDs::acidAccent, ParamIDs::acidFilter, ParamIDs::acidWave };
+    float kept[std::size (ids303)] {};
+    for (size_t i = 0; i < std::size (ids303); ++i)
+        kept[i] = state.getParameter (ids303[i])->getValue();
+
     releaseHeld.store (true);
     state.replaceState (tree.createCopy());
-    if (! keep303) // history, a favourite, undo or redo: a sound to start fresh on
-        resetAcid();
+    if (! take303)
+        for (size_t i = 0; i < std::size (ids303); ++i)
+            state.getParameter (ids303[i])->setValueNotifyingHost (kept[i]);
 
     adoptCurrentGenreAndType(); // the saved values already include any tweaks; keep them
     showingLatest = false;

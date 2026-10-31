@@ -1255,29 +1255,33 @@ namespace
                     problems.add ("Env Mod through the arp: step " + juce::String (step) + " did not sweep");
         }
 
-        // Neutral again on a new sound and after an undo; a project keeps it (checkState).
+        // The 303 settings carry over: a new sound (Generate, a preset) and a
+        // step back in history keep them; undo takes a 303 move back; a project
+        // keeps them (checkState).
         ZeroEngineProcessor a;
         loadProfile (a, genreNames.indexOf ("Trap"), typeNames.indexOf ("Lead"));
         auto set = [&] (const char* id, float v) { auto* q = a.state.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
-        auto atNeutral = [&]
-        {
-            for (auto* id : { ParamIDs::acidCutoff, ParamIDs::acidRes, ParamIDs::acidEnvMod, ParamIDs::acidDecay, ParamIDs::acidAccent, ParamIDs::acidFilter })
-                if (auto* q = a.state.getParameter (id); std::abs (q->getValue() - q->getDefaultValue()) > 1.0e-5f)
-                    return false;
-            return true;
-        };
+        auto value = [&] (const char* id) { return a.state.getRawParameterValue (id)->load(); };
         set (ParamIDs::acidCutoff, 2.0f);
         set (ParamIDs::acidEnvMod, 0.8f);
         set (ParamIDs::acidFilter, 1.0f);
+        auto kept = [&] { return std::abs (value (ParamIDs::acidCutoff) - 2.0f) < 1.0e-3f && std::abs (value (ParamIDs::acidEnvMod) - 0.8f) < 1.0e-3f
+                                 && value (ParamIDs::acidFilter) > 0.5f; };
         loadProfile (a, genreNames.indexOf ("Trap"), typeNames.indexOf ("Bass"));
-        if (! atNeutral())
-            problems.add ("a new sound kept the 303 row's settings");
-        set (ParamIDs::grit, 0.3f);
-        a.undo(); a.redo();
+        if (! kept())
+            problems.add ("a new sound reset the 303 settings");
+        a.generate (77);
+        if (! kept())
+            problems.add ("Generate reset the 303 settings");
+        a.generate (78);
+        a.stepHistory (-1);
+        if (! kept())
+            problems.add ("a step back in history reset the 303 settings");
+        a.undo(); a.redo(); // records where we are
         set (ParamIDs::acidAccent, 0.9f);
         a.undo();
-        if (! atNeutral())
-            problems.add ("undo kept the 303 row's settings");
+        if (value (ParamIDs::acidAccent) > 1.0e-3f)
+            problems.add ("undo did not take the 303 Accent move back");
         return problems;
     }
 

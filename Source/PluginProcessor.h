@@ -190,8 +190,7 @@ public:
 
 private:
     void timerCallback() override;
-    bool restoreState (const juce::XmlElement&, bool keep303 = false); // keep303: a project reopening keeps its 303 row
-    void resetAcid(); // the 303 row back to neutral (a new sound)
+    bool restoreState (const juce::XmlElement&, bool take303 = false); // take303: the saved 303 settings (a project); otherwise the current ones stay
     void adoptCurrentGenreAndType();
     void checkpoint(); // record an undo step if the sound changed since the last one
     int generatePattern (juce::Random&, int genre); // a step pattern from the genre's grooves; returns its suggested rate
@@ -204,7 +203,7 @@ private:
     std::unique_ptr<ReferenceMatch> matcher;           // after matchEngines, so it stops first
     juce::String matchSummary;
     double matchSummaryUntil = 0.0;
-    void restoreTree (const juce::ValueTree&, bool keep303 = false);
+    void restoreTree (const juce::ValueTree&, bool take303 = false);
 
     std::vector<juce::ValueTree> history; // Generate history, oldest first (message thread)
     int historyPos = -1;
